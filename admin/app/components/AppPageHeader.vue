@@ -19,7 +19,7 @@ defineProps({
 
 <template>
   <header
-    class="bg-background sticky top-0 z-10 flex h-16 shrink-0 items-center gap-2 border-b px-4 md:rounded-t-2xl"
+    class="bg-background sticky top-0 z-10 flex h-16 shrink-0 items-center gap-2 px-4 md:rounded-t-2xl"
   >
     <SidebarTrigger class="-ml-1" />
     <Separator orientation="vertical" class="mr-2 data-[orientation=vertical]:h-4" />
@@ -38,11 +38,12 @@ defineProps({
           <BreadcrumbSeparator />
         </template>
 
+        <!-- Deliberately unstyled beyond truncation: the current crumb takes the
+             breadcrumb's own size and weight, and is distinguished from its
+             ancestors by colour alone. It is still the page's <h1> — that is
+             semantics, not a licence to make it look like a heading. -->
         <BreadcrumbItem class="min-w-0">
-          <BreadcrumbPage
-            as="h1"
-            class="font-heading truncate text-[15px] font-semibold tracking-tight"
-          >
+          <BreadcrumbPage as="h1" class="truncate">
             {{ title }}
           </BreadcrumbPage>
         </BreadcrumbItem>

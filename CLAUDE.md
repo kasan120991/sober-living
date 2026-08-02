@@ -221,7 +221,10 @@ The preset owns colour and type. What it does not decide, and we do:
   which would put a third-party request on every page load.
 - **Forms use `AppField`**, not shadcn's `Form` — that one is vee-validate based and we
   validate server-side with zod. **Toasts go through `useNotify()`**, not `vue-sonner`
-  directly. **Page headers go through `AppPageHeader`.**
+  directly. **Page headers go through `AppPageHeader`.** That header has no bottom rule and
+  the page title renders at the breadcrumb's own size and weight — it is distinguished from
+  its ancestors by colour alone. It is still the `<h1>`; that is semantics, not a licence to
+  style it as a heading.
 - Table rows 48px, `px-3` cells. Wide tables scroll inside their own `overflow-x-auto`
   container; the page never scrolls sideways. Mobile-first for anything a tech touches.
 - The shell follows shadcn's **sidebar-08** block. Two deliberate deviations: no collapsible
