@@ -39,7 +39,7 @@ Use these terms in code, schema, and UI. Do not invent synonyms.
 | **Bed** | The unit of capacity. Lives directly in an Apartment — there is no room level. Beds are assigned, not apartments. |
 | **Resident** | A person living in the facility. Prefer this over "client" or "patient" in UI. `Resident` in code. |
 | **Program** | The track a resident is on (e.g. Phase 1 / 2 / 3). Drives privileges: curfew time, pass eligibility, required service hours. |
-| **Census** | Who is in which bed right now. The single most-viewed screen. |
+| **Census** | Who is in which bed right now. The single most-viewed screen, and the app's landing page. Note the sidebar links to it as **Home** — the nav says where you go, the page heading says what it is. |
 | **Sign-out** | A resident leaving the property and returning the same day. Has an expected return time. |
 | **Travel pass** | An overnight or multi-day approved absence. Requires approval; bed is held. |
 | **Apartment check** | A scheduled or random inspection of an apartment. Produces a pass/fail with findings. |
@@ -309,6 +309,19 @@ cd admin  && npm run dev      # admin → :3000
 Dev sign-in: `admin@facility.test` / `manager@facility.test` / `tech@facility.test`,
 password `soberlife-dev-1234`. Seed data only — `scripts/seed.js` refuses to run when
 `NODE_ENV=production`.
+
+Real accounts are created with `scripts/create-user.js`, which takes the password from
+`USER_PASSWORD` in the environment rather than an argv flag — an argument would land in
+shell history and be visible in `ps` to anyone else on the box:
+
+```
+USER_PASSWORD='...' node scripts/create-user.js \
+  --email you@example.com --name "Your Name" --role ADMIN
+```
+
+It upserts, so it can be re-run to reset a password, and it **revokes that user's live
+sessions** when the password changes. Note `seed.js` TRUNCATEs `users` — re-seeding
+removes accounts made this way, so re-run `create-user.js` afterwards.
 
 Two verification suites, both run against a live database:
 

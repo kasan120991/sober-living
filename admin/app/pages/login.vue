@@ -1,6 +1,7 @@
 <script setup>
-// Styled as Variant A (centered card) pending the layout choice. Swapping to B
-// or C touches only this template — the logic below is layout-independent.
+// Variant A (centered card). The one page outside the app shell.
+definePageMeta({ layout: false })
+
 const { signIn } = useAuth()
 
 const email = ref('')

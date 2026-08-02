@@ -27,6 +27,13 @@ export default defineAppConfig({
     button: { slots: { base: 'min-h-11 justify-center [-webkit-font-smoothing:auto]' } },
     select: { slots: { base: 'min-h-11' } },
     textarea: { slots: { base: 'min-h-11' } },
+    // Nav links are tapped too — the 44px floor is not just for form controls.
+    //
+    // `items-center` is not optional here. Raising a row's min-height without it
+    // leaves the label and icon pinned to the top of the taller box, which reads
+    // as a misalignment rather than as generous spacing.
+    navigationMenu: { slots: { link: 'min-h-11 items-center' } },
+    dropdownMenu: { slots: { item: 'min-h-11 items-center' } },
     checkbox: { slots: { base: 'size-5' } },
     radio: { slots: { base: 'size-5' } },
   },

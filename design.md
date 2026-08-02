@@ -187,6 +187,9 @@ All five were hit while building the login screen, and none produced a warning.
    Nuxt gives no alternative.
 4. **Nuxt UI's largest size is 40px**, under our 44px floor. `app.config.ts` sets
    `min-h-11` on every input, button, select and textarea so `size` cannot undercut it.
+   **Always pair `min-h-*` with `items-center`** — raising a row's minimum height alone
+   leaves its icon and label pinned to the top of the taller box, which reads as broken
+   alignment rather than as generous spacing.
 
 5. **Light-on-dark text needs `-webkit-font-smoothing: auto`.** Our base layer sets
    `antialiased`, which is right for dark text on the light canvas but thins glyphs on a
