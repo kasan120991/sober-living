@@ -205,13 +205,22 @@ given us.
 
 The preset owns colour and type. What it does not decide, and we do:
 
-- **44px minimum tap target** for anything a tech touches in a hallway. shadcn defaults to
-  36px, so the floor is baked into the vendored source — `button`, `input`, `select`,
-  `switch`. The **sidebar is the one conditional case**: it carries thirteen menu buttons
-  at once and raising them all pushes the nav past a laptop viewport, so it stays 36px under
-  a mouse and goes to 44px when `max-md` (the mobile sheet) or `pointer-coarse` (a tablet)
-  holds. Neither alone is enough — `max-md` misses the tablet, and `pointer-coarse` is
-  invisible when you test mobile by resizing a desktop browser.
+- **44px minimum tap target on touch**, baked into the vendored source of `button`,
+  `input`, `select` and `sidebar`. It is **conditional**, not absolute: the preset's own
+  scale applies under a mouse, and the floor comes in when either `max-md` (the phone,
+  which is also the breakpoint that swaps the sidebar for a sheet) or `pointer-coarse`
+  (a tablet or touch laptop) holds. Neither alone is enough — `max-md` misses the tablet,
+  and `pointer-coarse` is invisible when you test mobile by resizing a desktop browser.
+
+  It was unconditional first, and that was wrong twice over: thirteen sidebar items at
+  44px pushed the nav past a laptop viewport, and 44px chrome read as oversized to the two
+  roles who work in this app on a desktop all day. The rule was always about the hallway;
+  making it about every device was the mistake.
+
+  `Switch` is the exception that shows the better shape — a 20px track with a 44px hit
+  area from an `::after` inset. Where a control can keep a small visual and a large
+  target, prefer that over growing the control. Note `getBoundingClientRect()`
+  under-reports it.
 - **`--success` and `--warning` were added** to the preset's `@theme`, in both themes.
   shadcn ships only `destructive`, and this domain has to keep a refusal visually distinct
   from a dilute and from a positive — see modules 5 and 6.

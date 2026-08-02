@@ -15,17 +15,22 @@ export const buttonVariants = cva(
         destructive: 'bg-destructive/10 hover:bg-destructive/20 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/20 text-destructive focus-visible:border-destructive/40 dark:hover:bg-destructive/30',
         link: 'text-primary underline-offset-4 hover:underline',
       },
-// SoberLife: sizes raised to a 44px floor. CLAUDE.md requires it for
-      // anything a tech taps one-handed in a hallway; shadcn ships 36px.
+// SoberLife: the preset's scale on a desktop, raised to the 44px floor
+      // on touch. See the same two conditions on sidebar/index.ts — max-md
+      // catches the phone, pointer-coarse catches the tablet. Unconditional
+      // 44px read as oversized chrome under a mouse.
+      //
+      // xs stays put: it is deliberately small and is not used on any
+      // hallway control.
       size: {
-        'default': 'h-11 gap-1.5 px-3 has-data-[icon=inline-end]:pr-2.5 has-data-[icon=inline-start]:pl-2.5',
+        'default': 'h-9 max-md:h-11 pointer-coarse:h-11 gap-1.5 px-3 has-data-[icon=inline-end]:pr-2.5 has-data-[icon=inline-start]:pl-2.5',
         'xs': 'h-6 gap-1 px-2.5 text-xs has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2 [&_svg:not([class*=size-])]:size-3',
-        'sm': 'h-11 gap-1 px-3 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2',
-        'lg': 'h-12 gap-1.5 px-4 has-data-[icon=inline-end]:pr-3 has-data-[icon=inline-start]:pl-3',
-        'icon': 'size-11',
+        'sm': 'h-8 max-md:h-11 pointer-coarse:h-11 gap-1 px-3 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2',
+        'lg': 'h-10 max-md:h-12 pointer-coarse:h-12 gap-1.5 px-4 has-data-[icon=inline-end]:pr-3 has-data-[icon=inline-start]:pl-3',
+        'icon': 'size-9 max-md:size-11 pointer-coarse:size-11',
         'icon-xs': 'size-6 [&_svg:not([class*=size-])]:size-3',
-        'icon-sm': 'size-11',
-        'icon-lg': 'size-12',
+        'icon-sm': 'size-8 max-md:size-11 pointer-coarse:size-11',
+        'icon-lg': 'size-10 max-md:size-12 pointer-coarse:size-12',
       },
     },
     defaultVariants: {
