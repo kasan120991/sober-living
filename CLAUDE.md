@@ -301,14 +301,47 @@ sober-living/
   `server/src/domain/` and are copied into the frontends, not imported across folders.
   They must match the `enum` blocks in `schema.prisma`.
 
-### Row-level security
+### Row-level security — enabled
 
-Postgres RLS is available to us and should be used as a **database-layer backstop** on the
-app's most important privacy rule: residents must never enumerate other residents.
+The database-layer backstop on the app's most important privacy rule: residents must never
+enumerate other residents. Express middleware is still primary; this is what holds when a
+route is added without the right guard.
 
-Express middleware is still the primary enforcement. RLS is the second line — the thing
-that holds when a route is added without the right guard. Belt and braces, because a
-single missed check here is a 42 CFR Part 2 disclosure, not a bug report.
+**Two connections, and the distinction matters.**
+
+| | Role | Used by |
+|---|---|---|
+| `DATABASE_URL` | `soberlife` — owner, superuser | `prisma migrate`, `seed.js`, `verify-constraints.js` |
+| `APP_DATABASE_URL` | `soberlife_app` — no ownership, `NOSUPERUSER`, `NOBYPASSRLS` | the running API |
+
+A **superuser bypasses RLS entirely, even with `FORCE`**, so the app connecting as the
+owner would have made the policies decorative. `db/client.js` refuses to start in
+production without `APP_DATABASE_URL` and warns loudly in development.
+
+Setup: `npx prisma migrate deploy` creates the role (without a password — a credential in a
+migration is a credential in git), then `APP_DB_PASSWORD=... npm run db:app-role` grants it
+LOGIN and verifies it cannot bypass RLS.
+
+**Policies are fail-closed.** They read `app.actor_kind` / `app.resident_id`; with nothing
+set, `current_setting` returns NULL, every predicate is false, and queries return nothing.
+Forgetting to set context loses you data — it never leaks it.
+
+**Context is per-operation.** Connections are pooled, so the settings are scoped with
+`set_config(..., local => true)` inside a transaction; a plain `SET` would leak one
+request's identity onto whatever request got that connection next. Requests get context
+from `middleware/dbActor.js` (derived from the verified session, never from the request);
+scripts must wrap their work in `runAsSystem()`.
+
+Three things that are easy to get wrong here, all of which we did get wrong first:
+
+- **Extension order.** Prisma applies the FIRST-declared extension as the OUTERMOST hook.
+  RLS must be declared LAST, because it re-issues the operation on a bare transaction
+  client — declared first it bypassed every extension beneath it, silently turning soft
+  deletes on resident data into HARD deletes and dropping their audit rows.
+- **Every model needs context, not just RLS-protected ones.** A query on `Apartment` that
+  includes beds → assignments reaches `bed_assignments`, which is policy-protected.
+- **`PrismaPromise` is lazy.** `runAsSystem(() => prisma.x.findMany())` executes outside
+  the context; it must be `runAsSystem(async () => await prisma.x.findMany())`.
 
 ### Running it
 
@@ -342,6 +375,8 @@ Two verification suites, both run against a live database:
 - `node scripts/verify-apartments.js` — 24 assertions on apartments, beds and
   maintenance, including the admin/manager field split and the rules the database
   cannot enforce
+- `npm run verify:rls` — 16 assertions proving a resident actor cannot read, count or
+  write another resident's rows, and that the app role cannot bypass the policies
 
 **`verify:constraints` TRUNCATEs as it runs**, so reseed before running the auth suite or
 its users will be gone and every login assertion fails:
@@ -349,7 +384,8 @@ its users will be gone and every login assertion fails:
 ```
 npm run verify:constraints && node scripts/seed.js \
   && node scripts/verify-auth.js && node scripts/seed.js \
-  && node scripts/verify-apartments.js && node scripts/seed.js
+  && node scripts/verify-apartments.js && node scripts/seed.js \
+  && npm run verify:rls
 ```
 
 `verify-apartments.js` creates a test apartment and leaves it behind, so finish with a

@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser'
 
 import { requestContextMiddleware } from './lib/requestContext.js'
 import { sessionMiddleware } from './middleware/session.js'
+import { dbActorMiddleware } from './middleware/dbActor.js'
 import { errorHandler, notFound } from './middleware/errorHandler.js'
 import healthRouter from './routes/health.js'
 import authRouter from './routes/auth.js'
@@ -33,6 +34,9 @@ export function createApp() {
   app.use(cookieParser())
   app.use(requestContextMiddleware)
   app.use(sessionMiddleware)
+  // After the session: what the database may show is derived from the verified
+  // session, never from the request.
+  app.use(dbActorMiddleware)
 
   app.use('/health', healthRouter)
   app.use('/auth', authRouter)

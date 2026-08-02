@@ -6,7 +6,9 @@
  * Passwords here are development-only and printed to the console on purpose.
  * Never run this against production.
  */
+import './lib/as-owner.js'
 import { prisma } from '../src/db/client.js'
+import { runAsSystem } from '../src/lib/dbContext.js'
 import { hashPassword } from '../src/auth/passwords.js'
 
 const DEV_PASSWORD = 'soberlife-dev-1234'
@@ -159,7 +161,7 @@ async function main() {
   process.exit(0)
 }
 
-main().catch((e) => {
+runAsSystem(main).catch((e) => {
   console.error(e)
   process.exit(1)
 })

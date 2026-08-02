@@ -7,7 +7,9 @@
  *
  * Run against a DISPOSABLE database:  node scripts/verify-constraints.js
  */
+import './lib/as-owner.js'
 import { prisma } from '../src/db/client.js'
+import { runAsSystem } from '../src/lib/dbContext.js'
 import { runWithRequestContext } from '../src/lib/requestContext.js'
 
 let pass = 0
@@ -281,7 +283,7 @@ async function main() {
   process.exit(fail === 0 ? 0 : 1)
 }
 
-main().catch((e) => {
+runAsSystem(main).catch((e) => {
   console.error('\nverification crashed:', e)
   process.exit(1)
 })

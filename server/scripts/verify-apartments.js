@@ -9,6 +9,7 @@
  * Run after `node scripts/seed.js`. Does not truncate.
  */
 import { createApp } from '../src/app.js'
+import { runAsSystem } from '../src/lib/dbContext.js'
 
 let pass = 0
 let fail = 0
@@ -227,4 +228,4 @@ async function main() {
   process.exit(fail === 0 ? 0 : 1)
 }
 
-main().catch((e) => { console.error(e); process.exit(1) })
+runAsSystem(main).catch((e) => { console.error(e); process.exit(1) })

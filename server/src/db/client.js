@@ -3,12 +3,34 @@ import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '../generated/prisma/client.js'
 import { getRequestContext } from '../lib/requestContext.js'
 import { AUDIT_ACTION, AUDITED_MODELS, SOFT_DELETE_MODELS } from '../domain/constants.js'
+import { getDbActor } from '../lib/dbContext.js'
 
 if (!process.env.DATABASE_URL) {
   throw new Error('DATABASE_URL is not set. Copy .env.example to .env.')
 }
 
-const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL })
+/**
+ * The RUNTIME connection, which must not be the owner or a superuser — both
+ * bypass row-level security, the second of which does so even with FORCE. Set
+ * up by `npm run db:app-role`.
+ *
+ * DATABASE_URL stays the owner connection and is used by `prisma migrate`.
+ */
+const runtimeUrl = process.env.APP_DATABASE_URL ?? process.env.DATABASE_URL
+if (!process.env.APP_DATABASE_URL) {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'APP_DATABASE_URL is not set. The application must not connect as the ' +
+        'database owner in production — row-level security would be bypassed.',
+    )
+  }
+  console.warn(
+    '[db] APP_DATABASE_URL not set — connecting as the owner, so row-level ' +
+      'security is NOT in effect. Run `npm run db:app-role`.',
+  )
+}
+
+const adapter = new PrismaPg({ connectionString: runtimeUrl })
 
 /**
  * The BASE client. Deliberately not exported.
@@ -86,7 +108,92 @@ async function writeAuditEntries({ model, action, ids, subjectResidentId }) {
   }
 }
 
+/** Tables carrying row-level security policies — see the RLS migration. */
+const RLS_MODELS = new Set([
+  'Resident',
+  'Stay',
+  'EmergencyContact',
+  'Document',
+  'BedAssignment',
+])
+
+/**
+ * Runs `cb` against a client that the RLS policies will accept.
+ *
+ * Policies read `app.actor_kind` / `app.resident_id`, which are per-session
+ * settings. Connections are pooled, so they must be scoped with
+ * `set_config(..., local => true)` inside a transaction — a plain SET would
+ * leak one request's identity onto whatever request got that connection next.
+ *
+ * Cost: one short transaction per operation on an RLS table. Fine at this
+ * app's scale; if it ever isn't, the fix is a request-scoped transaction, not
+ * dropping the context.
+ *
+ * Everything that touches an RLS table goes through here — including the
+ * soft-delete extension's internal writes, which would otherwise run on the
+ * bare client and be refused by a fail-closed policy.
+ */
+function withRlsClient(model, cb) {
+  const actor = getDbActor()
+
+  if (!actor) {
+    if (RLS_MODELS.has(model)) {
+      // Fail closed AND loudly. Without this the policies would quietly return
+      // zero rows and the caller would conclude the table was empty.
+      return Promise.reject(
+        new Error(
+          `${model} was queried with no database actor context. Wrap it in ` +
+            'runAsSystem() (scripts) or ensure dbActorMiddleware ran (requests).',
+        ),
+      )
+    }
+    // Legitimately contextless: sign-in reads `users` before a session exists.
+    return cb(base)
+  }
+
+  return base.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT set_config('app.actor_kind', ${actor.kind}, true),
+                                set_config('app.resident_id', ${actor.residentId ?? ''}, true)`
+    return cb(tx)
+  })
+}
+
+// ORDER MATTERS. Prisma applies the FIRST-declared extension as the OUTERMOST
+// query hook, so these run audit → soft delete → RLS → database.
+//
+// RLS must be LAST (innermost) because it re-issues the operation on a bare
+// transaction client to attach the actor context. Declared first, it would run
+// outermost and that re-issued call would bypass every extension beneath it —
+// which silently turned soft deletes on resident data into HARD deletes and
+// dropped their audit rows.
 export const prisma = base
+  // ── Audit ──────────────────────────────────────────────────────────────────
+  // Every read and write of resident data, recorded by construction.
+  .$extends({
+    query: {
+      $allModels: {
+        async $allOperations({ model, operation, args, query }) {
+          const result = await query(args)
+          if (!audited.has(model)) return result
+
+          const action = READ_OPS.has(operation)
+            ? AUDIT_ACTION.READ
+            : ACTION_BY_OP[operation]
+          if (!action) return result
+
+          await writeAuditEntries({
+            model,
+            action,
+            ids: idsFrom(result),
+            subjectResidentId:
+              model === 'Resident' ? idsFrom(result)[0] ?? null : args?.where?.residentId ?? null,
+          })
+          return result
+        },
+      },
+    },
+  })
+
   // ── Soft delete ────────────────────────────────────────────────────────────
   // Destroyed records stop being reachable without every caller remembering a
   // `deletedAt: null` clause. Records are retained, never destroyed.
@@ -118,16 +225,20 @@ export const prisma = base
           // Turn destructive deletes into soft deletes. `query` is deliberately
           // NOT called here — calling it would issue the real DELETE.
           if (operation === 'delete') {
-            return base[lowerFirst(model)].update({
-              where: args.where,
-              data: { deletedAt: new Date() },
-            })
+            return withRlsClient(model, (c) =>
+              c[lowerFirst(model)].update({
+                where: args.where,
+                data: { deletedAt: new Date() },
+              }),
+            )
           }
           if (operation === 'deleteMany') {
-            return base[lowerFirst(model)].updateMany({
-              where: { ...args.where, deletedAt: null },
-              data: { deletedAt: new Date() },
-            })
+            return withRlsClient(model, (c) =>
+              c[lowerFirst(model)].updateMany({
+                where: { ...args.where, deletedAt: null },
+                data: { deletedAt: new Date() },
+              }),
+            )
           }
 
           return query(args)
@@ -135,28 +246,16 @@ export const prisma = base
       },
     },
   })
-  // ── Audit ──────────────────────────────────────────────────────────────────
-  // Every read and write of resident data, recorded by construction.
+  // ── Row-level security context ─────────────────────────────────────────────
   .$extends({
     query: {
       $allModels: {
         async $allOperations({ model, operation, args, query }) {
-          const result = await query(args)
-          if (!audited.has(model)) return result
-
-          const action = READ_OPS.has(operation)
-            ? AUDIT_ACTION.READ
-            : ACTION_BY_OP[operation]
-          if (!action) return result
-
-          await writeAuditEntries({
-            model,
-            action,
-            ids: idsFrom(result),
-            subjectResidentId:
-              model === 'Resident' ? idsFrom(result)[0] ?? null : args?.where?.residentId ?? null,
-          })
-          return result
+          // Applies to every model, not only RLS-protected roots: a query on
+          // Apartment that includes beds → assignments reaches bed_assignments,
+          // which is policy-protected. Scoping this to RLS roots left nested
+          // includes contextless, and they silently returned nothing.
+          return withRlsClient(model, (c) => c[lowerFirst(model)][operation](args))
         },
       },
     },

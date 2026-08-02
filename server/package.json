@@ -16,7 +16,9 @@
     "migrate:status": "prisma migrate status",
     "verify:constraints": "node scripts/verify-constraints.js",
     "db:up": "docker start soberlife-pg || docker run -d --name soberlife-pg -e POSTGRES_USER=soberlife -e POSTGRES_PASSWORD=soberlife -e POSTGRES_DB=soberlife -p 5432:5432 postgres:17",
-    "db:down": "docker stop soberlife-pg"
+    "db:down": "docker stop soberlife-pg",
+    "db:app-role": "node scripts/db-app-role.js",
+    "verify:rls": "node scripts/verify-rls.js"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.0.2",
