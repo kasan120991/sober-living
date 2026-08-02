@@ -123,10 +123,17 @@ async function dropContact(id) {
 const FACTS = [
   { k: 'Program', v: (r) => r.current.program?.name ?? '—' },
   { k: 'Intake', v: (r) => isoDate(r.current.intakeAt), num: true },
-  { k: 'Expected out', v: (r) => isoDate(r.current.expectedDischargeAt) ?? '—', num: true },
+  { k: 'Sober since', v: (r) => isoDate(r.current.sobrietyDate) ?? '—', num: true },
   { k: 'Day', v: (r) => r.current.dayOfStay, num: true },
+  { k: 'Expected out', v: (r) => isoDate(r.current.expectedDischargeAt) ?? '—', num: true },
   { k: 'Referral', v: (r) => r.current.referralSource ?? '—' },
 ]
+
+// Shown only when the server sent it, which it does only for admins and house
+// managers. The mask is presentation; the omission upstream is the protection.
+const maskedSsn = computed(() =>
+  resident.value?.ssnLast4 ? `•••• ${resident.value.ssnLast4}` : null,
+)
 </script>
 
 <template>
@@ -183,6 +190,54 @@ const FACTS = [
           <Button v-if="resident.current.bed" size="sm" variant="ghost" @click="freeBed">
             Release bed
           </Button>
+        </div>
+      </section>
+
+      <!-- Identity and cover. Two blocks that are usually empty on day one and
+           get filled in as paperwork arrives, so neither renders until it has
+           something to say. -->
+      <section
+        v-if="maskedSsn || resident.insurance || resident.current?.intakeNotes"
+        class="flex flex-col gap-3"
+      >
+        <h2 class="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
+          Intake detail
+        </h2>
+
+        <div class="bg-card flex flex-col gap-4 rounded-md border p-4">
+          <div v-if="maskedSsn || resident.insurance" class="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">
+            <div v-if="maskedSsn" class="flex flex-col">
+              <span class="text-muted-foreground text-[11.5px]">SSN</span>
+              <span class="text-[13.5px] font-medium tabular-nums">{{ maskedSsn }}</span>
+            </div>
+            <template v-if="resident.insurance">
+              <div class="flex flex-col">
+                <span class="text-muted-foreground text-[11.5px]">Insurance</span>
+                <span class="text-[13.5px] font-medium">{{ resident.insurance.provider }}</span>
+              </div>
+              <div class="flex flex-col">
+                <span class="text-muted-foreground text-[11.5px]">Policy</span>
+                <span class="text-[13.5px] font-medium tabular-nums">
+                  {{ resident.insurance.policyNumber }}
+                </span>
+              </div>
+              <div class="flex flex-col">
+                <span class="text-muted-foreground text-[11.5px]">Policy holder</span>
+                <!-- Blank in the database means the resident holds it, so say
+                     that rather than showing a dash. -->
+                <span class="text-[13.5px] font-medium">
+                  {{ resident.insurance.policyHolder ?? resident.fullName }}
+                </span>
+              </div>
+            </template>
+          </div>
+
+          <div v-if="resident.current?.intakeNotes" class="border-t pt-3">
+            <span class="text-muted-foreground text-[11.5px]">Intake notes</span>
+            <p class="mt-1 max-w-[75ch] text-[13.5px] whitespace-pre-line">
+              {{ resident.current.intakeNotes }}
+            </p>
+          </div>
         </div>
       </section>
 

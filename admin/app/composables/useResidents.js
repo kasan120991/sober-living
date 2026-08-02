@@ -24,6 +24,8 @@ export function useResidents() {
   const releaseBed = (id, reason) =>
     api(`/residents/${id}/bed`, { method: 'DELETE', body: { reason } })
 
+  const listPrograms = () => api('/residents/programs').then((r) => r.programs)
+
   const availableBeds = (cohort) =>
     api(`/residents/available-beds?cohort=${cohort}`).then((r) => r.beds)
 
@@ -48,6 +50,7 @@ export function useResidents() {
     assignBed,
     releaseBed,
     availableBeds,
+    listPrograms,
     listLedger,
     postLedgerEntry,
     addContact,

@@ -67,6 +67,25 @@ corrected by a new intake, not by editing the record.
 
 Managers and admins intake, discharge and move beds; techs read the roster.
 
+Intake runs in four sections — Personal, Program & Room, Contact, Insurance — clickable as
+well as sequential, because facts arrive out of order with a folder open. **Only a name is
+required**; everything else is added to the record later.
+
+**SSN is the last four digits only**, never the whole number: a facility has no use for one
+and holding it turns a records breach into an identity-theft breach. A CHECK constraint
+refuses anything that is not exactly four digits — the failure worth catching is a full SSN
+pasted into a box labelled "last 4". Read is restricted to **admin and house manager**, and
+the field is *omitted from the response* for anyone else rather than hidden in the client,
+so it never goes over the wire.
+
+**Orientation is a Program at level 0**, not a separate status field — it sorts above
+Phase 1 and is what intake selects by default. There is deliberately no "program type":
+this facility is residential only, so a Stay always expects a bed and anyone without one is
+an exception the bell should shout about.
+
+**Resident photos are deferred with documents** — the reference intake form has a photo
+upload and it is deliberately not built, for the reason below.
+
 **Documents are deferred.** The `Document` table exists but nothing uploads yet: storing
 scanned IDs and agreements needs object storage, encryption at rest, and access brokered
 through the API so every read is authorised and audited. That is its own slice.
@@ -531,8 +550,8 @@ Two verification suites, both run against a live database:
 - `node scripts/verify-apartments.js` — 24 assertions on apartments, beds and
   maintenance, including the admin/manager field split and the rules the database
   cannot enforce
-- `node scripts/verify-residents.js` — 30 assertions on the roster, intake,
-  bed moves, discharge and the notification bell
+- `node scripts/verify-residents.js` — 37 assertions on the roster, intake,
+  bed moves, discharge, the SSN read restriction and the notification bell
 - `node scripts/verify-ledger.js` — 25 assertions on derived balances, the append-only
   guards, dollar-to-cent parsing, and processor-reference idempotency
 - `npm run verify:rls` — 18 assertions proving a resident actor cannot read, count or

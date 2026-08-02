@@ -43,7 +43,11 @@ async function main() {
 
   // Phase privileges are deliberately left null — facility policy, not ours to
   // invent. See CLAUDE.md.
-  const [phase1, phase2] = await Promise.all([
+  // Orientation is level 0: the restricted first stretch before Phase 1. It is a
+  // Program row rather than a separate status field, so intake picks a standing
+  // and a phase from one list instead of two concepts meaning nearly the same.
+  const [orientation, phase1, phase2] = await Promise.all([
+    prisma.program.create({ data: { name: 'Orientation', level: 0 } }),
     prisma.program.create({ data: { name: 'Phase 1', level: 1 } }),
     prisma.program.create({ data: { name: 'Phase 2', level: 2 } }),
   ])
@@ -72,10 +76,17 @@ async function main() {
   })
 
   const people = [
-    { first: 'Andre', last: 'Whitfield', cohort: 'MEN', bed: mensBeds[0], program: phase2 },
+    {
+      first: 'Andre', last: 'Whitfield', cohort: 'MEN', bed: mensBeds[0], program: phase2,
+      ssn: '4471', email: 'a.whitfield@example.com', sober: '2025-11-30',
+      notes: 'Self-referred after completing detox. Has transport to work.',
+    },
     { first: 'Danny', last: 'Ocampo', cohort: 'MEN', bed: mensBeds[1], program: phase1 },
     { first: 'Ruben', last: 'Castillo', cohort: 'MEN', bed: mensBeds[2], program: phase1 },
-    { first: 'Tasha', last: 'Boone', cohort: 'WOMEN', bed: womensBeds[0], program: phase2 },
+    {
+      first: 'Tasha', last: 'Boone', cohort: 'WOMEN', bed: womensBeds[0], program: phase2,
+      ssn: '9012', email: 't.boone@example.com', sober: '2026-04-18',
+    },
     { first: 'Marisol', last: 'Ferrer', cohort: 'WOMEN', bed: womensBeds[1], program: phase1 },
   ]
 
@@ -83,7 +94,15 @@ async function main() {
 
   for (const p of people) {
     const resident = await prisma.resident.create({
-      data: { firstName: p.first, lastName: p.last, cohort: p.cohort },
+      data: {
+        firstName: p.first,
+        lastName: p.last,
+        cohort: p.cohort,
+        // Fabricated, and only ever the last four — see the CHECK constraint.
+        ssnLast4: p.ssn ?? null,
+        email: p.email ?? null,
+        phone: '512-555-0'.concat(String(100 + seededStays.length + 1)),
+      },
     })
     const stay = await prisma.stay.create({
       data: {
@@ -93,6 +112,8 @@ async function main() {
         intakeAt: new Date('2026-05-01T15:00:00Z'),
         expectedDischargeAt: new Date('2026-11-01T15:00:00Z'),
         referralSource: 'Travis County drug court',
+        sobrietyDate: p.sober ? new Date(p.sober) : null,
+        intakeNotes: p.notes ?? null,
       },
     })
     await prisma.bedAssignment.create({
@@ -178,6 +199,25 @@ async function main() {
     Boone: [1, 1, 1],
     Ferrer: [1, 1, 1], // plus a credit below, so one row shows a negative
   }
+
+  // Insurance and the new intake fields, on a couple of people rather than all
+  // of them: a seed where every record is complete hides the empty states.
+  await prisma.insurancePolicy.create({
+    data: {
+      residentId: (await prisma.resident.findFirst({ where: { lastName: 'Whitfield' } })).id,
+      provider: 'Blue Cross Blue Shield of Georgia',
+      policyNumber: 'BCBSGA88401277',
+      groupNumber: 'GRP20461',
+    },
+  })
+  await prisma.insurancePolicy.create({
+    data: {
+      residentId: (await prisma.resident.findFirst({ where: { lastName: 'Boone' } })).id,
+      provider: 'Ambetter',
+      policyNumber: 'AMB5520914',
+      policyHolder: 'Denise Boone',
+    },
+  })
 
   for (const { person, stayId } of seededStays) {
     const paid = paymentProfile[person.last] ?? [1, 1, 1]

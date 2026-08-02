@@ -236,6 +236,17 @@ model Resident {
   phone       String?
   email       String?
 
+  /// The LAST FOUR DIGITS ONLY. Never the full number — a facility has no use
+  /// for one, and holding it turns a records breach into an identity-theft
+  /// breach. Four digits is what a referral source or a lab asks for to confirm
+  /// they have the right person.
+  ///
+  /// Read is restricted to admins and house managers in the API, not hidden in
+  /// the client, and it never appears in an audit row or a log line. A CHECK in
+  /// the migration refuses anything that is not exactly four digits, because
+  /// the failure that matters is somebody pasting a whole SSN into this box.
+  ssnLast4 String?
+
   /// Which housing/scheduling track this resident is on. Deliberately separate
   /// from gender identity: this drives bed eligibility and schedule scoping.
   /// If the facility ever needs to record gender identity or pronouns, that is
@@ -245,6 +256,7 @@ model Resident {
   stays             Stay[]
   emergencyContacts EmergencyContact[]
   documents         Document[]
+  insurance         InsurancePolicy?
   user              User?
 
   createdAt DateTime  @default(now())
@@ -289,6 +301,17 @@ model Stay {
   /// Free text for now; likely becomes its own table once we know whether
   /// referral sources need contact details and reporting.
   referralSource String?
+
+  /// The date the resident counts their sobriety from. On the Stay rather than
+  /// the Resident because someone who relapses and returns starts a new count,
+  /// and the previous episode's date is still the truth about that episode.
+  sobrietyDate DateTime? @db.Date
+
+  /// What the person doing the intake observed or was told at the door.
+  /// Free text on purpose — it is a narrative note, not a field to report on.
+  /// Whatever is written here is disclosable, so it belongs in the same
+  /// conservative posture as everything else about the resident.
+  intakeNotes String?
 
   bedAssignments BedAssignment[]
   ledgerEntries  LedgerEntry[]
@@ -434,6 +457,38 @@ model LedgerEntry {
 
   @@index([stayId, occurredAt])
   @@map("ledger_entries")
+}
+
+/// A resident's insurance, as captured at intake.
+///
+/// One per resident, replaced rather than versioned: unlike a screen result or
+/// a med log, last year's policy number is not evidence of anything — it is
+/// just stale. Soft-deleted like the rest of resident data, so nothing is
+/// actually destroyed.
+///
+/// Its own table rather than four columns on Resident because these identifiers
+/// are the most directly abusable data in the system, and keeping them in one
+/// place means access to them can be narrowed later without touching the
+/// resident record.
+model InsurancePolicy {
+  id String @id @default(uuid(7))
+
+  residentId String   @unique
+  resident   Resident @relation(fields: [residentId], references: [id])
+
+  provider     String
+  policyNumber String
+  groupNumber  String?
+
+  /// Null means the resident is the policy holder, which is the common case.
+  /// Storing "Same as client" as text would make that fact unqueryable.
+  policyHolder String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("insurance_policies")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

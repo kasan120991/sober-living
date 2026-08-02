@@ -11,6 +11,7 @@ import {
   getResident,
   intakeResident,
   cohortCapacity,
+  listPrograms,
   listResidents,
   releaseBed,
   unhousedWithOptions,
@@ -41,6 +42,32 @@ const intakeBody = z.object({
   programId: z.string().optional().nullable(),
   referralSource: z.string().trim().max(160).optional().nullable(),
   bedId: z.string().optional().nullable(),
+
+  // Exactly four digits or nothing. The database refuses anything else too —
+  // the case worth catching is a whole SSN pasted into a box labelled "last 4",
+  // and it should fail here with a message a person can act on.
+  ssnLast4: z
+    .string()
+    .trim()
+    .regex(/^\d{4}$/, 'Enter only the last four digits')
+    .optional()
+    .nullable()
+    .or(z.literal('')),
+
+  sobrietyDate: iso.optional().nullable(),
+  intakeNotes: z.string().trim().max(4000).optional().nullable(),
+
+  insurance: z
+    .object({
+      provider: z.string().trim().max(120).optional(),
+      policyNumber: z.string().trim().max(60).optional(),
+      groupNumber: z.string().trim().max(60).optional().nullable(),
+      // Blank means the resident is the policy holder. Storing the words
+      // "same as client" would make that unqueryable.
+      policyHolder: z.string().trim().max(120).optional().nullable(),
+    })
+    .optional(),
+
   emergencyContact: z
     .object({
       name: z.string().trim().max(120).optional(),
@@ -116,6 +143,9 @@ router.get(
   }),
 )
 
+/** Static-ish list for the intake form. Must precede /:id. */
+router.get('/programs', handler(async (_req, res) => res.json({ programs: await listPrograms() })))
+
 /** Beds a resident could move into. Query param, so it must precede /:id. */
 router.get(
   '/available-beds',
@@ -126,7 +156,12 @@ router.get(
   }),
 )
 
-router.get('/:id', handler(async (req, res) => res.json(await getResident(req.params.id))))
+router.get(
+  '/:id',
+  handler(async (req, res) =>
+    res.json(await getResident(req.params.id, { viewerRole: req.session.role })),
+  ),
+)
 
 router.post(
   '/',

@@ -2,6 +2,12 @@ import { prisma, runInTransaction } from '../db/client.js'
 import { HttpError } from '../middleware/authorize.js'
 import { STAY_STATUS } from '../domain/constants.js'
 import { balancesByStay, balanceOfStay } from './ledger.js'
+import { STAFF_ROLE } from '../domain/constants.js'
+
+/// Who may see the last four of an SSN. Techs do not need it to run a med pass
+/// or an apartment check, and the smallest audience is the right one for the
+/// most directly abusable field on the record.
+const SSN_ROLES = [STAFF_ROLE.ADMIN, STAFF_ROLE.HOUSE_MANAGER]
 
 /**
  * A resident's current stay is the one that has not been discharged. There is
@@ -77,11 +83,32 @@ export async function listResidents({ includeDischarged = false } = {}) {
   return visible.map((r) => ({ ...r, balanceCents: r.stayId ? (balances.get(r.stayId) ?? 0) : null }))
 }
 
-export async function getResident(id) {
+/**
+ * The full record.
+ *
+ * `viewerRole` is not optional in spirit: the last four of an SSN is omitted
+ * from the response entirely for anyone below house manager. Filtering it in
+ * the client would still put it on the wire and in the browser's memory, which
+ * is the difference between hiding something and not disclosing it.
+ */
+/**
+ * The phases a resident can be on, lowest first. Orientation is level 0 — the
+ * restricted first stretch — so it sorts to the top and is what intake offers
+ * by default.
+ */
+export async function listPrograms() {
+  return prisma.program.findMany({
+    orderBy: { level: 'asc' },
+    select: { id: true, name: true, level: true },
+  })
+}
+
+export async function getResident(id, { viewerRole } = {}) {
   const resident = await prisma.resident.findUnique({
     where: { id },
     include: {
       emergencyContacts: { orderBy: [{ isPrimary: 'desc' }, { name: 'asc' }] },
+      insurance: true,
       stays: {
         orderBy: { intakeAt: 'desc' },
         include: {
@@ -107,6 +134,11 @@ export async function getResident(id) {
     dateOfBirth: resident.dateOfBirth,
     phone: resident.phone,
     email: resident.email,
+    // Present as a key only when the viewer may see it, so a client cannot tell
+    // the difference between "no SSN recorded" and "not allowed to see it".
+    ...(SSN_ROLES.includes(viewerRole) ? { ssnLast4: resident.ssnLast4 } : {}),
+    canSeeSsn: SSN_ROLES.includes(viewerRole),
+    insurance: resident.insurance,
     emergencyContacts: resident.emergencyContacts,
     current: current
       ? {
@@ -116,6 +148,8 @@ export async function getResident(id) {
           expectedDischargeAt: current.expectedDischargeAt,
           dayOfStay: dayOfStay(current.intakeAt),
           referralSource: current.referralSource,
+          sobrietyDate: current.sobrietyDate,
+          intakeNotes: current.intakeNotes,
           program: current.program,
           bed: currentBedOf({ bedAssignments: current.bedAssignments.filter((a) => !a.endedAt) }),
         }
@@ -155,6 +189,7 @@ export async function intakeResident(input, actorId) {
         dateOfBirth: input.dateOfBirth ? new Date(input.dateOfBirth) : null,
         phone: input.phone || null,
         email: input.email || null,
+        ssnLast4: input.ssnLast4 || null,
       },
     })
 
@@ -166,10 +201,27 @@ export async function intakeResident(input, actorId) {
         intakeAt: input.intakeAt ? new Date(input.intakeAt) : new Date(),
         expectedDischargeAt: input.expectedDischargeAt ? new Date(input.expectedDischargeAt) : null,
         referralSource: input.referralSource || null,
+        sobrietyDate: input.sobrietyDate ? new Date(input.sobrietyDate) : null,
+        intakeNotes: input.intakeNotes || null,
       },
     })
 
     if (input.bedId) await assignBedTo(stay.id, input.bedId, input.cohort, actorId)
+
+    // Provider and policy number travel together — one without the other is not
+    // a policy anyone could bill against, so a half-filled section is skipped
+    // rather than written as a stub.
+    if (input.insurance?.provider && input.insurance?.policyNumber) {
+      await prisma.insurancePolicy.create({
+        data: {
+          residentId: resident.id,
+          provider: input.insurance.provider,
+          policyNumber: input.insurance.policyNumber,
+          groupNumber: input.insurance.groupNumber || null,
+          policyHolder: input.insurance.policyHolder || null,
+        },
+      })
+    }
 
     if (input.emergencyContact?.name) {
       await prisma.emergencyContact.create({

@@ -114,6 +114,7 @@ export const AUDITED_MODELS = Object.freeze([
   'BedAssignment',
   'Document',
   'LedgerEntry',
+  'InsurancePolicy',
   // Facility configuration
   'Apartment',
   'Bed',
@@ -131,6 +132,7 @@ export const SOFT_DELETE_MODELS = Object.freeze([
   'EmergencyContact',
   'Program',
   'Document',
+  'InsurancePolicy',
   'User',
   'MaintenanceRequest',
 ])

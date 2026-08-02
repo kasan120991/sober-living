@@ -27,6 +27,7 @@ export async function resetFacilityData(prisma, { quiet = false } = {}) {
 
   await sql('DELETE FROM "documents"')
   await sql('DELETE FROM "emergency_contacts"')
+  await sql('DELETE FROM "insurance_policies"')
   await sql('DELETE FROM "stays"')
   await sql('DELETE FROM "maintenance_requests"')
   await sql('DELETE FROM "beds"')

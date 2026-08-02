@@ -33,6 +33,10 @@ async function main() {
     return { status: r.status, body: r.status === 204 ? null : await r.json().catch(() => null) }
   }
 
+  // Imported here rather than at module scope: importing db/client.js pulls in
+  // the extensions, and the suite wants the app booted first.
+  const { prisma } = await import('../src/db/client.js')
+
   const admin = as(await login('admin@facility.test'))
   const manager = as(await login('manager@facility.test'))
   const tech = as(await login('tech@facility.test'))
@@ -192,6 +196,52 @@ async function main() {
     ? ok('the discharged resident leaves the default roster')
     : bad('roster excludes discharged', 'still listed')
 
+  console.log('\n\x1b[1mIntake detail\x1b[0m')
+
+  const full = await manager('/residents', {
+    method: 'POST',
+    body: JSON.stringify({
+      firstName: 'Imani', lastName: 'Okafor', cohort: 'WOMEN',
+      dateOfBirth: '1991-02-09', ssnLast4: '3312',
+      intakeNotes: 'Arrived with two bags and a court letter.',
+      sobrietyDate: '2026-05-30', email: 'i.okafor@example.com', phone: '404-555-0170',
+      insurance: { provider: 'Peach State', policyNumber: 'PS99120', groupNumber: 'G4' },
+      emergencyContact: { name: 'Ada Okafor', relationship: 'Aunt', phone: '404-555-0171' },
+    }),
+  })
+  full.status === 201 ? ok('intake accepts the full form') : bad('full intake', JSON.stringify(full.body))
+
+  const rec = await manager(`/residents/${full.body.id}`)
+  rec.body?.current?.sobrietyDate && rec.body?.current?.intakeNotes
+    ? ok('sobriety date and intake notes are stored on the stay')
+    : bad('stay fields', JSON.stringify(rec.body?.current))
+  rec.body?.insurance?.policyNumber === 'PS99120'
+    ? ok('insurance is stored and returned')
+    : bad('insurance', JSON.stringify(rec.body?.insurance))
+
+  // The last four of an SSN must not reach a tech at all — omitted server-side,
+  // not hidden in the client, so it never goes over the wire.
+  const asManager = await manager(`/residents/${full.body.id}`)
+  const asTech = await tech(`/residents/${full.body.id}`)
+  asManager.body.ssnLast4 === '3312'
+    ? ok('a house manager sees the last four of the SSN')
+    : bad('manager sees ssn', asManager.body.ssnLast4)
+  !('ssnLast4' in asTech.body) && asTech.body.canSeeSsn === false
+    ? ok('a tech never receives it — the key is absent, not blanked')
+    : bad('tech ssn omitted', JSON.stringify({ has: 'ssnLast4' in asTech.body }))
+
+  const tooLong = await manager('/residents', {
+    method: 'POST',
+    body: JSON.stringify({ firstName: 'Reject', lastName: 'Me', cohort: 'MEN', ssnLast4: '123456789' }),
+  })
+  tooLong.status === 400
+    ? ok('a full SSN pasted into the last-four box is refused')
+    : bad('ssn length', tooLong.status)
+
+  const ssnLeak = await prisma.$queryRawUnsafe(`
+    SELECT count(*)::int AS n FROM "audit_log" WHERE "entityId" LIKE '%3312%'`)
+  ssnLeak[0].n === 0 ? ok('no SSN fragment reaches the audit log') : bad('ssn in audit', ssnLeak[0].n)
+
   console.log('\n\x1b[1mThe bell\x1b[0m')
 
   // Notifications are derived from current state, never stored — so the test
@@ -253,7 +303,6 @@ async function main() {
 
   console.log('\n\x1b[1mAudit\x1b[0m')
 
-  const { prisma } = await import('../src/db/client.js')
   const counts = Object.fromEntries(
     await Promise.all(
       ['Resident', 'Stay', 'BedAssignment'].map(async (e) => [
