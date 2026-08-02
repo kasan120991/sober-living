@@ -176,8 +176,9 @@ Non-negotiables, from day one:
   cross-origin auth; an XSS on the resident app must not hand over a session that can read
   PHI. Lock CORS to the two known origins.
 
-Open: which state, and therefore which licensing body and record-retention rules apply.
-Get this answered before the first production deploy.
+**Georgia.** The specific licensing or certification body and the retention period are
+still unverified — see open question 1. Until they are, the app's posture is deliberately
+conservative: retain everything, hard-delete nothing.
 
 ---
 
@@ -503,7 +504,17 @@ no longer the default.
 
 Resolve these as they come up; update this file when they do.
 
-1. Which state / licensing body? Determines retention and reporting requirements.
+1. ~~Which state?~~ **Georgia.** Still to confirm from an authoritative source, because
+   both affect the schema and the deploy:
+   - **Which body applies** — Georgia regulates clinical SUD treatment and recovery
+     residences differently, and a non-clinical sober living home may be certified rather
+     than licensed. Which one this facility is decides whose rules bind.
+   - **The record retention period** — currently the app retains everything and never hard
+     deletes, which is safe in the sense that nothing is lost too early. If Georgia sets a
+     maximum retention as well as a minimum, that becomes a real requirement rather than a
+     default.
+   Do not encode any specific Georgia rule from memory. Verify it before it reaches the
+   schema or a deploy.
 2. How many apartments and beds, at launch and realistically? What's the cohort split?
 3. Medication model: observed self-administration only, or does staff store and dispense?
 4. Does the facility already have a system (Sober Living App, BestNotes, spreadsheets)
