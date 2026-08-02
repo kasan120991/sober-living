@@ -102,7 +102,7 @@ const COLUMNS = ['Resident', 'Cohort', 'Bed', 'Phase', 'Intake', 'Expected out',
                 </td>
 
                 <!-- "No bed" is the one exception state on this screen, so it is
-                     the only thing here that gets colour. design.md §4. -->
+                     the only thing here that gets colour. -->
                 <td class="h-12 whitespace-nowrap border-b border-border px-3">
                   <span v-if="r.bed" class="text-foreground">
                     {{ r.bed.apartmentName }} · {{ r.bed.label }}

@@ -15,7 +15,7 @@ export const buttonVariants = cva(
         destructive: 'bg-destructive/10 hover:bg-destructive/20 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/20 text-destructive focus-visible:border-destructive/40 dark:hover:bg-destructive/30',
         link: 'text-primary underline-offset-4 hover:underline',
       },
-// SoberLife: sizes raised to a 44px floor. design.md requires it for
+// SoberLife: sizes raised to a 44px floor. CLAUDE.md requires it for
       // anything a tech taps one-handed in a hallway; shadcn ships 36px.
       size: {
         'default': 'h-11 gap-1.5 px-3 has-data-[icon=inline-end]:pr-2.5 has-data-[icon=inline-start]:pl-2.5',

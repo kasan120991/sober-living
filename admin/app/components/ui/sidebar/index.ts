@@ -43,7 +43,7 @@ export const sidebarMenuButtonVariants = cva(
         default: 'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
         outline: 'bg-background hover:bg-sidebar-accent hover:text-sidebar-accent-foreground shadow-[0_0_0_1px_var(--sidebar-border)] hover:shadow-[0_0_0_1px_var(--sidebar-accent)]',
       },
-      // Vendored change: the 44px floor from design.md §3. shadcn ships 36px
+      // Vendored change: the 44px floor from CLAUDE.md. shadcn ships 36px
       // and 32px here, which is fine under a mouse but not for a tech opening
       // the mobile sheet one-handed.
       //

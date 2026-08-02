@@ -193,12 +193,56 @@ given us.
 | `admin/` | Staff-facing app — admin, house manager, tech. Nuxt 4 + Nuxt UI v4 + Tailwind v4. |
 | `client/` | Resident-facing app. Same stack. Empty until the staff side is real. |
 
-- **shadcn-vue** for components, themed by the `a6OmWiie` preset. Components are
+- **shadcn-vue** for components, themed by the `a6OmWiie` preset — style `reka-luma`,
+  teal primary, Inter body with Geist Sans headings, Lucide icons. Components are
   **vendored** into `admin/app/components/ui/` — we own them, so restyling means editing
-  the component rather than overriding it. See `design.md`, the source of truth for UI.
+  the component rather than overriding it.
 - **Tailwind CSS v4** via `@tailwindcss/vite`.
 - **Both light and dark themes.** The earlier decision to defer dark mode is reversed —
   the preset defines both.
+
+### UI rules
+
+The preset owns colour and type. What it does not decide, and we do:
+
+- **44px minimum tap target** for anything a tech touches in a hallway. shadcn defaults to
+  36px, so the floor is baked into the vendored source — `button`, `input`, `select`,
+  `switch`. The **sidebar is the one conditional case**: it carries thirteen menu buttons
+  at once and raising them all pushes the nav past a laptop viewport, so it stays 36px under
+  a mouse and goes to 44px when `max-md` (the mobile sheet) or `pointer-coarse` (a tablet)
+  holds. Neither alone is enough — `max-md` misses the tablet, and `pointer-coarse` is
+  invisible when you test mobile by resizing a desktop browser.
+- **`--success` and `--warning` were added** to the preset's `@theme`, in both themes.
+  shadcn ships only `destructive`, and this domain has to keep a refusal visually distinct
+  from a dilute and from a positive — see modules 5 and 6.
+- **No monospace anywhere.** Column alignment comes from `tabular-nums`, which is what was
+  actually wanted; the face itself resolved to whatever the device happened to have.
+- **Fonts are self-hosted** by `@nuxt/fonts`. The preset ships Google Fonts CDN `@import`s,
+  which would put a third-party request on every page load.
+- **Forms use `AppField`**, not shadcn's `Form` — that one is vee-validate based and we
+  validate server-side with zod. **Toasts go through `useNotify()`**, not `vue-sonner`
+  directly. **Page headers go through `AppPageHeader`.**
+- Table rows 48px, `px-3` cells. Wide tables scroll inside their own `overflow-x-auto`
+  container; the page never scrolls sideways. Mobile-first for anything a tech touches.
+- The shell follows shadcn's **sidebar-08** block. Two deliberate deviations: no collapsible
+  submenus, because we have no second-level navigation and inventing one to fill the shape
+  would be IA written to match a template; and breadcrumb ancestors stay visible below `md`,
+  because they replaced a back arrow and a phone is where the way back matters most.
+
+Five things that will trip you up:
+
+1. **Never pass `--overwrite` to `shadcn-vue add`.** It rewrites `main.css` from the preset
+   and silently restores the Google Fonts CDN imports. Adding a component plainly does not
+   touch the CSS. If you do run it, `git diff app/assets/css/main.css` before committing.
+2. **`components:` in `nuxt.config.js` needs `extensions: ['vue']`** on the `ui` folder, or
+   Nuxt registers each `index.ts` barrel as a component too.
+3. **Composables exported from a component barrel are not auto-imported** — `useSidebar` has
+   to be imported explicitly. Nuxt only scans `composables/` and `utils/`.
+4. **Reka's `Select` rejects an empty-string item value**; it reserves `''` for "cleared".
+   Use a sentinel like `'all'` and map it to `undefined` at the query boundary.
+5. **`AppPageHeader`'s `md:rounded-t-2xl` has to match `SidebarInset`'s corner**, or the
+   card shows as a sliver outside the header. It is `2xl`, not the `xl` shadcn ships — the
+   preset restyled `SidebarInset`.
 - **Prisma 7** over **PostgreSQL**, via the `@prisma/adapter-pg` driver adapter
   (`PrismaPg`). Prisma 7 uses driver adapters — there is no `mysql2` or `pg` usage
   anywhere outside `db/client.js`.
@@ -288,7 +332,7 @@ forms, resident screens are a few read-only views plus two request forms. They s
 
 ```
 sober-living/
-  CLAUDE.md      design.md
+  CLAUDE.md
   server/
     prisma/
       schema.prisma  # single source of truth for the data model
@@ -531,8 +575,8 @@ Resolve these as they come up; update this file when they do.
 
 - Read this file at the start of every session. Update it when scope, decisions, or the
   stack change — it is the durable record, not the conversation.
-- Read `design.md` before writing any component, page, or CSS. Prefer Nuxt UI components
-  over custom ones; never hand-build what Nuxt UI already provides.
+- Prefer the vendored shadcn components over custom ones; add new ones with
+  `shadcn-vue add` rather than hand-rolling. See UI rules above.
 - Ask before inventing domain rules. Curfew times, phase privileges, and service-hour
   targets are facility policy, not defaults to guess at.
 - When touching resident data, default to the conservative privacy choice.
