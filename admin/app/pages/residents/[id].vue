@@ -82,31 +82,40 @@ const maskedSsn = computed(() =>
 </script>
 
 <template>
-  <!-- The breadcrumb replaces what was a back arrow: same job, and it also says
-       where you are rather than only where you can go. -->
-  <AppPageHeader
-    :title="resident?.fullName ?? 'Resident'"
-    :parents="[{ label: 'Residents', to: '/residents' }]"
-  >
-    <template #actions>
-      <template v-if="resident">
-        <Badge variant="outline" class="text-[10px] uppercase tracking-wider">
-          {{ cohortLabel }}
-        </Badge>
-        <Badge v-if="!isCurrent" variant="secondary">Discharged</Badge>
-        <Button
-          v-if="canManage && isCurrent"
-          size="sm"
-          variant="outline"
-          @click="dischargeOpen = true"
-        >
-          Discharge
-        </Button>
-      </template>
-    </template>
-  </AppPageHeader>
+  <AppPageHeader />
 
-  <div class="flex flex-1 flex-col gap-7 p-4">
+  <div class="flex min-w-0 flex-1 flex-col gap-7 p-4">
+    <!-- The back link lives with the title now. It used to be the breadcrumb in
+         the app bar, which the bar gave up when every page gained a heading. -->
+    <AppPageHeading
+      :title="resident?.fullName ?? 'Resident'"
+      :back="{ label: 'Residents', to: '/residents' }"
+    >
+      <template v-if="resident" #description>
+        {{ cohortLabel }}
+        <template v-if="resident.current?.bed">
+          · {{ resident.current.bed.apartmentName }} · {{ resident.current.bed.label }}
+        </template>
+        <template v-if="resident.current">
+          · {{ resident.current.program?.name ?? 'No program' }} · day
+          <span class="tabular-nums">{{ resident.current.dayOfStay }}</span>
+        </template>
+      </template>
+      <template #actions>
+        <template v-if="resident">
+          <Badge v-if="!isCurrent" variant="secondary">Discharged</Badge>
+          <Button
+            v-if="canManage && isCurrent"
+            size="sm"
+            variant="outline"
+            @click="dischargeOpen = true"
+          >
+            Discharge
+          </Button>
+        </template>
+      </template>
+    </AppPageHeading>
+
     <div v-if="pending" class="text-muted-foreground text-sm">Loading…</div>
 
     <template v-else-if="resident">

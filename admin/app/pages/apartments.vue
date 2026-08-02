@@ -22,11 +22,20 @@ const listHiddenOnMobile = computed(() => Boolean(selectedId.value))
 </script>
 
 <template>
-  <AppPageHeader title="Apartments &amp; Beds">
-    <template #actions>
-      <AppApartmentCreate @created="refresh" />
-    </template>
-  </AppPageHeader>
+  <AppPageHeader />
+
+  <!-- This page is a two-panel layout rather than AppPage's single column, so
+       it mounts the heading itself. Same component, same result. -->
+  <div class="px-4 pt-4 pb-3">
+    <AppPageHeading
+      title="Apartments &amp; Beds"
+      :description="`${apartments.length} apartments across both cohorts.`"
+    >
+      <template #actions>
+        <AppApartmentCreate @created="refresh" />
+      </template>
+    </AppPageHeading>
+  </div>
 
   <div class="flex min-h-0 flex-1">
     <aside

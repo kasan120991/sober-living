@@ -193,6 +193,37 @@ real table *and* a real decision about whether one person dismissing hides it fr
 The badge counts only `action` items. A bed out of service is worth seeing and is not a
 number anyone should feel behind on.
 
+**Planned: the bell becomes event-driven over a socket** — a resident signs out, a
+maintenance request arrives, a Stripe payment lands. That is a different thing from what is
+built, and it **reverses the "no Notification table" decision above**, so it should be a
+deliberate change rather than a drift:
+
+- Derived items answer *what is true now*; events answer *what just happened*. Both belong
+  in a bell, but they need different storage — an event has to persist to survive a
+  reconnect, and only an event can meaningfully be unread.
+- **A socket is a fan-out, and RLS does not apply to it.** Every subscriber gets what the
+  server pushes, so the authorisation the policies do per-query has to be re-done per
+  subscriber, per event. This is the single most likely place to leak resident data in the
+  next year of this project.
+- Who receives what is a role question with no default: a tech does not need to know a
+  payment landed, and an admin probably does not need every sign-out.
+- Stripe webhooks arrive server-to-server and have to be verified before they become
+  events — an unverified webhook is an unauthenticated write to a resident's balance.
+
+### 13. Global search
+**Built.** A header field with `⌘K`, searching residents and apartments.
+
+Treated as the largest deliberate disclosure surface in the app, because it is: under
+42 CFR Part 2, confirming that a **named person** is in this facility *is* the disclosure.
+So the endpoint is staff-only (never `RESIDENT`), refuses queries under two characters so it
+cannot be walked a letter at a time to enumerate the roster, caps results, and returns only
+the fields the roster already shows the same person — no date of birth, no SSN fragment, no
+balance, no notes.
+
+**The query string is never logged, audited, echoed in an error, or put in a URL.** It is
+somebody's name. The audit trail records which resident ids came back, which is the access
+that actually happened.
+
 **Nothing from modules 5 or 6 goes in the bell without a separate think.** A name against
 "has no bed" is operational. A name against a screen result is a disclosure to whoever is
 standing behind the person holding the phone.
@@ -329,11 +360,15 @@ The preset owns colour and type. What it does not decide, and we do:
 - **A table column list must not be an array of strings filtered with `filter(Boolean)`** —
   an empty-string header for an actions column is falsy and gets silently dropped, leaving
   a `th` short and the empty-state `colspan` off by one. Use objects with a `key`.
-- **The app header is shell, not page.** Trigger, breadcrumb, page actions, then the
-  notification bell, always last. A page that wants a visible heading uses `AppPageHeading`
-  in the body and moves its primary action there — the roster does. That repeats the
-  breadcrumb title deliberately: since matching sidebar-08 the breadcrumb is 14px regular,
-  right for a trail and too quiet to open a page with.
+- **The app header is shell, not page — and it no longer names the page.** It carries
+  search, one status figure, and the bell. **Every page states its own name** in an
+  `AppPageHeading` rendered by `AppPage`, so a screen cannot be nameless by omission.
+- **The way back out of a detail page is the heading's `back` prop**, not a breadcrumb.
+  It belongs with the title it returns from, not in chrome shared by every screen.
+- **The status pill shows ONE figure**, chosen server-side: the most urgent true thing,
+  falling back to beds free when the house is quiet. Three counts side by side is a
+  dashboard, and it competes with the bell. Counts only, never names — that is what makes
+  it safe on every screen regardless of who is behind the phone.
 - **Forms use `AppField`**, not shadcn's `Form` — that one is vee-validate based and we
   validate server-side with zod. **Toasts go through `useNotify()`**, not `vue-sonner`
   directly. **Page headers go through `AppPageHeader`.** That header has no bottom rule and
@@ -563,8 +598,8 @@ Two verification suites, both run against a live database:
 - `node scripts/verify-apartments.js` — 24 assertions on apartments, beds and
   maintenance, including the admin/manager field split and the rules the database
   cannot enforce
-- `node scripts/verify-residents.js` — 37 assertions on the roster, intake,
-  bed moves, discharge, the SSN read restriction and the notification bell
+- `node scripts/verify-residents.js` — 45 assertions on the roster, intake,
+  bed moves, discharge, the SSN read restriction, the notification bell, and search
 - `node scripts/verify-ledger.js` — 25 assertions on derived balances, the append-only
   guards, dollar-to-cent parsing, and processor-reference idempotency
 - `npm run verify:rls` — 18 assertions proving a resident actor cannot read, count or

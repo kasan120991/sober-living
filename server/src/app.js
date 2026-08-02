@@ -13,6 +13,7 @@ import apartmentsRouter from './routes/apartments.js'
 import bedsRouter from './routes/beds.js'
 import maintenanceRouter from './routes/maintenance.js'
 import notificationsRouter from './routes/notifications.js'
+import searchRouter from './routes/search.js'
 import residentsRouter from './routes/residents.js'
 
 export function createApp() {
@@ -49,6 +50,7 @@ export function createApp() {
   app.use('/beds', bedsRouter)
   app.use('/maintenance', maintenanceRouter)
   app.use('/notifications', notificationsRouter)
+  app.use('/search', searchRouter)
   app.use('/residents', residentsRouter)
 
   app.use(notFound)

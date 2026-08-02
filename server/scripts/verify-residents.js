@@ -301,6 +301,50 @@ async function main() {
     ? ok('nobody with a bed is flagged — the item clears itself, with nothing to dismiss')
     : bad('stale notification', housedFlagged.map((r) => r.fullName).join(', '))
 
+  console.log('\n\x1b[1mSearch and status\x1b[0m')
+
+  const short = await manager('/search?q=a')
+  short.body?.tooShort === true && !short.body.residents.length
+    ? ok('a one-letter query returns nothing — it cannot be walked to enumerate the roster')
+    : bad('min query length', JSON.stringify(short.body))
+
+  const byName = await manager('/search?q=boo')
+  byName.body?.residents?.[0]?.fullName === 'Tasha Boone'
+    ? ok('search finds a resident by partial surname')
+    : bad('search residents', JSON.stringify(byName.body?.residents))
+
+  const fields = Object.keys(byName.body?.residents?.[0] ?? {})
+  !fields.some((f) => ['dateOfBirth', 'ssnLast4', 'balanceCents', 'intakeNotes', 'phone'].includes(f))
+    ? ok(`search returns roster-level fields only (${fields.join(', ')})`)
+    : bad('search leaks fields', fields.join(', '))
+
+  const byApt = await manager('/search?q=apt')
+  byApt.body?.apartments?.length > 0
+    ? ok(`search finds apartments (${byApt.body.apartments.length})`)
+    : bad('search apartments', JSON.stringify(byApt.body))
+
+  // The query is a name. It must not reach the audit log.
+  const qLeak = await prisma.$queryRawUnsafe(`
+    SELECT count(*)::int AS n FROM "audit_log"
+     WHERE "entity" ILIKE '%search%' OR "entityId" ILIKE '%boo%'`)
+  qLeak[0].n === 0
+    ? ok('the search term never reaches the audit log')
+    : bad('query in audit', qLeak[0].n)
+
+  const techSearch = await tech('/search?q=boo')
+  techSearch.status === 200
+    ? ok('a tech may search — they can already read the roster')
+    : bad('tech search', techSearch.status)
+
+  const status = await tech('/search/status')
+  status.status === 200 && typeof status.body?.count === 'number' && status.body?.level
+    ? ok(`status returns one figure (${status.body.count} ${status.body.label})`)
+    : bad('status shape', JSON.stringify(status.body))
+
+  !JSON.stringify(status.body).match(/[A-Z][a-z]+ [A-Z][a-z]+/)
+    ? ok('status carries counts only, never a name')
+    : bad('status has a name in it', JSON.stringify(status.body))
+
   console.log('\n\x1b[1mAudit\x1b[0m')
 
   const counts = Object.fromEntries(

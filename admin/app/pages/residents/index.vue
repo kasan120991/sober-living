@@ -116,24 +116,20 @@ const shownCapacity = computed(() => {
 
 <template>
   <AppPage title="Residents">
-    <!-- min-w-0: a flex child defaults to min-width:auto, which lets the table
-         push this column wider than the viewport and scroll the whole PAGE
-         sideways instead of scrolling inside its own container. -->
-    <div class="flex min-w-0 flex-col gap-4">
-      <AppPageHeading title="Residents">
-        <template #description>
-          <span class="tabular-nums">{{ counts.ALL }}</span> in the house across two cohorts.
-          <template v-if="unhoused.length">
-            <span class="tabular-nums">{{ unhoused.length }}</span>
-            awaiting placement.
-          </template>
-          <template v-else>Everyone has a bed.</template>
-        </template>
-        <template #actions>
-          <AppResidentIntake v-if="canManage" @intaken="load" />
-        </template>
-      </AppPageHeading>
+    <template #description>
+      <span class="tabular-nums">{{ counts.ALL }}</span> in the house across two cohorts.
+      <template v-if="unhoused.length">
+        <span class="tabular-nums">{{ unhoused.length }}</span> awaiting placement.
+      </template>
+      <template v-else>Everyone has a bed.</template>
+    </template>
+    <template #actions>
+      <AppResidentIntake v-if="canManage" @intaken="load" />
+    </template>
 
+    <!-- min-w-0: a flex child defaults to min-width:auto, which lets the table
+         push this column wider than the viewport. -->
+    <div class="flex min-w-0 flex-col gap-4">
       <div class="flex flex-wrap items-center gap-3">
         <Tabs v-model="cohort">
           <TabsList>
