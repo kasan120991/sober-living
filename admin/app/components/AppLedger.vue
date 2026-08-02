@@ -9,7 +9,7 @@
 // corrected by posting an entry that points at the one it fixes.
 import { Plus } from '@lucide/vue'
 import { isoDate } from '~/composables/useResidents.js'
-import { money, inCredit, LEDGER_TYPES, LEDGER_CATEGORIES, categoryLabel } from '~/utils/money.js'
+import { money, inCredit, categoryLabel } from '~/utils/money.js'
 import { STAFF_ROLE } from '~/utils/roles.js'
 
 const props = defineProps({
@@ -20,8 +20,7 @@ const props = defineProps({
 const emit = defineEmits(['posted'])
 
 const { user } = useAuth()
-const { listLedger, postLedgerEntry } = useResidents()
-const notify = useNotify()
+const { listLedger } = useResidents()
 
 const entries = ref([])
 const balanceCents = ref(0)
@@ -43,56 +42,13 @@ async function load() {
 }
 await load()
 
-const open = ref(false)
-const busy = ref(false)
-const error = ref('')
+// The dialog is a sibling component now, not a nested one with its own trigger,
+// so the row menu on the roster can open the same implementation.
+const entryOpen = ref(false)
 
-const blank = () => ({
-  type: 'CHARGE',
-  category: 'RENT',
-  amount: '',
-  description: '',
-  occurredAt: new Date().toISOString().slice(0, 10),
-})
-const form = reactive(blank())
-
-// Only a charge carries a category — the database enforces it, so the form
-// should not offer one where it would be rejected.
-watch(
-  () => form.type,
-  (t) => {
-    form.category = t === 'CHARGE' ? (form.category ?? 'RENT') : null
-  },
-)
-
-watch(open, (isOpen) => {
-  if (!isOpen) return
-  error.value = ''
-  Object.assign(form, blank())
-})
-
-async function submit() {
-  error.value = ''
-  busy.value = true
-  try {
-    await postLedgerEntry(props.residentId, {
-      type: form.type,
-      category: form.type === 'CHARGE' ? form.category : null,
-      // Sent as typed. The server parses dollars to cents so one rounding rule
-      // applies everywhere; multiplying by 100 here loses a cent on 12.10.
-      amount: form.amount,
-      description: form.description,
-      occurredAt: form.occurredAt || null,
-    })
-    notify.success('Entry posted')
-    open.value = false
-    await load()
-    emit('posted')
-  } catch (err) {
-    error.value = err?.data?.error ?? 'Could not post the entry.'
-  } finally {
-    busy.value = false
-  }
+async function onPosted() {
+  await load()
+  emit('posted')
 }
 </script>
 
@@ -118,78 +74,9 @@ async function submit() {
         </span>
       </div>
 
-      <Dialog v-if="canManage" v-model:open="open">
-        <DialogTrigger as-child>
-          <Button size="sm" variant="outline"><Plus class="size-4" /> Add entry</Button>
-        </DialogTrigger>
-        <DialogContent class="sm:max-w-[460px]">
-          <DialogHeader><DialogTitle>Add a ledger entry</DialogTitle></DialogHeader>
-
-          <form class="flex flex-col gap-4" @submit.prevent="submit">
-            <Alert v-if="error" variant="destructive">
-              <AlertDescription>{{ error }}</AlertDescription>
-            </Alert>
-
-            <div class="flex gap-3">
-              <AppField label="Type" class="flex-1">
-                <Select v-model="form.type">
-                  <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem v-for="t in LEDGER_TYPES" :key="t.value" :value="t.value">
-                      {{ t.label }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </AppField>
-
-              <AppField v-if="form.type === 'CHARGE'" label="For" class="flex-1">
-                <Select v-model="form.category">
-                  <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem v-for="c in LEDGER_CATEGORIES" :key="c.value" :value="c.value">
-                      {{ c.label }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </AppField>
-            </div>
-
-            <div class="flex gap-3">
-              <AppField
-                v-slot="{ id }"
-                label="Amount"
-                class="flex-1"
-                description="Dollars, e.g. 650 or 20.50"
-              >
-                <Input :id="id" v-model="form.amount" inputmode="decimal" placeholder="650.00" required />
-              </AppField>
-              <AppField v-slot="{ id }" label="Date" class="flex-1" description="When it applies.">
-                <Input :id="id" v-model="form.occurredAt" type="date" />
-              </AppField>
-            </div>
-
-            <AppField
-              v-slot="{ id }"
-              label="Description"
-              description="What this is for. It appears on the resident's ledger."
-            >
-              <Input :id="id" v-model="form.description" placeholder="Rent 2026-08" required />
-            </AppField>
-
-            <!-- Append-only is a property of the record, not a technicality —
-                 say so where someone is about to write one. -->
-            <p class="text-muted-foreground text-xs">
-              Entries cannot be edited or deleted. A mistake is corrected by posting
-              another entry.
-            </p>
-
-            <DialogFooter class="border-t pt-4">
-              <Button type="button" variant="ghost" @click="open = false">Cancel</Button>
-              <Button type="submit" :disabled="busy">Post entry</Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <Button v-if="canManage" size="sm" variant="outline" @click="entryOpen = true">
+        <Plus class="size-4" /> Add entry
+      </Button>
     </div>
 
     <p v-if="pending" class="text-muted-foreground text-sm">Loading…</p>
@@ -247,5 +134,11 @@ async function submit() {
         </table>
       </div>
     </div>
+    <AppLedgerEntryDialog
+      v-model:open="entryOpen"
+      :resident-id="residentId"
+      :balance-cents="balanceCents"
+      @posted="onPosted"
+    />
   </section>
 </template>

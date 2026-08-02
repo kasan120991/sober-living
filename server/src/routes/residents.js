@@ -2,7 +2,7 @@ import { Router } from 'express'
 import { z } from 'zod'
 
 import { handler, parseBody } from '../lib/http.js'
-import { requireAuth, requireRole, requireStaff } from '../middleware/authorize.js'
+import { HttpError, requireAuth, requireRole, requireStaff } from '../middleware/authorize.js'
 import { STAFF_ROLE } from '../domain/constants.js'
 import {
   addContact,
@@ -151,7 +151,7 @@ router.get(
   '/available-beds',
   handler(async (req, res) => {
     const cohort = req.query.cohort
-    if (cohort !== 'MEN' && cohort !== 'WOMEN') throw new Error('cohort is required')
+    if (cohort !== 'MEN' && cohort !== 'WOMEN') throw new HttpError(400, 'cohort is required')
     res.json({ beds: await availableBeds(cohort) })
   }),
 )
@@ -226,7 +226,11 @@ router.post(
   handler(async (req, res) => {
     const data = parseBody(ledgerBody, req.body)
     const stayId = await activeStayIdFor(req.params.id)
-    if (!stayId) throw new Error('This resident has no active stay to bill.')
+    // HttpError, not Error: errorHandler replaces the message on anything >= 500,
+    // so a bare Error would reach the user as "Internal server error". This is a
+    // likely race from a row menu — the roster is a snapshot, and the resident
+    // may have been discharged in another tab since it was drawn.
+    if (!stayId) throw new HttpError(409, 'This resident has no active stay to bill.')
     const entry = await postEntry(
       {
         stayId,

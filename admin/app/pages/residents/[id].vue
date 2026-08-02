@@ -5,19 +5,21 @@ import { STAFF_ROLE } from '~/utils/roles.js'
 
 const route = useRoute()
 const { user } = useAuth()
-const {
-  getResident, dischargeResident, assignBed, releaseBed,
-  availableBeds, addContact, removeContact,
-} = useResidents()
+const { getResident, addContact, removeContact } = useResidents()
 const notify = useNotify()
 
 const resident = ref(null)
 const pending = ref(true)
 
+const { refresh: refreshNotifications } = useNotifications()
+
 async function load() {
   pending.value = true
   resident.value = await getResident(route.params.id)
   pending.value = false
+  // Same reason as the roster: releasing a bed here creates a notification and
+  // assigning one clears it, and nothing else would tell the bell.
+  refreshNotifications()
 }
 await load()
 
@@ -28,69 +30,12 @@ const isCurrent = computed(() => Boolean(resident.value?.current))
 const cohortLabel = computed(() => (resident.value?.cohort === 'MEN' ? 'Men' : 'Women'))
 const dischargeLabel = (t) => DISCHARGE_TYPES.find((d) => d.value === t)?.label ?? t
 
-// ── Bed ─────────────────────────────────────────────────────────────────────
+// ── Row-level actions ───────────────────────────────────────────────────────
+// The dialogs are components now, shared with the roster's row menu, so this
+// page holds only which one is open.
 const bedOpen = ref(false)
-const beds = ref([])
-const chosenBed = ref('')
-const bedPending = ref(false)
-const bedError = ref('')
-
-async function openBed() {
-  bedError.value = ''
-  beds.value = await availableBeds(resident.value.cohort)
-  chosenBed.value = beds.value[0]?.id ?? ''
-  bedOpen.value = true
-}
-
-async function saveBed() {
-  bedPending.value = true
-  bedError.value = ''
-  try {
-    await assignBed(resident.value.id, chosenBed.value)
-    notify.success('Bed assigned')
-    bedOpen.value = false
-    await load()
-  } catch (err) {
-    bedError.value = err?.data?.error ?? 'Could not assign the bed.'
-  } finally {
-    bedPending.value = false
-  }
-}
-
-async function freeBed() {
-  try {
-    await releaseBed(resident.value.id, 'released')
-    notify.success('Bed released')
-    await load()
-  } catch (err) {
-    notify.error(err?.data?.error ?? 'Could not release the bed.')
-  }
-}
-
-// ── Discharge ───────────────────────────────────────────────────────────────
+const releaseOpen = ref(false)
 const dischargeOpen = ref(false)
-const discharge = reactive({ dischargeType: 'SUCCESSFUL', dischargeReason: '' })
-const dischargePending = ref(false)
-const dischargeError = ref('')
-
-async function submitDischarge() {
-  dischargeError.value = ''
-  if (!discharge.dischargeReason.trim()) {
-    dischargeError.value = 'A discharge needs a reason.'
-    return
-  }
-  dischargePending.value = true
-  try {
-    await dischargeResident(resident.value.id, { ...discharge })
-    notify.success(`${resident.value.fullName} discharged`)
-    dischargeOpen.value = false
-    await load()
-  } catch (err) {
-    dischargeError.value = err?.data?.error ?? 'Could not complete the discharge.'
-  } finally {
-    dischargePending.value = false
-  }
-}
 
 // ── Emergency contacts ──────────────────────────────────────────────────────
 const contactOpen = ref(false)
@@ -184,10 +129,10 @@ const maskedSsn = computed(() =>
         </div>
 
         <div v-if="canManage" class="mt-2 flex gap-2">
-          <Button size="sm" variant="outline" @click="openBed">
+          <Button size="sm" variant="outline" @click="bedOpen = true">
             {{ resident.current.bed ? 'Move bed' : 'Assign a bed' }}
           </Button>
-          <Button v-if="resident.current.bed" size="sm" variant="ghost" @click="freeBed">
+          <Button v-if="resident.current.bed" size="sm" variant="ghost" @click="releaseOpen = true">
             Release bed
           </Button>
         </div>
@@ -337,74 +282,29 @@ const maskedSsn = computed(() =>
     </template>
   </div>
 
-  <!-- Assign / move bed -->
-  <Dialog v-model:open="bedOpen">
-    <DialogContent class="sm:max-w-[440px]">
-      <DialogHeader>
-        <DialogTitle>{{ resident?.current?.bed ? 'Move bed' : 'Assign a bed' }}</DialogTitle>
-      </DialogHeader>
-      <form class="flex flex-col gap-4" @submit.prevent="saveBed">
-        <Alert v-if="bedError" variant="destructive"><AlertDescription>{{ bedError }}</AlertDescription></Alert>
-        <AppField
-          label="Bed"
-          description="Free beds in matching-cohort apartments only. Moving closes the current assignment and opens a new one — the history keeps both."
-        >
-          <Select v-model="chosenBed">
-            <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem v-for="b in beds" :key="b.id" :value="b.id">{{ b.label }}</SelectItem>
-            </SelectContent>
-          </Select>
-        </AppField>
-        <p v-if="!beds.length" class="text-warning text-sm">No free beds in this cohort.</p>
-        <DialogFooter>
-          <Button type="button" variant="ghost" @click="bedOpen = false">Cancel</Button>
-          <Button type="submit" :disabled="bedPending || !beds.length">Save</Button>
-        </DialogFooter>
-      </form>
-    </DialogContent>
-  </Dialog>
+  <AppResidentBedDialog
+    v-model:open="bedOpen"
+    :resident-id="resident?.id"
+    :resident-name="resident?.fullName"
+    :cohort="resident?.cohort"
+    :has-bed="Boolean(resident?.current?.bed)"
+    @assigned="load"
+  />
 
-  <!-- Discharge -->
-  <Dialog v-model:open="dischargeOpen">
-    <DialogContent class="sm:max-w-[440px]">
-      <DialogHeader><DialogTitle>Discharge {{ resident?.fullName }}</DialogTitle></DialogHeader>
-      <form class="flex flex-col gap-4" @submit.prevent="submitDischarge">
-        <Alert v-if="dischargeError" variant="destructive">
-          <AlertDescription>{{ dischargeError }}</AlertDescription>
-        </Alert>
+  <AppResidentReleaseBedDialog
+    v-model:open="releaseOpen"
+    :resident-id="resident?.id"
+    :resident-name="resident?.fullName"
+    :bed-label="resident?.current?.bed ? `${resident.current.bed.apartmentName} · ${resident.current.bed.label}` : ''"
+    @released="load"
+  />
 
-        <AppField label="Type">
-          <Select v-model="discharge.dischargeType">
-            <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem v-for="d in DISCHARGE_TYPES" :key="d.value" :value="d.value">
-                {{ d.label }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </AppField>
-
-        <AppField
-          v-slot="{ id }"
-          label="Reason"
-          description="Required. This is the record that explains the discharge to a referral source or an audit."
-        >
-          <Textarea :id="id" v-model="discharge.dischargeReason" :rows="3" />
-        </AppField>
-
-        <p class="text-muted-foreground text-xs">
-          This closes the stay and frees the bed, and cannot be undone. A mistake is
-          corrected by a new intake, not by editing this one.
-        </p>
-
-        <DialogFooter>
-          <Button type="button" variant="ghost" @click="dischargeOpen = false">Cancel</Button>
-          <Button type="submit" :disabled="dischargePending">Discharge</Button>
-        </DialogFooter>
-      </form>
-    </DialogContent>
-  </Dialog>
+  <AppResidentDischargeDialog
+    v-model:open="dischargeOpen"
+    :resident-id="resident?.id"
+    :resident-name="resident?.fullName"
+    @discharged="load"
+  />
 
   <!-- Add contact -->
   <Dialog v-model:open="contactOpen">

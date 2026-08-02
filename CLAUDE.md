@@ -316,6 +316,19 @@ The preset owns colour and type. What it does not decide, and we do:
   actually wanted; the face itself resolved to whatever the device happened to have.
 - **Fonts are self-hosted** by `@nuxt/fonts`. The preset ships Google Fonts CDN `@import`s,
   which would put a third-party request on every page load.
+- **Row actions follow `AppBedTable`**: a trailing column, a ghost ellipsis
+  `DropdownMenuTrigger`, `DropdownMenuContent align="end"`, and **one dialog per table**
+  driven by a row ref — never one dialog per row. Dialogs are siblings of the table, never
+  inside a cell.
+- **Dialogs that more than one screen opens take `v-model:open` and take no trigger of
+  their own** — `AppResidentBedDialog`, `AppResidentDischargeDialog`,
+  `AppResidentReleaseBedDialog`, `AppLedgerEntryDialog`. A component that owns its trigger
+  can only be opened where it is rendered, which is what forced these out of the record
+  page. They take scalars (`residentId`, `residentName`, …), not a resident object: the
+  roster row and the record page hold different shapes.
+- **A table column list must not be an array of strings filtered with `filter(Boolean)`** —
+  an empty-string header for an actions column is falsy and gets silently dropped, leaving
+  a `th` short and the empty-state `colspan` off by one. Use objects with a `key`.
 - **The app header is shell, not page.** Trigger, breadcrumb, page actions, then the
   notification bell, always last. A page that wants a visible heading uses `AppPageHeading`
   in the body and moves its primary action there — the roster does. That repeats the

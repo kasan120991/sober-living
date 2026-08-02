@@ -1,4 +1,5 @@
 <script setup>
+import { Ellipsis } from '@lucide/vue'
 import { isoDate } from '~/composables/useResidents.js'
 import { money, inCredit } from '~/utils/money.js'
 import { STAFF_ROLE } from '~/utils/roles.js'
@@ -24,9 +25,13 @@ const query = ref('')
 const showDischarged = ref(false)
 const cohort = ref('ALL')
 
-const canIntake = computed(() =>
+// Presentation only. Every route behind these actions is gated server-side by
+// the same pair — see `managers` in server/src/routes/residents.js.
+const canManage = computed(() =>
   [STAFF_ROLE.ADMIN, STAFF_ROLE.HOUSE_MANAGER].includes(user.value?.role),
 )
+
+const { refresh: refreshNotifications } = useNotifications()
 
 async function load() {
   pending.value = true
@@ -35,6 +40,13 @@ async function load() {
   capacity.value = data.capacity
   unhoused.value = data.unhoused
   pending.value = false
+
+  // The bell only refreshes on navigation, and on this screen you never
+  // navigate — so assigning a bed used to leave a stale "no bed" notification,
+  // and releasing one used to not create the notification it should. Not
+  // awaited: the table must never wait on the bell, and refresh() swallows its
+  // own errors.
+  refreshNotifications()
 }
 await load()
 watch(showDischarged, load)
@@ -64,17 +76,36 @@ const searching = computed(() => query.value.trim().length > 0)
 // the page. It earns its place only on All, or when a search has crossed both.
 const showCohortColumn = computed(() => cohort.value === 'ALL' || searching.value)
 
+// Objects rather than strings, because `filter(Boolean)` silently drops an
+// empty-string header — which is how AppBedTable labels its actions column. A
+// dropped header means a th short and a colspan off by one, with nothing to
+// show for it in the markup.
 const columns = computed(() =>
   [
-    'Resident',
-    showCohortColumn.value ? 'Cohort' : null,
-    'Bed',
-    'Phase',
-    'Intake',
-    'Day',
-    'Balance',
+    { key: 'name', label: 'Resident' },
+    showCohortColumn.value ? { key: 'cohort', label: 'Cohort' } : null,
+    { key: 'bed', label: 'Bed' },
+    { key: 'phase', label: 'Phase' },
+    { key: 'intake', label: 'Intake' },
+    { key: 'day', label: 'Day' },
+    { key: 'balance', label: 'Balance', align: 'end' },
+    canManage.value ? { key: 'actions', label: 'Actions', srOnly: true, align: 'end' } : null,
   ].filter(Boolean),
 )
+
+// ── Row actions ─────────────────────────────────────────────────────────────
+// One dialog per table, not per row, each driven by a row ref — the same shape
+// AppBedTable uses. Reka renders DropdownMenuContent lazily, so twenty rows
+// mount twenty triggers and no menu bodies.
+const bedFor = ref(null)
+const releaseFor = ref(null)
+const payFor = ref(null)
+const dischargeFor = ref(null)
+
+// No clear-then-refetch helper: each dialog emits `update:open false` before its
+// done event, and the @update:open handler below already nulls the row ref. A
+// helper taking the ref would receive the unwrapped value in a template — and by
+// then it is null.
 
 const shownCapacity = computed(() => {
   if (!capacity.value) return []
@@ -85,7 +116,10 @@ const shownCapacity = computed(() => {
 
 <template>
   <AppPage title="Residents">
-    <div class="flex flex-col gap-4">
+    <!-- min-w-0: a flex child defaults to min-width:auto, which lets the table
+         push this column wider than the viewport and scroll the whole PAGE
+         sideways instead of scrolling inside its own container. -->
+    <div class="flex min-w-0 flex-col gap-4">
       <AppPageHeading title="Residents">
         <template #description>
           <span class="tabular-nums">{{ counts.ALL }}</span> in the house across two cohorts.
@@ -96,7 +130,7 @@ const shownCapacity = computed(() => {
           <template v-else>Everyone has a bed.</template>
         </template>
         <template #actions>
-          <AppResidentIntake v-if="canIntake" @intaken="load" />
+          <AppResidentIntake v-if="canManage" @intaken="load" />
         </template>
       </AppPageHeading>
 
@@ -134,12 +168,12 @@ const shownCapacity = computed(() => {
             <thead>
               <tr>
                 <th
-                  v-for="h in columns"
-                  :key="h"
+                  v-for="c in columns"
+                  :key="c.key"
                   class="border-border bg-card text-muted-foreground border-b px-3 py-2 text-left text-[10.5px] font-semibold tracking-[0.1em] whitespace-nowrap uppercase"
-                  :class="h === 'Balance' && 'text-right'"
+                  :class="c.align === 'end' && 'text-right'"
                 >
-                  {{ h }}
+                  <span :class="c.srOnly && 'sr-only'">{{ c.label }}</span>
                 </th>
               </tr>
             </thead>
@@ -206,6 +240,43 @@ const shownCapacity = computed(() => {
                   </span>
                   <span v-else class="text-muted-foreground/60">—</span>
                 </td>
+
+                <!-- Same shape as AppBedTable: ghost ellipsis, menu aligned to
+                     the end. Discharged rows keep the trigger but offer only
+                     the record — an empty cell reads as broken. -->
+                <td v-if="canManage" class="border-border h-12 border-b px-3 text-right">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger as-child>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        :aria-label="`Actions for ${r.fullName}`"
+                      >
+                        <Ellipsis class="size-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" class="w-52">
+                      <DropdownMenuItem as-child>
+                        <NuxtLink :to="`/residents/${r.id}`">Open record</NuxtLink>
+                      </DropdownMenuItem>
+
+                      <template v-if="r.status === 'ACTIVE'">
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem @select="bedFor = r">
+                          {{ r.bed ? 'Move bed…' : 'Assign a bed…' }}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem v-if="r.bed" @select="releaseFor = r">
+                          Release bed
+                        </DropdownMenuItem>
+                        <DropdownMenuItem @select="payFor = r">Record a payment…</DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem class="text-destructive" @select="dischargeFor = r">
+                          Discharge…
+                        </DropdownMenuItem>
+                      </template>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </td>
               </tr>
 
               <tr v-if="!filtered.length">
@@ -221,5 +292,47 @@ const shownCapacity = computed(() => {
         </div>
       </div>
     </div>
+
+    <!-- Siblings of the table, never inside a cell. Each is bound to a row ref
+         so there is one instance per table rather than one per row. -->
+    <AppResidentBedDialog
+      :open="Boolean(bedFor)"
+      :resident-id="bedFor?.id"
+      :resident-name="bedFor?.fullName"
+      :cohort="bedFor?.cohort"
+      :has-bed="Boolean(bedFor?.bed)"
+      @update:open="(v) => !v && (bedFor = null)"
+      @assigned="load"
+    />
+
+    <AppResidentReleaseBedDialog
+      :open="Boolean(releaseFor)"
+      :resident-id="releaseFor?.id"
+      :resident-name="releaseFor?.fullName"
+      :bed-label="releaseFor?.bed ? `${releaseFor.bed.apartmentName} · ${releaseFor.bed.label}` : ''"
+      @update:open="(v) => !v && (releaseFor = null)"
+      @released="load"
+    />
+
+    <!-- defaultType PAYMENT: taking money against a balance is the reason to
+         reach for this from a list. balanceCents comes from the row, so the
+         dialog fetches nothing. -->
+    <AppLedgerEntryDialog
+      :open="Boolean(payFor)"
+      :resident-id="payFor?.id"
+      :resident-name="payFor?.fullName"
+      :balance-cents="payFor?.balanceCents"
+      default-type="PAYMENT"
+      @update:open="(v) => !v && (payFor = null)"
+      @posted="load"
+    />
+
+    <AppResidentDischargeDialog
+      :open="Boolean(dischargeFor)"
+      :resident-id="dischargeFor?.id"
+      :resident-name="dischargeFor?.fullName"
+      @update:open="(v) => !v && (dischargeFor = null)"
+      @discharged="load"
+    />
   </AppPage>
 </template>
