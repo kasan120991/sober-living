@@ -192,9 +192,12 @@ given us.
 | `admin/` | Staff-facing app — admin, house manager, tech. Nuxt 4 + Nuxt UI v4 + Tailwind v4. |
 | `client/` | Resident-facing app. Same stack. Empty until the staff side is real. |
 
-- **Nuxt UI v4** for components, themed with our own tokens — **decided: no hand-built
-  component kit.** See `design.md`, which is the source of truth for all UI work.
-- **Tailwind CSS v4** for layout and one-off chrome, sharing the same `@theme` tokens.
+- **shadcn-vue** for components, themed by the `a6OmWiie` preset. Components are
+  **vendored** into `admin/app/components/ui/` — we own them, so restyling means editing
+  the component rather than overriding it. See `design.md`, the source of truth for UI.
+- **Tailwind CSS v4** via `@tailwindcss/vite`.
+- **Both light and dark themes.** The earlier decision to defer dark mode is reversed —
+  the preset defines both.
 - **Prisma 7** over **PostgreSQL**, via the `@prisma/adapter-pg` driver adapter
   (`PrismaPg`). Prisma 7 uses driver adapters — there is no `mysql2` or `pg` usage
   anywhere outside `db/client.js`.
@@ -463,6 +466,9 @@ no longer the default.
 ## Conventions
 
 - **Plain JavaScript, ES modules.** No TypeScript, no build step on the server.
+  One exception: the vendored shadcn components in `admin/app/components/ui/` are
+  TypeScript, because shadcn's sidebar does not survive the CLI's TS→JS conversion. That is
+  library code we own rather than code we write, and Nuxt compiles it without extra setup.
 - **Domain states are frozen constant objects, never loose strings.** Without TS enums
   this is how we keep `'refused'` from silently becoming `'Refused'` in one code path:
 

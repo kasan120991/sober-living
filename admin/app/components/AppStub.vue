@@ -9,12 +9,10 @@ defineProps({
 </script>
 
 <template>
-  <div
-    class="rounded-[var(--ui-radius)] border border-[var(--color-hairline)] bg-[var(--color-elevated)] p-5"
-  >
-    <p class="font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--color-mute)]">
+  <div class="bg-card rounded-md border p-5">
+    <p class="text-muted-foreground text-[11px] uppercase tracking-wider">
       {{ module }}
     </p>
-    <p class="mt-2 max-w-[65ch] text-sm text-[var(--color-body)]">{{ summary }}</p>
+    <p class="mt-2 max-w-[65ch] text-sm">{{ summary }}</p>
   </div>
 </template>

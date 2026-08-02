@@ -1,5 +1,5 @@
 <script setup>
-// Variant A (centered card). The one page outside the app shell.
+// The one page outside the app shell.
 definePageMeta({ layout: false })
 
 const { signIn } = useAuth()
@@ -26,78 +26,58 @@ async function onSubmit() {
 </script>
 
 <template>
-  <div class="min-h-screen grid place-items-center bg-[var(--color-canvas)] p-5">
-    <div
-      class="w-full max-w-[372px] rounded-[10px] border border-[var(--color-hairline)] bg-[var(--color-elevated)] p-7 flex flex-col gap-[22px]"
-    >
-      <div class="flex flex-col gap-[18px]">
-        <div class="flex items-center gap-[9px]">
-          <span class="grid size-[22px] place-items-center rounded-[5px] bg-[var(--color-ink)]">
-            <span class="size-2 rounded-[2px] bg-[var(--color-elevated)]" />
+  <div class="bg-muted/40 grid min-h-svh place-items-center p-5">
+    <div class="bg-card w-full max-w-[380px] rounded-xl border p-7 shadow-sm">
+      <div class="flex flex-col gap-5">
+        <div class="flex items-center gap-2.5">
+          <span class="bg-primary text-primary-foreground grid size-8 place-items-center rounded-lg">
+            <span class="bg-primary-foreground size-2 rounded-[2px]" />
           </span>
-          <span class="text-[14.5px] font-semibold tracking-[-0.02em] text-[var(--color-ink)]">
-            SoberLife
-          </span>
+          <span class="font-heading text-[15px] font-semibold tracking-tight">SoberLife</span>
         </div>
+
         <div>
-          <h1 class="text-[22px] font-semibold tracking-[-0.028em] text-[var(--color-ink)]">
-            Sign in
-          </h1>
-          <p class="mt-1.5 text-[13.5px] text-[var(--color-mute)]">
-            Staff access to house operations.
-          </p>
+          <h1 class="font-heading text-2xl font-semibold tracking-tight">Sign in</h1>
+          <p class="text-muted-foreground mt-1 text-sm">Staff access to house operations.</p>
         </div>
-      </div>
 
-      <UAlert
-        v-if="error"
-        color="error"
-        variant="soft"
-        icon="i-lucide-circle-alert"
-        :description="error"
-      />
+        <Alert v-if="error" variant="destructive">
+          <AlertDescription>{{ error }}</AlertDescription>
+        </Alert>
 
-      <form class="flex flex-col gap-[15px]" @submit.prevent="onSubmit">
-        <UFormField label="Email" name="email">
-          <UInput
-            v-model="email"
-            type="email"
-            autocomplete="username"
-            placeholder="you@facility.org"
-            size="xl"
-            class="w-full"
-            required
-          />
-        </UFormField>
+        <form class="flex flex-col gap-4" @submit.prevent="onSubmit">
+          <AppField v-slot="{ id }" label="Email">
+            <Input
+              :id="id"
+              v-model="email"
+              type="email"
+              autocomplete="username"
+              placeholder="you@facility.org"
+              required
+            />
+          </AppField>
 
-        <UFormField label="Password" name="password">
-          <UInput
-            v-model="password"
-            type="password"
-            autocomplete="current-password"
-            placeholder="••••••••••"
-            size="xl"
-            class="w-full"
-            required
-          />
-        </UFormField>
+          <AppField v-slot="{ id }" label="Password">
+            <Input
+              :id="id"
+              v-model="password"
+              type="password"
+              autocomplete="current-password"
+              placeholder="••••••••••"
+              required
+            />
+          </AppField>
 
-        <UButton
-          type="submit"
-          color="primary"
-          size="xl"
-          block
-          :loading="pending"
-          :label="pending ? 'Signing in…' : 'Sign in'"
-        />
-      </form>
+          <Button type="submit" :disabled="pending" class="w-full">
+            {{ pending ? 'Signing in…' : 'Sign in' }}
+          </Button>
+        </form>
 
-      <div class="flex items-center justify-between pt-1">
-        <!-- No 'remember me': staff devices are shared, and a persistent
+        <!-- No "remember me": staff devices are shared, and a persistent
              session on a hallway phone is what session timeouts prevent. -->
-        <span class="font-mono text-[11px] uppercase tracking-[0.06em] text-[var(--color-faint)]">
+        <p class="text-muted-foreground text-[11px] uppercase tracking-wider">
           Sessions end after 20 min idle
-        </span>
+        </p>
       </div>
     </div>
   </div>

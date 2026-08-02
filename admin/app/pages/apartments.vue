@@ -22,32 +22,25 @@ const listHiddenOnMobile = computed(() => Boolean(selectedId.value))
 </script>
 
 <template>
-  <UDashboardPanel
-    id="apartment-list"
-    :default-size="26"
-    :min-size="20"
-    :max-size="34"
-    resizable
-    :class="listHiddenOnMobile ? 'hidden lg:flex' : 'flex'"
-  >
-    <template #header>
-      <UDashboardNavbar
-        title="Apartments & Beds"
-        :ui="{
-          root: 'border-b border-[var(--color-hairline)] bg-[var(--color-elevated)]',
-          title: 'text-[15px] font-semibold tracking-[-0.02em] text-[var(--color-ink)]',
-        }"
-      >
-        <template #right>
-          <AppApartmentCreate @created="refresh" />
-        </template>
-      </UDashboardNavbar>
-    </template>
+  <header class="bg-background sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b px-4">
+    <SidebarTrigger class="-ml-1" />
+    <Separator orientation="vertical" class="mr-2 h-4" />
+    <h1 class="font-heading text-[15px] font-semibold tracking-tight">Apartments &amp; Beds</h1>
+    <div class="ml-auto">
+      <AppApartmentCreate @created="refresh" />
+    </div>
+  </header>
 
-    <template #body>
+  <div class="flex min-h-0 flex-1">
+    <aside
+      class="w-full shrink-0 overflow-y-auto border-r lg:w-[300px]"
+      :class="listHiddenOnMobile ? 'hidden lg:block' : 'block'"
+    >
       <AppApartmentList :apartments="apartments" :pending="pending" :selected-id="selectedId" />
-    </template>
-  </UDashboardPanel>
+    </aside>
 
-  <NuxtPage />
+    <div class="min-w-0 flex-1 overflow-y-auto">
+      <NuxtPage />
+    </div>
+  </div>
 </template>

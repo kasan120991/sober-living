@@ -1,19 +1,15 @@
 <script setup>
+import { ArrowLeft, Plus, X } from '@lucide/vue'
 import { DISCHARGE_TYPES, isoDate } from '~/composables/useResidents.js'
 import { STAFF_ROLE } from '~/utils/roles.js'
 
 const route = useRoute()
 const { user } = useAuth()
 const {
-  getResident,
-  dischargeResident,
-  assignBed,
-  releaseBed,
-  availableBeds,
-  addContact,
-  removeContact,
+  getResident, dischargeResident, assignBed, releaseBed,
+  availableBeds, addContact, removeContact,
 } = useResidents()
-const toast = useToast()
+const notify = useNotify()
 
 const resident = ref(null)
 const pending = ref(true)
@@ -30,6 +26,7 @@ const canManage = computed(() =>
 )
 const isCurrent = computed(() => Boolean(resident.value?.current))
 const cohortLabel = computed(() => (resident.value?.cohort === 'MEN' ? 'Men' : 'Women'))
+const dischargeLabel = (t) => DISCHARGE_TYPES.find((d) => d.value === t)?.label ?? t
 
 // ── Bed ─────────────────────────────────────────────────────────────────────
 const bedOpen = ref(false)
@@ -50,7 +47,7 @@ async function saveBed() {
   bedError.value = ''
   try {
     await assignBed(resident.value.id, chosenBed.value)
-    toast.add({ title: 'Bed assigned', color: 'success', icon: 'i-lucide-check' })
+    notify.success('Bed assigned')
     bedOpen.value = false
     await load()
   } catch (err) {
@@ -63,10 +60,10 @@ async function saveBed() {
 async function freeBed() {
   try {
     await releaseBed(resident.value.id, 'released')
-    toast.add({ title: 'Bed released', color: 'success' })
+    notify.success('Bed released')
     await load()
   } catch (err) {
-    toast.add({ title: err?.data?.error ?? 'Could not release the bed.', color: 'error' })
+    notify.error(err?.data?.error ?? 'Could not release the bed.')
   }
 }
 
@@ -85,7 +82,7 @@ async function submitDischarge() {
   dischargePending.value = true
   try {
     await dischargeResident(resident.value.id, { ...discharge })
-    toast.add({ title: `${resident.value.fullName} discharged`, color: 'success' })
+    notify.success(`${resident.value.fullName} discharged`)
     dischargeOpen.value = false
     await load()
   } catch (err) {
@@ -108,7 +105,7 @@ async function submitContact() {
     contactOpen.value = false
     await load()
   } catch (err) {
-    toast.add({ title: err?.data?.error ?? 'Could not add the contact.', color: 'error' })
+    notify.error(err?.data?.error ?? 'Could not add the contact.')
   } finally {
     contactPending.value = false
   }
@@ -119,325 +116,247 @@ async function dropContact(id) {
     await removeContact(id)
     await load()
   } catch (err) {
-    toast.add({ title: err?.data?.error ?? 'Could not remove the contact.', color: 'error' })
+    notify.error(err?.data?.error ?? 'Could not remove the contact.')
   }
 }
 
-const dischargeLabel = (t) => DISCHARGE_TYPES.find((d) => d.value === t)?.label ?? t
+const FACTS = [
+  { k: 'Program', v: (r) => r.current.program?.name ?? '—' },
+  { k: 'Intake', v: (r) => isoDate(r.current.intakeAt), mono: true },
+  { k: 'Expected out', v: (r) => isoDate(r.current.expectedDischargeAt) ?? '—', mono: true },
+  { k: 'Day', v: (r) => r.current.dayOfStay, mono: true },
+  { k: 'Referral', v: (r) => r.current.referralSource ?? '—' },
+]
 </script>
 
 <template>
-  <UDashboardPanel id="resident-detail">
-    <template #header>
-      <UDashboardNavbar
-        :title="resident?.fullName ?? 'Resident'"
-        :ui="{
-          root: 'border-b border-[var(--color-hairline)] bg-[var(--color-elevated)]',
-          title: 'text-[15px] font-semibold tracking-[-0.02em] text-[var(--color-ink)]',
-        }"
-      >
-        <template #leading>
-          <UButton
-            to="/residents"
-            icon="i-lucide-arrow-left"
-            color="neutral"
-            variant="ghost"
-            size="sm"
-            aria-label="Back to residents"
-          />
-        </template>
+  <header class="bg-background sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b px-4">
+    <Button as-child variant="ghost" size="sm" aria-label="Back to residents">
+      <NuxtLink to="/residents"><ArrowLeft class="size-4" /></NuxtLink>
+    </Button>
+    <h1 class="font-heading text-[15px] font-semibold tracking-tight">
+      {{ resident?.fullName ?? 'Resident' }}
+    </h1>
+    <div v-if="resident" class="ml-auto flex items-center gap-3">
+      <Badge variant="outline" class="text-[10px] uppercase tracking-wider">
+        {{ cohortLabel }}
+      </Badge>
+      <Badge v-if="!isCurrent" variant="secondary">Discharged</Badge>
+      <Button v-if="canManage && isCurrent" size="sm" variant="outline" @click="dischargeOpen = true">
+        Discharge
+      </Button>
+    </div>
+  </header>
 
-        <template #right>
-          <div v-if="resident" class="flex items-center gap-3">
-            <span
-              class="rounded-[3px] border border-[var(--color-hairline)] px-1.5 py-px font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--color-body)]"
-            >
-              {{ cohortLabel }}
+  <div class="flex flex-1 flex-col gap-7 p-4">
+    <div v-if="pending" class="text-muted-foreground text-sm">Loading…</div>
+
+    <template v-else-if="resident">
+      <!-- Current stay -->
+      <section v-if="resident.current">
+        <div class="bg-card grid grid-cols-2 gap-x-6 gap-y-4 rounded-md border p-4 sm:grid-cols-3 lg:grid-cols-6">
+          <div class="flex flex-col">
+            <span class="text-muted-foreground text-[11.5px]">Bed</span>
+            <span v-if="resident.current.bed" class="font-mono text-[12.5px]">
+              {{ resident.current.bed.apartmentName }} · {{ resident.current.bed.label }}
             </span>
-            <span
-              v-if="!isCurrent"
-              class="rounded-full border border-[var(--color-hairline)] px-2 py-0.5 text-xs text-[var(--color-mute)]"
-            >
-              Discharged
+            <span v-else class="text-warning text-[13px] font-medium">Awaiting a bed</span>
+          </div>
+          <div v-for="f in FACTS" :key="f.k" class="flex flex-col">
+            <span class="text-muted-foreground text-[11.5px]">{{ f.k }}</span>
+            <span :class="f.mono ? 'font-mono text-[12.5px] tabular-nums' : 'text-[13.5px] font-medium'">
+              {{ f.v(resident) }}
             </span>
-            <UButton
-              v-if="canManage && isCurrent"
-              color="neutral"
-              variant="outline"
-              size="sm"
-              label="Discharge"
-              @click="dischargeOpen = true"
-            />
           </div>
-        </template>
-      </UDashboardNavbar>
-    </template>
+        </div>
 
-    <template #body>
-      <div v-if="pending" class="text-sm text-[var(--color-mute)]">Loading…</div>
+        <div v-if="canManage" class="mt-2 flex gap-2">
+          <Button size="sm" variant="outline" @click="openBed">
+            {{ resident.current.bed ? 'Move bed' : 'Assign a bed' }}
+          </Button>
+          <Button v-if="resident.current.bed" size="sm" variant="ghost" @click="freeBed">
+            Release bed
+          </Button>
+        </div>
+      </section>
 
-      <div v-else-if="resident" class="flex flex-col gap-7">
-        <!-- Current stay -->
-        <section v-if="resident.current">
-          <div
-            class="grid grid-cols-2 gap-x-6 gap-y-4 rounded-[var(--ui-radius)] border border-[var(--color-hairline)] bg-[var(--color-elevated)] p-4 sm:grid-cols-3 lg:grid-cols-4"
-          >
-            <div class="flex flex-col">
-              <span class="text-[11.5px] text-[var(--color-mute)]">Bed</span>
-              <span v-if="resident.current.bed" class="font-mono text-[12.5px] text-[var(--color-ink)]">
-                {{ resident.current.bed.apartmentName }} · {{ resident.current.bed.label }}
-              </span>
-              <span v-else class="text-[13px] font-medium text-[var(--color-warning-deep)]">
-                Awaiting a bed
-              </span>
-            </div>
-            <div class="flex flex-col">
-              <span class="text-[11.5px] text-[var(--color-mute)]">Program</span>
-              <span class="text-[13.5px] font-medium text-[var(--color-ink)]">
-                {{ resident.current.program?.name ?? '—' }}
-              </span>
-            </div>
-            <div class="flex flex-col">
-              <span class="text-[11.5px] text-[var(--color-mute)]">Intake</span>
-              <span class="font-mono text-[12.5px] tabular-nums text-[var(--color-ink)]">
-                {{ isoDate(resident.current.intakeAt) }}
-              </span>
-            </div>
-            <div class="flex flex-col">
-              <span class="text-[11.5px] text-[var(--color-mute)]">Expected out</span>
-              <span class="font-mono text-[12.5px] tabular-nums text-[var(--color-ink)]">
-                {{ isoDate(resident.current.expectedDischargeAt) ?? '—' }}
-              </span>
-            </div>
-            <div class="flex flex-col">
-              <span class="text-[11.5px] text-[var(--color-mute)]">Day</span>
-              <span class="font-mono text-[12.5px] tabular-nums text-[var(--color-ink)]">
-                {{ resident.current.dayOfStay }}
-              </span>
-            </div>
-            <div class="flex flex-col">
-              <span class="text-[11.5px] text-[var(--color-mute)]">Referral</span>
-              <span class="text-[13.5px] text-[var(--color-ink)]">
-                {{ resident.current.referralSource ?? '—' }}
-              </span>
-            </div>
-          </div>
-
-          <div v-if="canManage" class="mt-2 flex gap-2">
-            <UButton
-              size="sm"
-              color="neutral"
-              variant="outline"
-              :label="resident.current.bed ? 'Move bed' : 'Assign a bed'"
-              @click="openBed"
-            />
-            <UButton
-              v-if="resident.current.bed"
-              size="sm"
-              color="neutral"
-              variant="ghost"
-              label="Release bed"
-              @click="freeBed"
-            />
-          </div>
-        </section>
-
-        <!-- Emergency contacts -->
-        <section class="flex flex-col gap-3">
-          <div class="flex items-center justify-between gap-3">
-            <h2 class="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--color-mute)]">
-              Emergency contacts
-            </h2>
-            <UButton
-              v-if="canManage"
-              icon="i-lucide-plus"
-              size="sm"
-              color="neutral"
-              variant="outline"
-              label="Add"
-              @click="contactOpen = true"
-            />
-          </div>
-
-          <div
-            v-if="resident.emergencyContacts.length"
-            class="overflow-hidden rounded-[var(--ui-radius)] border border-[var(--color-hairline)]"
-          >
-            <div
-              v-for="c in resident.emergencyContacts"
-              :key="c.id"
-              class="flex min-h-12 items-center justify-between gap-3 border-b border-[var(--color-hairline-soft)] bg-[var(--color-elevated)] px-3 py-2 last:border-b-0"
-            >
-              <div class="min-w-0">
-                <span class="text-[13.5px] text-[var(--color-ink)]">{{ c.name }}</span>
-                <span v-if="c.relationship" class="text-[12.5px] text-[var(--color-mute)]">
-                  · {{ c.relationship }}
-                </span>
-                <span v-if="c.isPrimary" class="ms-2 font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--color-mute)]">
-                  Primary
-                </span>
-              </div>
-              <div class="flex items-center gap-2">
-                <span class="font-mono text-[12.5px] text-[var(--color-body)]">{{ c.phone }}</span>
-                <UButton
-                  v-if="canManage"
-                  icon="i-lucide-x"
-                  color="neutral"
-                  variant="ghost"
-                  size="xs"
-                  :aria-label="`Remove ${c.name}`"
-                  @click="dropContact(c.id)"
-                />
-              </div>
-            </div>
-          </div>
-          <p v-else class="text-sm text-[var(--color-mute)]">No emergency contacts recorded.</p>
-          <p class="text-xs text-[var(--color-mute)]">
-            Being listed here does not authorise disclosure to that person.
-          </p>
-        </section>
-
-        <!-- Stay history -->
-        <section class="flex flex-col gap-3">
-          <h2 class="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--color-mute)]">
-            Stay history
+      <!-- Emergency contacts -->
+      <section class="flex flex-col gap-3">
+        <div class="flex items-center justify-between gap-3">
+          <h2 class="text-muted-foreground text-[11px] font-semibold uppercase tracking-wider">
+            Emergency contacts
           </h2>
-          <div class="overflow-hidden rounded-[var(--ui-radius)] border border-[var(--color-hairline)]">
-            <div class="overflow-x-auto">
-              <table class="w-full border-collapse text-[13.5px]">
-                <thead>
-                  <tr>
-                    <th
-                      v-for="h in ['Intake', 'Discharge', 'Type', 'Reason', 'Beds']"
-                      :key="h"
-                      class="whitespace-nowrap border-b border-[var(--color-hairline)] bg-[var(--color-elevated)] px-3 py-2 text-left font-mono text-[10.5px] font-semibold uppercase tracking-[0.1em] text-[var(--color-mute)]"
-                    >
-                      {{ h }}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="s in resident.stays" :key="s.id" class="bg-[var(--color-elevated)]">
-                    <td class="h-12 whitespace-nowrap border-b border-[var(--color-hairline-soft)] px-3 font-mono text-[12.5px] tabular-nums">
-                      {{ isoDate(s.intakeAt) }}
-                    </td>
-                    <td class="h-12 whitespace-nowrap border-b border-[var(--color-hairline-soft)] px-3">
-                      <span v-if="s.dischargedAt" class="font-mono text-[12.5px] tabular-nums">
-                        {{ isoDate(s.dischargedAt) }}
-                      </span>
-                      <span
-                        v-else
-                        class="inline-flex items-center rounded-full border border-dashed border-[var(--color-mute)] px-2 py-0.5 text-xs"
-                      >
-                        Current
-                      </span>
-                    </td>
-                    <td class="h-12 whitespace-nowrap border-b border-[var(--color-hairline-soft)] px-3">
-                      {{ s.dischargeType ? dischargeLabel(s.dischargeType) : '—' }}
-                    </td>
-                    <td class="h-12 max-w-[32ch] truncate border-b border-[var(--color-hairline-soft)] px-3 text-[var(--color-body)]">
-                      {{ s.dischargeReason ?? '—' }}
-                    </td>
-                    <td class="h-12 whitespace-nowrap border-b border-[var(--color-hairline-soft)] px-3 font-mono text-[12px]">
-                      {{ s.beds.map((b) => b.label).join(', ') || '—' }}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+          <Button v-if="canManage" size="sm" variant="outline" @click="contactOpen = true">
+            <Plus class="size-4" /> Add
+          </Button>
+        </div>
+
+        <div v-if="resident.emergencyContacts.length" class="overflow-hidden rounded-md border">
+          <div
+            v-for="c in resident.emergencyContacts"
+            :key="c.id"
+            class="bg-card flex min-h-12 items-center justify-between gap-3 border-b px-3 py-2 last:border-b-0"
+          >
+            <div class="min-w-0">
+              <span class="text-sm">{{ c.name }}</span>
+              <span v-if="c.relationship" class="text-muted-foreground text-xs"> · {{ c.relationship }}</span>
+              <span v-if="c.isPrimary" class="text-muted-foreground ms-2 text-[10px] uppercase tracking-wider">
+                Primary
+              </span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="font-mono text-[12.5px]">{{ c.phone }}</span>
+              <Button v-if="canManage" variant="ghost" size="sm" :aria-label="`Remove ${c.name}`"
+                      @click="dropContact(c.id)">
+                <X class="size-4" />
+              </Button>
             </div>
           </div>
-          <p v-if="resident.stays.length > 1" class="text-xs text-[var(--color-mute)]">
-            A returning resident gets a new stay — this record is the person, and persists across all of them.
-          </p>
-        </section>
-      </div>
+        </div>
+        <p v-else class="text-muted-foreground text-sm">No emergency contacts recorded.</p>
+        <p class="text-muted-foreground text-xs">
+          Being listed here does not authorise disclosure to that person.
+        </p>
+      </section>
+
+      <!-- Stay history -->
+      <section class="flex flex-col gap-3">
+        <h2 class="text-muted-foreground text-[11px] font-semibold uppercase tracking-wider">
+          Stay history
+        </h2>
+        <div class="overflow-hidden rounded-md border">
+          <div class="overflow-x-auto">
+            <table class="w-full border-collapse text-sm">
+              <thead>
+                <tr>
+                  <th v-for="h in ['Intake', 'Discharge', 'Type', 'Reason', 'Beds']" :key="h"
+                      class="bg-card text-muted-foreground whitespace-nowrap border-b px-3 py-2 text-left text-[10.5px] font-semibold uppercase tracking-wider">
+                    {{ h }}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="s in resident.stays" :key="s.id" class="bg-card">
+                  <td class="h-12 whitespace-nowrap border-b px-3 font-mono text-[12.5px] tabular-nums">
+                    {{ isoDate(s.intakeAt) }}
+                  </td>
+                  <td class="h-12 whitespace-nowrap border-b px-3">
+                    <span v-if="s.dischargedAt" class="font-mono text-[12.5px] tabular-nums">
+                      {{ isoDate(s.dischargedAt) }}
+                    </span>
+                    <Badge v-else variant="outline" class="border-dashed">Current</Badge>
+                  </td>
+                  <td class="h-12 whitespace-nowrap border-b px-3">
+                    {{ s.dischargeType ? dischargeLabel(s.dischargeType) : '—' }}
+                  </td>
+                  <td class="text-muted-foreground h-12 max-w-[32ch] truncate border-b px-3">
+                    {{ s.dischargeReason ?? '—' }}
+                  </td>
+                  <td class="h-12 whitespace-nowrap border-b px-3 font-mono text-[12px]">
+                    {{ s.beds.map((b) => b.label).join(', ') || '—' }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <p v-if="resident.stays.length > 1" class="text-muted-foreground text-xs">
+          A returning resident gets a new stay — this record is the person, and persists across all of them.
+        </p>
+      </section>
     </template>
-  </UDashboardPanel>
+  </div>
 
   <!-- Assign / move bed -->
-  <UModal v-model:open="bedOpen" :title="resident?.current?.bed ? 'Move bed' : 'Assign a bed'">
-    <template #body>
+  <Dialog v-model:open="bedOpen">
+    <DialogContent class="sm:max-w-[440px]">
+      <DialogHeader>
+        <DialogTitle>{{ resident?.current?.bed ? 'Move bed' : 'Assign a bed' }}</DialogTitle>
+      </DialogHeader>
       <form class="flex flex-col gap-4" @submit.prevent="saveBed">
-        <UAlert v-if="bedError" color="error" variant="soft" :description="bedError" />
-        <UFormField
+        <Alert v-if="bedError" variant="destructive"><AlertDescription>{{ bedError }}</AlertDescription></Alert>
+        <AppField
           label="Bed"
-          name="bed"
           description="Free beds in matching-cohort apartments only. Moving closes the current assignment and opens a new one — the history keeps both."
         >
-          <USelect
-            v-model="chosenBed"
-            :items="beds.map((b) => ({ label: b.label, value: b.id }))"
-            value-key="value"
-            class="w-full"
-          />
-        </UFormField>
-        <p v-if="!beds.length" class="text-sm text-[var(--color-warning-deep)]">
-          No free beds in this cohort.
-        </p>
-        <div class="flex justify-end gap-2">
-          <UButton color="neutral" variant="ghost" label="Cancel" @click="bedOpen = false" />
-          <UButton type="submit" color="primary" :loading="bedPending" :disabled="!beds.length" label="Save" />
-        </div>
+          <Select v-model="chosenBed">
+            <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="b in beds" :key="b.id" :value="b.id">{{ b.label }}</SelectItem>
+            </SelectContent>
+          </Select>
+        </AppField>
+        <p v-if="!beds.length" class="text-warning text-sm">No free beds in this cohort.</p>
+        <DialogFooter>
+          <Button type="button" variant="ghost" @click="bedOpen = false">Cancel</Button>
+          <Button type="submit" :disabled="bedPending || !beds.length">Save</Button>
+        </DialogFooter>
       </form>
-    </template>
-  </UModal>
+    </DialogContent>
+  </Dialog>
 
   <!-- Discharge -->
-  <UModal v-model:open="dischargeOpen" :title="`Discharge ${resident?.fullName ?? ''}`">
-    <template #body>
+  <Dialog v-model:open="dischargeOpen">
+    <DialogContent class="sm:max-w-[440px]">
+      <DialogHeader><DialogTitle>Discharge {{ resident?.fullName }}</DialogTitle></DialogHeader>
       <form class="flex flex-col gap-4" @submit.prevent="submitDischarge">
-        <UAlert v-if="dischargeError" color="error" variant="soft" :description="dischargeError" />
+        <Alert v-if="dischargeError" variant="destructive">
+          <AlertDescription>{{ dischargeError }}</AlertDescription>
+        </Alert>
 
-        <UFormField label="Type" name="dischargeType">
-          <USelect
-            v-model="discharge.dischargeType"
-            :items="DISCHARGE_TYPES"
-            value-key="value"
-            class="w-full"
-          />
-        </UFormField>
+        <AppField label="Type">
+          <Select v-model="discharge.dischargeType">
+            <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="d in DISCHARGE_TYPES" :key="d.value" :value="d.value">
+                {{ d.label }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </AppField>
 
-        <UFormField
+        <AppField
+          v-slot="{ id }"
           label="Reason"
-          name="dischargeReason"
           description="Required. This is the record that explains the discharge to a referral source or an audit."
         >
-          <UTextarea v-model="discharge.dischargeReason" :rows="3" class="w-full" />
-        </UFormField>
+          <Textarea :id="id" v-model="discharge.dischargeReason" :rows="3" />
+        </AppField>
 
-        <p class="text-xs text-[var(--color-mute)]">
+        <p class="text-muted-foreground text-xs">
           This closes the stay and frees the bed, and cannot be undone. A mistake is
           corrected by a new intake, not by editing this one.
         </p>
 
-        <div class="flex justify-end gap-2">
-          <UButton color="neutral" variant="ghost" label="Cancel" @click="dischargeOpen = false" />
-          <UButton type="submit" color="primary" :loading="dischargePending" label="Discharge" />
-        </div>
+        <DialogFooter>
+          <Button type="button" variant="ghost" @click="dischargeOpen = false">Cancel</Button>
+          <Button type="submit" :disabled="dischargePending">Discharge</Button>
+        </DialogFooter>
       </form>
-    </template>
-  </UModal>
+    </DialogContent>
+  </Dialog>
 
   <!-- Add contact -->
-  <UModal v-model:open="contactOpen" title="Add emergency contact">
-    <template #body>
+  <Dialog v-model:open="contactOpen">
+    <DialogContent class="sm:max-w-[440px]">
+      <DialogHeader><DialogTitle>Add emergency contact</DialogTitle></DialogHeader>
       <form class="flex flex-col gap-4" @submit.prevent="submitContact">
         <div class="flex gap-3">
-          <UFormField label="Name" name="name" class="flex-1">
-            <UInput v-model="contact.name" class="w-full" required />
-          </UFormField>
-          <UFormField label="Relationship" name="relationship" class="w-36">
-            <UInput v-model="contact.relationship" placeholder="Parent" class="w-full" />
-          </UFormField>
+          <AppField v-slot="{ id }" label="Name" class="flex-1">
+            <Input :id="id" v-model="contact.name" required />
+          </AppField>
+          <AppField v-slot="{ id }" label="Relationship" class="w-36">
+            <Input :id="id" v-model="contact.relationship" placeholder="Parent" />
+          </AppField>
         </div>
-        <UFormField label="Phone" name="phone">
-          <UInput v-model="contact.phone" class="w-full" required />
-        </UFormField>
-        <div class="flex justify-end gap-2">
-          <UButton color="neutral" variant="ghost" label="Cancel" @click="contactOpen = false" />
-          <UButton type="submit" color="primary" :loading="contactPending" label="Add" />
-        </div>
+        <AppField v-slot="{ id }" label="Phone">
+          <Input :id="id" v-model="contact.phone" required />
+        </AppField>
+        <DialogFooter>
+          <Button type="button" variant="ghost" @click="contactOpen = false">Cancel</Button>
+          <Button type="submit" :disabled="contactPending">Add</Button>
+        </DialogFooter>
       </form>
-    </template>
-  </UModal>
+    </DialogContent>
+  </Dialog>
 </template>

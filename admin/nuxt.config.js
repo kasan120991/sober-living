@@ -1,34 +1,52 @@
-// Plain JavaScript, not TypeScript — see CLAUDE.md.
+import tailwindcss from '@tailwindcss/vite'
+
+// Plain JavaScript, not TypeScript — see CLAUDE.md. The vendored shadcn-vue
+// components under app/components/ui are the one exception: their sidebar does
+// not survive the CLI's TS→JS conversion, and they are library code we own
+// rather than code we write.
 export default defineNuxtConfig({
   compatibilityDate: '2026-08-01',
   devtools: { enabled: true },
 
-  modules: ['@nuxt/ui', '@nuxt/fonts'],
+  modules: ['@nuxt/fonts', '@nuxtjs/color-mode'],
 
   css: ['~/assets/css/main.css'],
 
-  // Light only, per design.md §7 — a light canvas is correct for a phone held
-  // in a bright hallway. Without pinning this, @nuxtjs/color-mode follows the
-  // OS preference and Nuxt UI renders its dark tokens (dark borders, dark
-  // surfaces) on top of our hardcoded light background.
-  colorMode: { preference: 'light', fallback: 'light' },
+  vite: {
+    plugins: [tailwindcss()],
+  },
+
+  // Vendored shadcn components are re-exported from an index per folder. Point
+  // Nuxt at the folder with no prefix so <Button /> resolves, matching how
+  // shadcn-vue is written upstream.
+  components: [
+    // `extensions: ['vue']` matters: each shadcn folder has an index.ts barrel,
+    // and without this Nuxt registers the barrel as a component too — giving
+    // two files resolving to the same name for every one of them.
+    { path: '~/components/ui', pathPrefix: false, extensions: ['vue'], priority: 10 },
+    { path: '~/components', pathPrefix: false, ignore: ['**/ui/**'] },
+  ],
+
+  // Self-hosted, so no request carrying our URLs reaches a font CDN. Families
+  // match what the preset asked for: Inter for body, Geist for headings.
+  fonts: {
+    families: [
+      { name: 'Inter', provider: 'google' },
+      { name: 'Geist', provider: 'google' },
+    ],
+  },
 
   // SSR off: data comes from the Express API, and rendering resident data on a
   // Nuxt server would put PHI through a second process for no benefit.
   ssr: false,
 
+  // Both themes now. `class` mode is what shadcn's `dark:` variant keys off.
+  colorMode: { classSuffix: '' },
+
   runtimeConfig: {
     public: {
       apiBase: process.env.NUXT_PUBLIC_API_BASE || 'http://localhost:3001',
     },
-  },
-
-  // Self-hosted, so no request carrying our URLs reaches a font CDN.
-  fonts: {
-    families: [
-      { name: 'Geist', provider: 'google' },
-      { name: 'Geist Mono', provider: 'google' },
-    ],
   },
 
   devServer: { port: 3000 },

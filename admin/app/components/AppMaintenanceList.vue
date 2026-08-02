@@ -1,7 +1,7 @@
 <script setup>
 import { STAFF_ROLE } from '~/utils/roles.js'
 
-const props = defineProps({
+defineProps({
   requests: { type: Array, default: () => [] },
   showApartment: { type: Boolean, default: false },
 })
@@ -9,7 +9,7 @@ const emit = defineEmits(['changed'])
 
 const { user } = useAuth()
 const { updateRequest } = useApartments()
-const toast = useToast()
+const notify = useNotify()
 
 const canClose = computed(() =>
   [STAFF_ROLE.ADMIN, STAFF_ROLE.HOUSE_MANAGER].includes(user.value?.role),
@@ -33,7 +33,7 @@ async function confirmClose() {
   pending.value = true
   try {
     await updateRequest(closing.value.id, { status: 'RESOLVED', resolutionNote: note.value.trim() })
-    toast.add({ title: 'Request resolved', color: 'success', icon: 'i-lucide-check' })
+    notify.success('Request resolved')
     closing.value = null
     note.value = ''
     emit('changed')
@@ -50,12 +50,12 @@ const fmt = (d) =>
 
 <template>
   <div class="flex flex-col gap-2">
-    <p v-if="!requests.length" class="text-sm text-[var(--color-mute)]">No maintenance requests.</p>
+    <p v-if="!requests.length" class="text-muted-foreground text-sm">No maintenance requests.</p>
 
     <div
       v-for="r in requests"
       :key="r.id"
-      class="rounded-[var(--ui-radius)] border border-[var(--color-hairline)] bg-[var(--color-elevated)] p-3"
+      class="bg-card rounded-md border p-3"
       :class="!isOpen(r) && 'opacity-70'"
     >
       <div class="flex items-start justify-between gap-3">
@@ -63,29 +63,20 @@ const fmt = (d) =>
           <div class="flex flex-wrap items-center gap-2">
             <!-- URGENT is the only coloured thing here. Normal and low priority
                  are the ordinary case and stay achromatic. -->
-            <span
-              v-if="r.priority === 'URGENT' && isOpen(r)"
-              class="rounded-full border border-[rgba(238,0,0,.25)] bg-[var(--color-error-soft)] px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-[#a30000]"
-            >
+            <Badge v-if="r.priority === 'URGENT' && isOpen(r)" variant="destructive"
+                   class="text-[10px] uppercase tracking-wider">
               Urgent
-            </span>
-            <span class="text-[13.5px] font-medium text-[var(--color-ink)]">{{ r.title }}</span>
-            <span
-              v-if="!isOpen(r)"
-              class="font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--color-mute)]"
-            >
+            </Badge>
+            <span class="text-sm font-medium">{{ r.title }}</span>
+            <span v-if="!isOpen(r)" class="text-muted-foreground text-[10px] uppercase tracking-wider">
               {{ r.status === 'RESOLVED' ? 'Resolved' : 'Cancelled' }}
             </span>
           </div>
 
-          <p v-if="r.description" class="mt-1 max-w-[65ch] text-xs text-[var(--color-body)]">
-            {{ r.description }}
-          </p>
+          <p v-if="r.description" class="mt-1 max-w-[65ch] text-xs">{{ r.description }}</p>
 
-          <p class="mt-1 text-xs text-[var(--color-mute)]">
-            <template v-if="showApartment && r.apartmentName">
-              {{ r.apartmentName }} ·
-            </template>
+          <p class="text-muted-foreground mt-1 text-xs">
+            <template v-if="showApartment && r.apartmentName">{{ r.apartmentName }} · </template>
             Reported by {{ r.reportedBy?.fullName ?? 'unknown' }} on
             <span class="font-mono">{{ fmt(r.reportedAt) }}</span>
             <template v-if="r.resolvedAt">
@@ -94,47 +85,37 @@ const fmt = (d) =>
             </template>
           </p>
 
-          <p
-            v-if="r.resolutionNote"
-            class="mt-1.5 border-l-2 border-[var(--color-hairline)] pl-2 text-xs text-[var(--color-body)]"
-          >
+          <p v-if="r.resolutionNote" class="mt-1.5 border-l-2 pl-2 text-xs">
             {{ r.resolutionNote }}
           </p>
         </div>
 
-        <UButton
-          v-if="isOpen(r) && canClose"
-          size="sm"
-          color="neutral"
-          variant="outline"
-          label="Resolve"
-          @click="((closing = r), (note = ''), (error = ''))"
-        />
+        <Button v-if="isOpen(r) && canClose" size="sm" variant="outline"
+                @click="((closing = r), (note = ''), (error = ''))">
+          Resolve
+        </Button>
       </div>
     </div>
   </div>
 
-  <UModal
-    :open="Boolean(closing)"
-    title="Resolve request"
-    @update:open="(v) => !v && (closing = null)"
-  >
-    <template #body>
+  <Dialog :open="Boolean(closing)" @update:open="(v) => !v && (closing = null)">
+    <DialogContent class="sm:max-w-[440px]">
+      <DialogHeader><DialogTitle>Resolve request</DialogTitle></DialogHeader>
       <form class="flex flex-col gap-4" @submit.prevent="confirmClose">
-        <p class="text-sm text-[var(--color-body)]">{{ closing?.title }}</p>
-        <UAlert v-if="error" color="error" variant="soft" :description="error" />
-        <UFormField
+        <p class="text-sm">{{ closing?.title }}</p>
+        <Alert v-if="error" variant="destructive"><AlertDescription>{{ error }}</AlertDescription></Alert>
+        <AppField
+          v-slot="{ id }"
           label="What was done"
-          name="resolutionNote"
           description="Required. A request that just disappears leaves no record of what was fixed."
         >
-          <UTextarea v-model="note" :rows="3" class="w-full" placeholder="Replaced the latch." />
-        </UFormField>
-        <div class="flex justify-end gap-2">
-          <UButton color="neutral" variant="ghost" label="Cancel" @click="closing = null" />
-          <UButton type="submit" color="primary" :loading="pending" label="Resolve" />
-        </div>
+          <Textarea :id="id" v-model="note" :rows="3" placeholder="Replaced the latch." />
+        </AppField>
+        <DialogFooter>
+          <Button type="button" variant="ghost" @click="closing = null">Cancel</Button>
+          <Button type="submit" :disabled="pending">Resolve</Button>
+        </DialogFooter>
       </form>
-    </template>
-  </UModal>
+    </DialogContent>
+  </Dialog>
 </template>

@@ -1,8 +1,8 @@
 <script setup>
-// Standard page frame: sticky navbar carrying the title and the mobile sidebar
-// toggle, then the scrolling body.
+// Standard page frame: a sticky header carrying the title and the mobile
+// sidebar trigger, then the scrolling body.
 //
-// The title lives in the navbar rather than being repeated as an in-body <h1> —
+// The title lives in the header rather than being repeated as an in-body <h1> —
 // two headings saying the same thing is the usual way dashboard pages end up
 // with a wasted first screenful.
 defineProps({
@@ -12,26 +12,19 @@ defineProps({
 </script>
 
 <template>
-  <UDashboardPanel>
-    <template #header>
-      <UDashboardNavbar
-        :title="title"
-        :ui="{
-          root: 'border-b border-[var(--color-hairline)] bg-[var(--color-elevated)]',
-          title: 'text-[15px] font-semibold tracking-[-0.02em] text-[var(--color-ink)]',
-        }"
-      >
-        <template #right>
-          <slot name="actions" />
-        </template>
-      </UDashboardNavbar>
-    </template>
+  <header
+    class="bg-background sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b px-4"
+  >
+    <SidebarTrigger class="-ml-1" />
+    <Separator orientation="vertical" class="mr-2 h-4" />
+    <h1 class="font-heading text-[15px] font-semibold tracking-tight">{{ title }}</h1>
+    <div class="ml-auto flex items-center gap-2">
+      <slot name="actions" />
+    </div>
+  </header>
 
-    <template #body>
-      <p v-if="description" class="mb-5 max-w-[65ch] text-sm text-[var(--color-mute)]">
-        {{ description }}
-      </p>
-      <slot />
-    </template>
-  </UDashboardPanel>
+  <div class="flex flex-1 flex-col gap-4 p-4">
+    <p v-if="description" class="text-muted-foreground max-w-[65ch] text-sm">{{ description }}</p>
+    <slot />
+  </div>
 </template>

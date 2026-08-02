@@ -1,40 +1,27 @@
 <script setup>
-const emit = defineEmits(['intaken'])
+import { UserPlus } from '@lucide/vue'
 
+const emit = defineEmits(['intaken'])
 const { intakeResident, availableBeds } = useResidents()
-const toast = useToast()
+const notify = useNotify()
 
 const open = ref(false)
 const pending = ref(false)
 const error = ref('')
+const NO_BED = 'none'
 
 const blank = () => ({
-  firstName: '',
-  lastName: '',
-  cohort: 'MEN',
-  dateOfBirth: '',
-  phone: '',
-  intakeAt: new Date().toISOString().slice(0, 10),
-  expectedDischargeAt: '',
-  referralSource: '',
-  bedId: '',
-  contactName: '',
-  contactRelationship: '',
-  contactPhone: '',
+  firstName: '', lastName: '', cohort: 'MEN', dateOfBirth: '', phone: '',
+  intakeAt: new Date().toISOString().slice(0, 10), expectedDischargeAt: '',
+  referralSource: '', bedId: NO_BED,
+  contactName: '', contactRelationship: '', contactPhone: '',
 })
 const form = reactive(blank())
 
-const cohorts = [
-  { label: 'Men', value: 'MEN' },
-  { label: 'Women', value: 'WOMEN' },
-]
-
-// Only beds in matching-cohort apartments can be offered — the composite
-// foreign keys would refuse anything else, so filtering here saves the user a
-// pointless error rather than being the enforcement.
+// Only beds in matching-cohort apartments are offered — the composite foreign
+// keys would refuse anything else, so filtering here saves a pointless error
+// rather than being the enforcement.
 const beds = ref([])
-const NO_BED = 'none'
-
 async function loadBeds() {
   beds.value = await availableBeds(form.cohort)
   if (!beds.value.some((b) => b.id === form.bedId)) form.bedId = NO_BED
@@ -44,14 +31,8 @@ watch(open, (isOpen) => {
   if (!isOpen) return
   error.value = ''
   Object.assign(form, blank())
-  form.bedId = NO_BED
   loadBeds()
 })
-
-const bedItems = computed(() => [
-  { label: 'No bed yet', value: NO_BED },
-  ...beds.value.map((b) => ({ label: b.label, value: b.id })),
-])
 
 async function submit() {
   error.value = ''
@@ -68,18 +49,10 @@ async function submit() {
       referralSource: form.referralSource || null,
       bedId: form.bedId === NO_BED ? null : form.bedId,
       emergencyContact: form.contactName
-        ? {
-            name: form.contactName,
-            relationship: form.contactRelationship || null,
-            phone: form.contactPhone,
-          }
+        ? { name: form.contactName, relationship: form.contactRelationship || null, phone: form.contactPhone }
         : undefined,
     })
-    toast.add({
-      title: `${form.firstName} ${form.lastName} intaken`,
-      color: 'success',
-      icon: 'i-lucide-check',
-    })
+    notify.success(`${form.firstName} ${form.lastName} intaken`)
     open.value = false
     emit('intaken')
   } catch (err) {
@@ -91,86 +64,97 @@ async function submit() {
 </script>
 
 <template>
-  <UModal v-model:open="open" title="Intake a resident">
-    <UButton icon="i-lucide-user-plus" size="sm" color="primary" label="Intake" />
+  <Dialog v-model:open="open">
+    <DialogTrigger as-child>
+      <Button size="sm"><UserPlus class="size-4" /> Intake</Button>
+    </DialogTrigger>
+    <DialogContent class="max-h-[85vh] overflow-y-auto sm:max-w-[520px]">
+      <DialogHeader><DialogTitle>Intake a resident</DialogTitle></DialogHeader>
 
-    <template #body>
       <form class="flex flex-col gap-4" @submit.prevent="submit">
-        <UAlert v-if="error" color="error" variant="soft" :description="error" />
+        <Alert v-if="error" variant="destructive">
+          <AlertDescription>{{ error }}</AlertDescription>
+        </Alert>
 
         <div class="flex gap-3">
-          <UFormField label="First name" name="firstName" class="flex-1">
-            <UInput v-model="form.firstName" class="w-full" required />
-          </UFormField>
-          <UFormField label="Last name" name="lastName" class="flex-1">
-            <UInput v-model="form.lastName" class="w-full" required />
-          </UFormField>
+          <AppField v-slot="{ id }" label="First name" class="flex-1">
+            <Input :id="id" v-model="form.firstName" required />
+          </AppField>
+          <AppField v-slot="{ id }" label="Last name" class="flex-1">
+            <Input :id="id" v-model="form.lastName" required />
+          </AppField>
         </div>
 
         <div class="flex gap-3">
-          <UFormField
-            label="Cohort"
-            name="cohort"
-            class="flex-1"
-            description="Decides which apartments they can be housed in."
-          >
-            <USelect v-model="form.cohort" :items="cohorts" value-key="value" class="w-full" />
-          </UFormField>
-          <UFormField label="Date of birth" name="dateOfBirth" class="flex-1">
-            <UInput v-model="form.dateOfBirth" type="date" class="w-full" />
-          </UFormField>
+          <AppField label="Cohort" class="flex-1" description="Decides which apartments they can be housed in.">
+            <Select v-model="form.cohort">
+              <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="MEN">Men</SelectItem>
+                <SelectItem value="WOMEN">Women</SelectItem>
+              </SelectContent>
+            </Select>
+          </AppField>
+          <AppField v-slot="{ id }" label="Date of birth" class="flex-1">
+            <Input :id="id" v-model="form.dateOfBirth" type="date" />
+          </AppField>
         </div>
 
-        <UFormField
+        <AppField
           label="Bed"
-          name="bedId"
           description="Only free beds in matching-cohort apartments are listed. A resident can be intaken without one."
         >
-          <USelect v-model="form.bedId" :items="bedItems" value-key="value" class="w-full" />
-        </UFormField>
+          <Select v-model="form.bedId">
+            <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem :value="NO_BED">No bed yet</SelectItem>
+              <SelectItem v-for="b in beds" :key="b.id" :value="b.id">{{ b.label }}</SelectItem>
+            </SelectContent>
+          </Select>
+        </AppField>
 
         <div class="flex gap-3">
-          <UFormField label="Intake date" name="intakeAt" class="flex-1">
-            <UInput v-model="form.intakeAt" type="date" class="w-full" />
-          </UFormField>
-          <UFormField label="Expected out" name="expectedDischargeAt" class="flex-1">
-            <UInput v-model="form.expectedDischargeAt" type="date" class="w-full" />
-          </UFormField>
+          <AppField v-slot="{ id }" label="Intake date" class="flex-1">
+            <Input :id="id" v-model="form.intakeAt" type="date" />
+          </AppField>
+          <AppField v-slot="{ id }" label="Expected out" class="flex-1">
+            <Input :id="id" v-model="form.expectedDischargeAt" type="date" />
+          </AppField>
         </div>
 
-        <UFormField label="Referral source" name="referralSource">
-          <UInput v-model="form.referralSource" placeholder="Travis County drug court" class="w-full" />
-        </UFormField>
+        <AppField v-slot="{ id }" label="Referral source">
+          <Input :id="id" v-model="form.referralSource" placeholder="Travis County drug court" />
+        </AppField>
 
-        <div class="border-t border-[var(--color-hairline)] pt-4">
-          <p class="mb-3 font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--color-mute)]">
+        <div class="border-t pt-4">
+          <p class="text-muted-foreground mb-3 text-[11px] uppercase tracking-wider">
             Emergency contact
           </p>
           <div class="flex flex-col gap-3">
             <div class="flex gap-3">
-              <UFormField label="Name" name="contactName" class="flex-1">
-                <UInput v-model="form.contactName" class="w-full" />
-              </UFormField>
-              <UFormField label="Relationship" name="contactRelationship" class="w-36">
-                <UInput v-model="form.contactRelationship" placeholder="Parent" class="w-full" />
-              </UFormField>
+              <AppField v-slot="{ id }" label="Name" class="flex-1">
+                <Input :id="id" v-model="form.contactName" />
+              </AppField>
+              <AppField v-slot="{ id }" label="Relationship" class="w-36">
+                <Input :id="id" v-model="form.contactRelationship" placeholder="Parent" />
+              </AppField>
             </div>
-            <UFormField label="Phone" name="contactPhone">
-              <UInput v-model="form.contactPhone" class="w-full" />
-            </UFormField>
+            <AppField v-slot="{ id }" label="Phone">
+              <Input :id="id" v-model="form.contactPhone" />
+            </AppField>
           </div>
           <!-- 42 CFR Part 2: being listed here does not authorise telling this
                person anything. Consent is separate and not built yet. -->
-          <p class="mt-2 text-xs text-[var(--color-mute)]">
+          <p class="text-muted-foreground mt-2 text-xs">
             Listing a contact does not authorise disclosure to them.
           </p>
         </div>
 
-        <div class="flex justify-end gap-2 border-t border-[var(--color-hairline)] pt-4">
-          <UButton color="neutral" variant="ghost" label="Cancel" @click="open = false" />
-          <UButton type="submit" color="primary" :loading="pending" label="Complete intake" />
-        </div>
+        <DialogFooter class="border-t pt-4">
+          <Button type="button" variant="ghost" @click="open = false">Cancel</Button>
+          <Button type="submit" :disabled="pending">Complete intake</Button>
+        </DialogFooter>
       </form>
-    </template>
-  </UModal>
+    </DialogContent>
+  </Dialog>
 </template>

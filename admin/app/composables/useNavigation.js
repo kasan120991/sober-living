@@ -1,3 +1,18 @@
+import {
+  Building2,
+  CalendarDays,
+  ClipboardCheck,
+  DoorOpen,
+  FlaskConical,
+  HandHeart,
+  Home,
+  IdCard,
+  Pill,
+  Plane,
+  ScrollText,
+  Users,
+  Wrench,
+} from '@lucide/vue'
 import { STAFF_ROLE } from '~/utils/roles.js'
 
 /**
@@ -10,6 +25,9 @@ import { STAFF_ROLE } from '~/utils/roles.js'
  * Grouped by how staff work rather than by CLAUDE.md's build order: the things a
  * tech touches on shift sit together, and facility configuration is separated
  * out because it is visited rarely.
+ *
+ * Icons are Lucide components rather than `i-lucide-*` strings — shadcn-vue
+ * imports icons directly instead of resolving them from a name.
  */
 
 const ALL_STAFF = [STAFF_ROLE.ADMIN, STAFF_ROLE.HOUSE_MANAGER, STAFF_ROLE.STAFF]
@@ -22,40 +40,40 @@ const GROUPS = [
     items: [
       // Labelled "Home" in the nav, though the page itself is the census board.
       // The nav says where you go; the page says what it is.
-      { label: 'Home', icon: 'i-lucide-house', to: '/', roles: ALL_STAFF },
-      { label: 'Residents', icon: 'i-lucide-users', to: '/residents', roles: ALL_STAFF },
+      { label: 'Home', icon: Home, to: '/', roles: ALL_STAFF },
+      { label: 'Residents', icon: Users, to: '/residents', roles: ALL_STAFF },
     ],
   },
   {
     id: 'daily',
     label: 'Daily',
     items: [
-      { label: 'Apartment Checks', icon: 'i-lucide-clipboard-check', to: '/checks', roles: ALL_STAFF },
-      { label: 'Drug Screens', icon: 'i-lucide-flask-conical', to: '/screens', roles: ALL_STAFF },
-      { label: 'Med Pass', icon: 'i-lucide-pill', to: '/meds', roles: ALL_STAFF },
-      { label: 'Sign-Outs', icon: 'i-lucide-door-open', to: '/sign-outs', roles: ALL_STAFF },
+      { label: 'Apartment Checks', icon: ClipboardCheck, to: '/checks', roles: ALL_STAFF },
+      { label: 'Drug Screens', icon: FlaskConical, to: '/screens', roles: ALL_STAFF },
+      { label: 'Med Pass', icon: Pill, to: '/meds', roles: ALL_STAFF },
+      { label: 'Sign-Outs', icon: DoorOpen, to: '/sign-outs', roles: ALL_STAFF },
     ],
   },
   {
     id: 'planning',
     label: 'Planning',
     items: [
-      { label: 'Schedule', icon: 'i-lucide-calendar-days', to: '/schedule', roles: ALL_STAFF },
-      { label: 'Travel Passes', icon: 'i-lucide-plane', to: '/passes', roles: ALL_STAFF },
-      { label: 'Community Service', icon: 'i-lucide-hand-heart', to: '/service', roles: ALL_STAFF },
+      { label: 'Schedule', icon: CalendarDays, to: '/schedule', roles: ALL_STAFF },
+      { label: 'Travel Passes', icon: Plane, to: '/passes', roles: ALL_STAFF },
+      { label: 'Community Service', icon: HandHeart, to: '/service', roles: ALL_STAFF },
     ],
   },
   {
     id: 'facility',
     label: 'Facility',
     items: [
-      { label: 'Apartments & Beds', icon: 'i-lucide-building-2', to: '/apartments', roles: MANAGERS },
+      { label: 'Apartments & Beds', icon: Building2, to: '/apartments', roles: MANAGERS },
       // Visible to every staff role: a tech who finds a broken latch during an
       // apartment check should be able to file it there and then. Consequence —
       // techs now see a Facility group containing only this.
-      { label: 'Maintenance', icon: 'i-lucide-wrench', to: '/maintenance', roles: ALL_STAFF },
-      { label: 'Staff', icon: 'i-lucide-id-card', to: '/staff', roles: ADMIN_ONLY },
-      { label: 'Audit Log', icon: 'i-lucide-scroll-text', to: '/audit', roles: ADMIN_ONLY },
+      { label: 'Maintenance', icon: Wrench, to: '/maintenance', roles: ALL_STAFF },
+      { label: 'Staff', icon: IdCard, to: '/staff', roles: ADMIN_ONLY },
+      { label: 'Audit Log', icon: ScrollText, to: '/audit', roles: ADMIN_ONLY },
     ],
   },
 ]
@@ -64,27 +82,18 @@ export function useNavigation() {
   const { user } = useAuth()
 
   /**
-   * `UNavigationMenu` takes an array of arrays and draws a divider between each.
-   * A `type: 'label'` entry gives the group its heading; the dividers still
-   * separate the groups once railed, where labels are hidden.
-   *
-   * @param {boolean} collapsed — drop headings in the rail, where there is no
-   *   width for them and the dividers carry the grouping on their own.
+   * Groups the current role may see, each with its visible items. Empty groups
+   * are dropped so a role never gets a heading with nothing under it.
    */
-  const itemsFor = (collapsed = false) => {
+  const itemsFor = () => {
     const role = user.value?.role
     if (!role) return []
 
-    return GROUPS.map((group) => {
-      const visible = group.items
-        .filter((item) => item.roles.includes(role))
-        .map(({ roles, ...item }) => item)
-
-      if (!visible.length) return []
-      return group.label && !collapsed
-        ? [{ label: group.label, type: 'label' }, ...visible]
-        : visible
-    }).filter((group) => group.length > 0)
+    return GROUPS.map((group) => ({
+      id: group.id,
+      label: group.label ?? null,
+      items: group.items.filter((item) => item.roles.includes(role)),
+    })).filter((group) => group.items.length > 0)
   }
 
   return { itemsFor }

@@ -53,23 +53,21 @@ const COLUMNS = ['Resident', 'Cohort', 'Bed', 'Phase', 'Intake', 'Expected out',
       <AppUnhousedAlert :unhoused="unhoused" @assigned="load" />
 
       <div class="flex flex-wrap items-center gap-3">
-        <UInput
-          v-model="query"
-          icon="i-lucide-search"
-          placeholder="Search by name"
-          class="w-full sm:w-64"
-        />
-        <USwitch v-model="showDischarged" label="Include discharged" />
-        <span class="ms-auto text-xs text-[var(--color-mute)]">
+        <Input v-model="query" placeholder="Search by name" class="w-full sm:w-64" />
+        <div class="flex items-center gap-2">
+          <Switch id="discharged" v-model="showDischarged" />
+          <Label for="discharged" class="font-normal">Include discharged</Label>
+        </div>
+        <span class="ms-auto text-xs text-muted-foreground">
           <span class="tabular-nums">{{ total }}</span> shown
         </span>
       </div>
 
-      <p v-if="pending" class="text-sm text-[var(--color-mute)]">Loading…</p>
+      <p v-if="pending" class="text-sm text-muted-foreground">Loading…</p>
 
       <div
         v-else
-        class="overflow-hidden rounded-[var(--ui-radius)] border border-[var(--color-hairline)]"
+        class="overflow-hidden rounded-md border border-border"
       >
         <!-- Seven columns is wide, so the table scrolls inside its own container
              rather than letting the page scroll sideways. -->
@@ -80,65 +78,58 @@ const COLUMNS = ['Resident', 'Cohort', 'Bed', 'Phase', 'Intake', 'Expected out',
                 <th
                   v-for="h in COLUMNS"
                   :key="h"
-                  class="whitespace-nowrap border-b border-[var(--color-hairline)] bg-[var(--color-elevated)] px-3 py-2 text-left font-mono text-[10.5px] font-semibold uppercase tracking-[0.1em] text-[var(--color-mute)]"
+                  class="whitespace-nowrap border-b border-border bg-card px-3 py-2 text-left text-[10.5px] font-semibold uppercase tracking-[0.1em] text-muted-foreground"
                 >
                   {{ h }}
                 </th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="r in filtered" :key="r.id" class="bg-[var(--color-elevated)]">
-                <td class="h-12 whitespace-nowrap border-b border-[var(--color-hairline-soft)] px-3">
+              <tr v-for="r in filtered" :key="r.id" class="bg-card">
+                <td class="h-12 whitespace-nowrap border-b border-border px-3">
                   <NuxtLink
                     :to="`/residents/${r.id}`"
-                    class="font-medium text-[var(--color-ink)] hover:underline"
+                    class="font-medium text-foreground hover:underline"
                   >
                     {{ r.lastName }}, {{ r.firstName }}
                   </NuxtLink>
                 </td>
 
-                <td class="h-12 whitespace-nowrap border-b border-[var(--color-hairline-soft)] px-3">
-                  <span
-                    class="rounded-[3px] border border-[var(--color-hairline)] px-1.5 py-px font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--color-body)]"
-                  >
+                <td class="h-12 whitespace-nowrap border-b border-border px-3">
+                  <Badge variant="outline" class="text-[10px] uppercase tracking-wider">
                     {{ r.cohort === 'MEN' ? 'Men' : 'Women' }}
-                  </span>
+                  </Badge>
                 </td>
 
                 <!-- "No bed" is the one exception state on this screen, so it is
                      the only thing here that gets colour. design.md §4. -->
-                <td class="h-12 whitespace-nowrap border-b border-[var(--color-hairline-soft)] px-3">
-                  <span v-if="r.bed" class="font-mono text-[12.5px] text-[var(--color-ink)]">
+                <td class="h-12 whitespace-nowrap border-b border-border px-3">
+                  <span v-if="r.bed" class="font-mono text-[12.5px] text-foreground">
                     {{ r.bed.apartmentName }} · {{ r.bed.label }}
                   </span>
-                  <span
-                    v-else-if="r.status === 'ACTIVE'"
-                    class="inline-flex items-center rounded-full border border-[rgba(245,166,35,.35)] bg-[var(--color-warning-soft)] px-2 py-0.5 text-xs text-[var(--color-warning-deep)]"
-                  >
-                    No bed
-                  </span>
-                  <span v-else class="text-[var(--color-faint)]">—</span>
+                  <Badge v-else-if="r.status === 'ACTIVE'" variant="outline" class="border-warning/40 bg-warning/15 text-warning">No bed</Badge>
+                  <span v-else class="text-muted-foreground/60">—</span>
                 </td>
 
-                <td class="h-12 whitespace-nowrap border-b border-[var(--color-hairline-soft)] px-3 font-mono text-[12px]">
+                <td class="h-12 whitespace-nowrap border-b border-border px-3 font-mono text-[12px]">
                   {{ r.program?.name ?? '—' }}
                 </td>
-                <td class="h-12 whitespace-nowrap border-b border-[var(--color-hairline-soft)] px-3 font-mono text-[12.5px] tabular-nums">
+                <td class="h-12 whitespace-nowrap border-b border-border px-3 font-mono text-[12.5px] tabular-nums">
                   {{ isoDate(r.intakeAt) ?? '—' }}
                 </td>
-                <td class="h-12 whitespace-nowrap border-b border-[var(--color-hairline-soft)] px-3 font-mono text-[12.5px] tabular-nums">
+                <td class="h-12 whitespace-nowrap border-b border-border px-3 font-mono text-[12.5px] tabular-nums">
                   {{ isoDate(r.expectedDischargeAt) ?? '—' }}
                 </td>
-                <td class="h-12 whitespace-nowrap border-b border-[var(--color-hairline-soft)] px-3 font-mono text-[12.5px] tabular-nums">
+                <td class="h-12 whitespace-nowrap border-b border-border px-3 font-mono text-[12.5px] tabular-nums">
                   <span v-if="r.status === 'ACTIVE'">{{ r.dayOfStay }}</span>
-                  <span v-else class="text-[var(--color-faint)]">discharged</span>
+                  <span v-else class="text-muted-foreground/60">discharged</span>
                 </td>
               </tr>
 
               <tr v-if="!filtered.length">
                 <td
                   :colspan="COLUMNS.length"
-                  class="bg-[var(--color-elevated)] px-3 py-8 text-center text-sm text-[var(--color-mute)]"
+                  class="bg-card px-3 py-8 text-center text-sm text-muted-foreground"
                 >
                   {{ query ? `No resident matching “${query}”.` : 'No residents yet.' }}
                 </td>

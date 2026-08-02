@@ -1,116 +1,150 @@
+
+
+/* Fonts are self-hosted by @nuxt/fonts, not pulled from Google's CDN.
+   The preset shipped `@import url('https://fonts.googleapis.com/...')`, which
+   sends a request carrying this app's URL to a third party on every page load.
+   CLAUDE.md: nothing about this app goes to an outside service. Nuxt Fonts
+   downloads the same families at build time and serves them from our origin. */
 @import "tailwindcss";
-@import "@nuxt/ui";
+@import "tw-animate-css";
+@import "shadcn-vue/tailwind.css";
 
-/* ─── SOBERLIFE DESIGN TOKENS ────────────────────────────────────────────
-   Transcribed from design.md, which is the source of truth. This block is
-   COPIED into each app, never imported across admin/ and client/ — see
-   CLAUDE.md on why the two apps share tokens but not code.
-   ──────────────────────────────────────────────────────────────────────── */
-@theme {
-  /* ── Ink & surface (Geist) ── */
-  --color-ink: #171717;
-  --color-body: #4d4d4d;
-  --color-mute: #8f8f8f;
-  --color-faint: #a1a1a1;
-  --color-hairline: #ebebeb;
-  --color-hairline-soft: #f2f2f2;
-  --color-canvas: #fafafa;
-  --color-elevated: #ffffff;
+@custom-variant dark (&:is(.dark *));
 
-  /* ── Neutral scale (Nuxt UI `neutral` — named "geist", NOT "slate": Tailwind ships a built-in
-     slate that is blue-tinted, and reusing the name silently loses our greys) ── */
-  --color-geist-50: #fafafa;
-  --color-geist-100: #f2f2f2;
-  --color-geist-200: #ebebeb;
-  --color-geist-300: #d4d4d4;
-  --color-geist-400: #a1a1a1;
-  --color-geist-500: #8f8f8f;
-  --color-geist-600: #4d4d4d;
-  --color-geist-700: #333333;
-  --color-geist-800: #262626;
-  --color-geist-900: #171717;
-  --color-geist-950: #0a0a0a;
-
-  /* ── Status — success is OURS, not Vercel's. See design.md §4. ── */
-  --color-success: #16a34a;
-  --color-success-soft: #dcfce7;
-  --color-success-deep: #15803d;
-
-  --color-warning: #f5a623;
-  --color-warning-soft: #ffefcf;
-  --color-warning-deep: #ab570a;
-
-  --color-error: #ee0000;
-  --color-error-soft: #ffe5e5;
-  --color-error-deep: #c50000;
-
-  --color-info: #0070f3;
-  --color-info-soft: #d3e5ff;
-  --color-info-deep: #0761d1;
-
-  /* ── Type ──
-     Geist is self-hosted via @nuxt/fonts (no third-party CDN — no request
-     carrying our URLs to an outside host). See CLAUDE.md compliance posture. */
-  --font-sans: "Geist", "Inter", system-ui, sans-serif;
-  --font-mono: "Geist Mono", "JetBrains Mono", ui-monospace, Menlo, monospace;
+@theme inline {
+    --font-sans: 'Inter Variable', sans-serif;
+    --font-heading: 'Geist Variable', sans-serif;
+    --color-sidebar-ring: var(--sidebar-ring);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar: var(--sidebar);
+    --color-chart-5: var(--chart-5);
+    --color-chart-4: var(--chart-4);
+    --color-chart-3: var(--chart-3);
+    --color-chart-2: var(--chart-2);
+    --color-chart-1: var(--chart-1);
+    --color-ring: var(--ring);
+    --color-input: var(--input);
+    --color-border: var(--border);
+    --color-destructive: var(--destructive);
+    --color-success: var(--success);
+    --color-success-foreground: var(--success-foreground);
+    --color-warning: var(--warning);
+    --color-warning-foreground: var(--warning-foreground);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-accent: var(--accent);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-muted: var(--muted);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-secondary: var(--secondary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-primary: var(--primary);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-popover: var(--popover);
+    --color-card-foreground: var(--card-foreground);
+    --color-card: var(--card);
+    --color-foreground: var(--foreground);
+    --color-background: var(--background);
+    --radius-sm: calc(var(--radius) - 4px);
+    --radius-md: calc(var(--radius) - 2px);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) + 4px);
 }
 
 :root {
-  /* Geist's primary is a flat near-black. Nuxt UI rejects shadeless colors in
-     app.config, so it is set here directly. Hover/active derive via alpha. */
-  --ui-primary: var(--color-ink);
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.145 0 0);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.145 0 0);
+    --primary: oklch(0.511 0.096 186.391);
+    --primary-foreground: oklch(0.984 0.014 180.72);
+    --secondary: oklch(0.967 0.001 286.375);
+    --secondary-foreground: oklch(0.21 0.006 285.885);
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.556 0 0);
+    --accent: oklch(0.97 0 0);
+    --accent-foreground: oklch(0.205 0 0);
+    --destructive: oklch(0.577 0.245 27.325);
+    --border: oklch(0.922 0 0);
+    --input: oklch(0.922 0 0);
+    --ring: oklch(0.708 0 0);
+    --chart-1: oklch(0.855 0.138 181.071);
+    --chart-2: oklch(0.704 0.14 182.503);
+    --chart-3: oklch(0.6 0.118 184.704);
+    --chart-4: oklch(0.511 0.096 186.391);
+    --chart-5: oklch(0.437 0.078 188.216);
+    --radius: 0.625rem;
+    --sidebar: oklch(0.985 0 0);
+    --sidebar-foreground: oklch(0.145 0 0);
+    --sidebar-primary: oklch(0.6 0.118 184.704);
+    --sidebar-primary-foreground: oklch(0.984 0.014 180.72);
+    --sidebar-accent: oklch(0.97 0 0);
+    --sidebar-accent-foreground: oklch(0.205 0 0);
+    --sidebar-border: oklch(0.922 0 0);
+    --sidebar-ring: oklch(0.708 0 0);
 
-  --ui-radius: 6px; /* Geist app chrome: tight 6px squares */
-  --ui-container: 90rem; /* wide — this app is data-dense */
+    /* Not in the preset. shadcn ships `destructive` alone, but a bed out of
+       service is not an error, a refused medication is not a missed one, and
+       CLAUDE.md forbids collapsing a refused screen into a positive. Written in
+       the preset's oklch idiom at matching lightness so they sit with it. */
+    --success: oklch(0.596 0.145 156.5);
+    --success-foreground: oklch(0.985 0.01 156.5);
+    --warning: oklch(0.706 0.153 70.5);
+    --warning-foreground: oklch(0.269 0.05 70.5);
 }
 
-/* MUST be inside @layer base.
-   Cascade layers rank UNLAYERED styles above layered ones, so an unlayered
-   `body { color }` here silently outranks every Tailwind and Nuxt UI utility —
-   inputs lose their ring color and fall back to currentColor, text-muted stops
-   working, and the whole component library quietly renders in body grey. */
+.dark {
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.205 0 0);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.205 0 0);
+    --popover-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.437 0.078 188.216);
+    --primary-foreground: oklch(0.984 0.014 180.72);
+    --secondary: oklch(0.274 0.006 286.033);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.269 0 0);
+    --muted-foreground: oklch(0.708 0 0);
+    --accent: oklch(0.269 0 0);
+    --accent-foreground: oklch(0.985 0 0);
+    --destructive: oklch(0.704 0.191 22.216);
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.556 0 0);
+    --chart-1: oklch(0.855 0.138 181.071);
+    --chart-2: oklch(0.704 0.14 182.503);
+    --chart-3: oklch(0.6 0.118 184.704);
+    --chart-4: oklch(0.511 0.096 186.391);
+    --chart-5: oklch(0.437 0.078 188.216);
+    --sidebar: oklch(0.205 0 0);
+    --sidebar-foreground: oklch(0.985 0 0);
+    --sidebar-primary: oklch(0.704 0.14 182.503);
+    --sidebar-primary-foreground: oklch(0.277 0.046 192.524);
+    --sidebar-accent: oklch(0.269 0 0);
+    --sidebar-accent-foreground: oklch(0.985 0 0);
+    --sidebar-border: oklch(1 0 0 / 10%);
+    --sidebar-ring: oklch(0.556 0 0);
+
+    /* Lifted and desaturated so they hold against a dark ground. */
+    --success: oklch(0.722 0.13 156.5);
+    --success-foreground: oklch(0.24 0.045 156.5);
+    --warning: oklch(0.79 0.13 70.5);
+    --warning-foreground: oklch(0.26 0.05 70.5);
+}
+
 @layer base {
+  * {
+    @apply border-border outline-ring/50;
+    }
   body {
-    background-color: var(--color-canvas);
-    color: var(--color-body);
-    font-family: var(--font-sans);
-    -webkit-font-smoothing: antialiased;
-  }
-
-  :focus-visible {
-    outline: 2px solid var(--color-ink);
-    outline-offset: 2px;
-  }
-}
-
-/* ─── Nuxt UI semantic tokens → our tokens ───────────────────────────────
-   Mapped explicitly rather than inferred from the neutral ramp, so a Nuxt UI
-   upgrade cannot quietly restyle every surface in the app. */
-:root {
-  /* `bg-default` is the surface components sit ON (inputs, cards, menus), so it
-     is white — not the page canvas. The page background comes from the @layer
-     base rule above. design.md §3: white inputs, hairline border, flat. */
-  --ui-bg: var(--color-elevated);
-  --ui-bg-muted: var(--color-canvas);
-  --ui-bg-elevated: var(--color-hairline-soft);
-  --ui-bg-accented: var(--color-hairline);
-
-  --ui-border: var(--color-hairline);
-  --ui-border-muted: var(--color-hairline);
-  --ui-border-accented: var(--color-hairline);
-
-  --ui-text-dimmed: var(--color-faint);
-  --ui-text-muted: var(--color-mute);
-  --ui-text-toned: var(--color-body);
-  --ui-text: var(--color-body);
-  --ui-text-highlighted: var(--color-ink);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
-  }
+    @apply bg-background text-foreground;
+    @apply font-sans;
+    }
 }

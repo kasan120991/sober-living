@@ -1,31 +1,25 @@
 <script setup>
+import { Settings } from '@lucide/vue'
 import { STAFF_ROLE } from '~/utils/roles.js'
 
-const props = defineProps({
-  apartment: { type: Object, required: true },
-})
+const props = defineProps({ apartment: { type: Object, required: true } })
 const emit = defineEmits(['saved'])
 
 const { user } = useAuth()
 const { updateApartment, removeApartment } = useApartments()
-const toast = useToast()
+const notify = useNotify()
 
 const isAdmin = computed(() => user.value?.role === STAFF_ROLE.ADMIN)
 
 const open = ref(false)
 const pending = ref(false)
 const error = ref('')
-const form = reactive({})
+const form = reactive({ name: '', cohort: 'MEN' })
 
 // Cohort is locked once beds exist — Postgres refuses the change via the
 // composite foreign key from Bed. This dialog is the only place that fact is
 // actionable, which is why the explanation lives here rather than on the page.
 const cohortLocked = computed(() => (props.apartment.beds?.length ?? 0) > 0)
-
-const cohorts = [
-  { label: 'Men', value: 'MEN' },
-  { label: 'Women', value: 'WOMEN' },
-]
 
 watch(open, (isOpen) => {
   if (!isOpen) return
@@ -43,7 +37,7 @@ async function save() {
     const body = { ...form }
     if (cohortLocked.value) delete body.cohort
     await updateApartment(props.apartment.id, body)
-    toast.add({ title: 'Apartment updated', color: 'success', icon: 'i-lucide-check' })
+    notify.success('Apartment updated')
     open.value = false
     emit('saved')
   } catch (err) {
@@ -58,7 +52,7 @@ async function destroy() {
   pending.value = true
   try {
     await removeApartment(props.apartment.id)
-    toast.add({ title: `${props.apartment.name} removed`, color: 'success' })
+    notify.success(`${props.apartment.name} removed`)
     open.value = false
     await navigateTo('/apartments')
     emit('saved')
@@ -73,55 +67,53 @@ async function destroy() {
 </script>
 
 <template>
-  <UModal v-if="isAdmin" v-model:open="open" :title="`Edit ${apartment.name}`">
-    <UButton
-      icon="i-lucide-settings"
-      color="neutral"
-      variant="ghost"
-      size="sm"
-      aria-label="Edit apartment"
-    />
+  <Dialog v-if="isAdmin" v-model:open="open">
+    <DialogTrigger as-child>
+      <Button variant="ghost" size="sm" aria-label="Edit apartment">
+        <Settings class="size-4" />
+      </Button>
+    </DialogTrigger>
+    <DialogContent class="sm:max-w-[440px]">
+      <DialogHeader>
+        <DialogTitle>Edit {{ apartment.name }}</DialogTitle>
+      </DialogHeader>
 
-    <template #body>
       <form class="flex flex-col gap-4" @submit.prevent="save">
-        <UAlert v-if="error" color="error" variant="soft" :description="error" />
+        <Alert v-if="error" variant="destructive">
+          <AlertDescription>{{ error }}</AlertDescription>
+        </Alert>
 
-        <UFormField label="Name" name="name">
-          <UInput v-model="form.name" class="w-full" required />
-        </UFormField>
+        <AppField v-slot="{ id }" label="Name">
+          <Input :id="id" v-model="form.name" required />
+        </AppField>
 
-        <UFormField
+        <AppField
           label="Cohort"
-          name="cohort"
           :description="
             cohortLocked
               ? 'Locked while this apartment has beds.'
               : 'An apartment serves one cohort.'
           "
         >
-          <USelect
-            v-model="form.cohort"
-            :items="cohorts"
-            value-key="value"
-            :disabled="cohortLocked"
-            class="w-full"
-          />
-        </UFormField>
+          <Select v-model="form.cohort" :disabled="cohortLocked">
+            <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="MEN">Men</SelectItem>
+              <SelectItem value="WOMEN">Women</SelectItem>
+            </SelectContent>
+          </Select>
+        </AppField>
 
-        <div class="flex items-center justify-between gap-2 border-t border-[var(--color-hairline)] pt-4">
-          <UButton
-            color="error"
-            variant="ghost"
-            label="Remove apartment"
-            :disabled="pending"
-            @click="destroy"
-          />
+        <DialogFooter class="border-t pt-4 sm:justify-between">
+          <Button type="button" variant="ghost" class="text-destructive" :disabled="pending" @click="destroy">
+            Remove apartment
+          </Button>
           <div class="flex gap-2">
-            <UButton color="neutral" variant="ghost" label="Cancel" @click="open = false" />
-            <UButton type="submit" color="primary" :loading="pending" label="Save" />
+            <Button type="button" variant="ghost" @click="open = false">Cancel</Button>
+            <Button type="submit" :disabled="pending">Save</Button>
           </div>
-        </div>
+        </DialogFooter>
       </form>
-    </template>
-  </UModal>
+    </DialogContent>
+  </Dialog>
 </template>

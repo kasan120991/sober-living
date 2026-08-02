@@ -1,11 +1,12 @@
 <script setup>
+import { ArrowLeft, Plus } from '@lucide/vue'
 import { STAFF_ROLE } from '~/utils/roles.js'
 import { previewLabels } from '~/composables/useApartments.js'
 
 const route = useRoute()
 const { user } = useAuth()
 const { getApartment, addBeds, createRequest } = useApartments()
-const toast = useToast()
+const notify = useNotify()
 
 const refreshList = inject('refreshApartments', () => {})
 
@@ -25,6 +26,18 @@ async function refreshAll() {
 }
 
 const isAdmin = computed(() => user.value?.role === STAFF_ROLE.ADMIN)
+const cohortLabel = computed(() => (apartment.value?.cohort === 'MEN' ? 'Men' : 'Women'))
+
+// Counts are derived from the beds we already have — no second request, and no
+// chance of disagreeing with the table directly below them.
+const counts = computed(() => {
+  const beds = apartment.value?.beds ?? []
+  return {
+    total: beds.length,
+    occupied: beds.filter((b) => b.occupied).length,
+    outOfService: beds.filter((b) => b.status === 'OUT_OF_SERVICE').length,
+  }
+})
 
 // ── Add beds ────────────────────────────────────────────────────────────────
 const bedsOpen = ref(false)
@@ -34,11 +47,7 @@ const bedPending = ref(false)
 const bedError = ref('')
 
 const preview = computed(() =>
-  previewLabels(
-    bedForm.scheme,
-    bedForm.count,
-    (apartment.value?.beds ?? []).map((b) => b.label),
-  ),
+  previewLabels(bedForm.scheme, bedForm.count, (apartment.value?.beds ?? []).map((b) => b.label)),
 )
 
 async function submitBeds() {
@@ -51,7 +60,7 @@ async function submitBeds() {
         ? { count: Number(bedForm.count), scheme: bedForm.scheme }
         : { label: bedForm.label.trim() },
     )
-    toast.add({ title: 'Beds added', color: 'success', icon: 'i-lucide-check' })
+    notify.success('Beds added')
     bedsOpen.value = false
     bedForm.label = ''
     await refreshAll()
@@ -68,18 +77,12 @@ const reqForm = reactive({ title: '', description: '', priority: 'NORMAL' })
 const reqPending = ref(false)
 const reqError = ref('')
 
-const priorities = [
-  { label: 'Low', value: 'LOW' },
-  { label: 'Normal', value: 'NORMAL' },
-  { label: 'Urgent', value: 'URGENT' },
-]
-
 async function submitRequest() {
   reqError.value = ''
   reqPending.value = true
   try {
     await createRequest({ apartmentId: route.params.id, ...reqForm })
-    toast.add({ title: 'Request filed', color: 'success', icon: 'i-lucide-check' })
+    notify.success('Request filed')
     reqOpen.value = false
     Object.assign(reqForm, { title: '', description: '', priority: 'NORMAL' })
     await load()
@@ -89,194 +92,158 @@ async function submitRequest() {
     reqPending.value = false
   }
 }
-
-const cohortLabel = computed(() => (apartment.value?.cohort === 'MEN' ? 'Men' : 'Women'))
-
-// Counts are derived from the beds we already have — no second request, and no
-// chance of disagreeing with the table directly below them.
-const counts = computed(() => {
-  const beds = apartment.value?.beds ?? []
-  return {
-    total: beds.length,
-    occupied: beds.filter((b) => b.occupied).length,
-    outOfService: beds.filter((b) => b.status === 'OUT_OF_SERVICE').length,
-  }
-})
 </script>
 
 <template>
-  <UDashboardPanel id="apartment-detail">
-    <template #header>
-      <UDashboardNavbar
-        :title="apartment?.name ?? 'Apartment'"
-        :ui="{
-          root: 'border-b border-[var(--color-hairline)] bg-[var(--color-elevated)]',
-          title: 'text-[15px] font-semibold tracking-[-0.02em] text-[var(--color-ink)]',
-        }"
-      >
-        <template #leading>
-          <!-- Back to the list. Only meaningful on a phone, where the list is
-               hidden while a detail route is open. -->
-          <UButton
-            to="/apartments"
-            icon="i-lucide-arrow-left"
-            color="neutral"
-            variant="ghost"
-            size="sm"
-            class="lg:hidden"
-            aria-label="Back to apartments"
-          />
-        </template>
+  <div class="flex h-full flex-col">
+    <!-- Cohort and occupancy live here rather than in a settings card. Cohort is
+         the one structurally important fact — it is what keeps the two cohorts
+         in separate units — so it stays visible. -->
+    <div class="bg-background sticky top-0 z-10 flex h-14 shrink-0 items-center gap-3 border-b px-4">
+      <Button as-child variant="ghost" size="sm" class="lg:hidden" aria-label="Back to apartments">
+        <NuxtLink to="/apartments"><ArrowLeft class="size-4" /></NuxtLink>
+      </Button>
+      <h2 class="font-heading text-[15px] font-semibold tracking-tight">
+        {{ apartment?.name ?? 'Apartment' }}
+      </h2>
+      <div v-if="apartment" class="ml-auto flex items-center gap-3">
+        <Badge variant="outline" class="text-[10px] uppercase tracking-wider">
+          {{ cohortLabel }}
+        </Badge>
+        <span class="text-muted-foreground hidden text-xs sm:inline">
+          <span class="text-foreground font-medium tabular-nums">
+            {{ counts.occupied }} of {{ counts.total }}
+          </span>
+          occupied
+          <template v-if="counts.outOfService">
+            · <span class="text-warning">{{ counts.outOfService }} out</span>
+          </template>
+        </span>
+        <AppApartmentEdit :apartment="apartment" @saved="refreshAll" />
+      </div>
+    </div>
 
-        <!-- Cohort and occupancy live here rather than in a settings card.
-             Cohort is the one structurally important fact — it is what keeps the
-             two cohorts in separate units — so it stays visible. Timezone and
-             address are set once at intake and moved into the edit dialog. -->
-        <template #right>
-          <div v-if="apartment" class="flex items-center gap-3">
-            <span
-              class="rounded-[3px] border border-[var(--color-hairline)] px-1.5 py-px font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--color-body)]"
-            >
-              {{ cohortLabel }}
-            </span>
-            <span class="hidden text-[12.5px] text-[var(--color-mute)] sm:inline">
-              <span class="font-medium tabular-nums text-[var(--color-ink)]">
-                {{ counts.occupied }} of {{ counts.total }}
-              </span>
-              occupied
-              <template v-if="counts.outOfService">
-                ·
-                <span class="text-[var(--color-warning-deep)]">{{ counts.outOfService }} out</span>
-              </template>
-            </span>
-            <AppApartmentEdit :apartment="apartment" @saved="refreshAll" />
-          </div>
-        </template>
-      </UDashboardNavbar>
-    </template>
-
-    <template #body>
-      <div v-if="pending" class="text-sm text-[var(--color-mute)]">Loading…</div>
+    <div class="flex-1 overflow-y-auto p-4">
+      <div v-if="pending" class="text-muted-foreground text-sm">Loading…</div>
 
       <div v-else-if="apartment" class="flex flex-col gap-7">
-        <!-- Beds -->
         <section class="flex flex-col gap-3">
           <div class="flex items-center justify-between gap-3">
-            <h2 class="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--color-mute)]">
+            <h3 class="text-muted-foreground text-[11px] font-semibold uppercase tracking-wider">
               Beds
-            </h2>
-            <UButton
-              v-if="isAdmin"
-              icon="i-lucide-plus"
-              size="sm"
-              color="neutral"
-              variant="outline"
-              label="Add beds"
-              @click="bedsOpen = true"
-            />
+            </h3>
+            <Button v-if="isAdmin" size="sm" variant="outline" @click="bedsOpen = true">
+              <Plus class="size-4" /> Add beds
+            </Button>
           </div>
           <AppBedTable :beds="apartment.beds" @changed="refreshAll" />
         </section>
 
-        <!-- Maintenance -->
         <section class="flex flex-col gap-3">
           <div class="flex items-center justify-between gap-3">
-            <h2 class="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--color-mute)]">
+            <h3 class="text-muted-foreground text-[11px] font-semibold uppercase tracking-wider">
               Maintenance
-            </h2>
-            <UButton
-              icon="i-lucide-plus"
-              size="sm"
-              color="neutral"
-              variant="outline"
-              label="File request"
-              @click="reqOpen = true"
-            />
+            </h3>
+            <Button size="sm" variant="outline" @click="reqOpen = true">
+              <Plus class="size-4" /> File request
+            </Button>
           </div>
           <AppMaintenanceList :requests="apartment.maintenanceRequests" @changed="load" />
         </section>
       </div>
-    </template>
-  </UDashboardPanel>
+    </div>
+  </div>
 
   <!-- Add beds -->
-  <UModal v-model:open="bedsOpen" title="Add beds">
-    <template #body>
+  <Dialog v-model:open="bedsOpen">
+    <DialogContent class="sm:max-w-[440px]">
+      <DialogHeader><DialogTitle>Add beds</DialogTitle></DialogHeader>
       <form class="flex flex-col gap-4" @submit.prevent="submitBeds">
-        <UAlert v-if="bedError" color="error" variant="soft" :description="bedError" />
+        <Alert v-if="bedError" variant="destructive">
+          <AlertDescription>{{ bedError }}</AlertDescription>
+        </Alert>
 
-        <UFormField label="How" name="mode">
-          <URadioGroup
-            v-model="bedMode"
-            :items="[
-              { label: 'Several at once', value: 'bulk' },
-              { label: 'One with a specific label', value: 'single' },
-            ]"
-            value-key="value"
-          />
-        </UFormField>
+        <AppField label="How">
+          <RadioGroup v-model="bedMode" class="flex flex-col gap-2">
+            <div class="flex items-center gap-2">
+              <RadioGroupItem id="bulk" value="bulk" />
+              <Label for="bulk" class="font-normal">Several at once</Label>
+            </div>
+            <div class="flex items-center gap-2">
+              <RadioGroupItem id="single" value="single" />
+              <Label for="single" class="font-normal">One with a specific label</Label>
+            </div>
+          </RadioGroup>
+        </AppField>
 
         <template v-if="bedMode === 'bulk'">
           <div class="flex gap-3">
-            <UFormField label="How many" name="count" class="flex-1">
-              <UInput v-model="bedForm.count" type="number" min="1" max="24" class="w-full" />
-            </UFormField>
-            <UFormField label="Labelled" name="scheme" class="flex-1">
-              <USelect
-                v-model="bedForm.scheme"
-                :items="[
-                  { label: 'A, B, C…', value: 'alpha' },
-                  { label: '1, 2, 3…', value: 'numeric' },
-                ]"
-                value-key="value"
-                class="w-full"
-              />
-            </UFormField>
+            <AppField v-slot="{ id }" label="How many" class="flex-1">
+              <Input :id="id" v-model="bedForm.count" type="number" min="1" max="24" />
+            </AppField>
+            <AppField label="Labelled" class="flex-1">
+              <Select v-model="bedForm.scheme">
+                <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="alpha">A, B, C…</SelectItem>
+                  <SelectItem value="numeric">1, 2, 3…</SelectItem>
+                </SelectContent>
+              </Select>
+            </AppField>
           </div>
           <!-- Show the labels before committing: bulk creation continues from
                the last existing bed rather than restarting, which is easy to
                get wrong in your head. -->
-          <p class="text-xs text-[var(--color-mute)]">
-            Will create
-            <span class="font-mono text-[var(--color-ink)]">{{ preview.join(', ') }}</span>
+          <p class="text-muted-foreground text-xs">
+            Will create <span class="text-foreground font-mono">{{ preview.join(', ') }}</span>
           </p>
         </template>
 
-        <UFormField v-else label="Label" name="label">
-          <UInput v-model="bedForm.label" placeholder="E" class="w-full" required />
-        </UFormField>
+        <AppField v-else v-slot="{ id }" label="Label">
+          <Input :id="id" v-model="bedForm.label" placeholder="E" required />
+        </AppField>
 
-        <div class="flex justify-end gap-2">
-          <UButton color="neutral" variant="ghost" label="Cancel" @click="bedsOpen = false" />
-          <UButton type="submit" color="primary" :loading="bedPending" label="Add" />
-        </div>
+        <DialogFooter>
+          <Button type="button" variant="ghost" @click="bedsOpen = false">Cancel</Button>
+          <Button type="submit" :disabled="bedPending">Add</Button>
+        </DialogFooter>
       </form>
-    </template>
-  </UModal>
+    </DialogContent>
+  </Dialog>
 
   <!-- File maintenance request -->
-  <UModal v-model:open="reqOpen" title="File maintenance request">
-    <template #body>
+  <Dialog v-model:open="reqOpen">
+    <DialogContent class="sm:max-w-[440px]">
+      <DialogHeader><DialogTitle>File maintenance request</DialogTitle></DialogHeader>
       <form class="flex flex-col gap-4" @submit.prevent="submitRequest">
-        <UAlert v-if="reqError" color="error" variant="soft" :description="reqError" />
+        <Alert v-if="reqError" variant="destructive">
+          <AlertDescription>{{ reqError }}</AlertDescription>
+        </Alert>
 
-        <UFormField label="What is wrong" name="title">
-          <UInput v-model="reqForm.title" placeholder="Window latch broken" class="w-full" required />
-        </UFormField>
+        <AppField v-slot="{ id }" label="What is wrong">
+          <Input :id="id" v-model="reqForm.title" placeholder="Window latch broken" required />
+        </AppField>
 
-        <UFormField label="Details" name="description">
-          <UTextarea v-model="reqForm.description" :rows="3" class="w-full" />
-        </UFormField>
+        <AppField v-slot="{ id }" label="Details">
+          <Textarea :id="id" v-model="reqForm.description" :rows="3" />
+        </AppField>
 
-        <UFormField label="Priority" name="priority">
-          <USelect v-model="reqForm.priority" :items="priorities" value-key="value" class="w-full" />
-        </UFormField>
+        <AppField label="Priority">
+          <Select v-model="reqForm.priority">
+            <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="LOW">Low</SelectItem>
+              <SelectItem value="NORMAL">Normal</SelectItem>
+              <SelectItem value="URGENT">Urgent</SelectItem>
+            </SelectContent>
+          </Select>
+        </AppField>
 
-        <div class="flex justify-end gap-2">
-          <UButton color="neutral" variant="ghost" label="Cancel" @click="reqOpen = false" />
-          <UButton type="submit" color="primary" :loading="reqPending" label="File request" />
-        </div>
+        <DialogFooter>
+          <Button type="button" variant="ghost" @click="reqOpen = false">Cancel</Button>
+          <Button type="submit" :disabled="reqPending">File request</Button>
+        </DialogFooter>
       </form>
-    </template>
-  </UModal>
+    </DialogContent>
+  </Dialog>
 </template>
