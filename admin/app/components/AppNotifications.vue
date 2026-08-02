@@ -47,7 +47,7 @@ const label = computed(() =>
 
     <DropdownMenuContent align="end" :side-offset="8" class="w-[min(22rem,calc(100vw-2rem))] p-0">
       <div class="flex items-center justify-between gap-2 px-3 py-2.5">
-        <span class="text-[13.5px] font-medium">Needs attention</span>
+        <span class="text-[13.5px] font-medium">Notifications</span>
         <span class="text-muted-foreground text-xs tabular-nums">{{ actionCount }}</span>
       </div>
       <DropdownMenuSeparator class="my-0" />

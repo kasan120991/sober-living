@@ -72,12 +72,11 @@ async function onSubmit() {
             {{ pending ? 'Signing in…' : 'Sign in' }}
           </Button>
         </form>
-
-        <!-- No "remember me": staff devices are shared, and a persistent
-             session on a hallway phone is what session timeouts prevent. -->
-        <p class="text-muted-foreground text-[11px] uppercase tracking-wider">
-          Sessions end after 20 min idle
-        </p>
+        <!-- There is still no "remember me" — staff devices are shared, and the
+             server expires an idle session regardless of what this page says.
+             The notice was removed because it was reassurance aimed at nobody:
+             a tech signing in does not need telling, and stating the window
+             tells anyone who picks up an unlocked phone how long they have. -->
       </div>
     </div>
   </div>
