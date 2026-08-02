@@ -12,6 +12,7 @@ import authRouter from './routes/auth.js'
 import apartmentsRouter from './routes/apartments.js'
 import bedsRouter from './routes/beds.js'
 import maintenanceRouter from './routes/maintenance.js'
+import residentsRouter from './routes/residents.js'
 
 export function createApp() {
   const app = express()
@@ -46,6 +47,7 @@ export function createApp() {
   app.use('/apartments', apartmentsRouter)
   app.use('/beds', bedsRouter)
   app.use('/maintenance', maintenanceRouter)
+  app.use('/residents', residentsRouter)
 
   app.use(notFound)
   app.use(errorHandler)

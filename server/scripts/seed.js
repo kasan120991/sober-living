@@ -7,6 +7,7 @@
  * Never run this against production.
  */
 import './lib/as-owner.js'
+import { resetFacilityData } from './lib/reset.js'
 import { prisma } from '../src/db/client.js'
 import { runAsSystem } from '../src/lib/dbContext.js'
 import { hashPassword } from '../src/auth/passwords.js'
@@ -19,10 +20,7 @@ async function main() {
   }
 
   console.log('Seeding…')
-  await prisma.$executeRawUnsafe(`
-    TRUNCATE "sessions","bed_assignments","stays","documents","emergency_contacts",
-             "maintenance_requests","beds","apartments","residents","users","programs"
-    RESTART IDENTITY CASCADE`)
+  await resetFacilityData(prisma)
 
   const passwordHash = await hashPassword(DEV_PASSWORD)
 
@@ -115,6 +113,52 @@ async function main() {
     })
   }
 
+  // Two states the roster has to handle, seeded so they are always visible:
+  // someone intaked but not yet in a bed, and someone already discharged.
+  const unhoused = await prisma.resident.create({
+    data: { firstName: 'Joy', lastName: 'Nakamura', cohort: 'WOMEN' },
+  })
+  await prisma.stay.create({
+    data: {
+      residentId: unhoused.id,
+      cohort: 'WOMEN',
+      programId: phase1.id,
+      intakeAt: new Date(),
+      referralSource: 'Self-referral',
+    },
+  })
+
+  const alum = await prisma.resident.create({
+    data: { firstName: 'Curtis', lastName: 'Ramsey', cohort: 'MEN' },
+  })
+  const alumStay = await prisma.stay.create({
+    data: {
+      residentId: alum.id,
+      cohort: 'MEN',
+      programId: phase2.id,
+      intakeAt: new Date('2025-11-03T15:00:00Z'),
+      status: 'DISCHARGED',
+      dischargedAt: new Date('2026-04-15T16:00:00Z'),
+      dischargeType: 'SUCCESSFUL',
+      dischargeReason: 'Completed the program and moved to independent housing.',
+    },
+  })
+  // Created already closed. A live assignment here would collide with Ruben's
+  // on the same bed — the partial unique index allows only one at a time — and
+  // the history has to read correctly anyway: this resident vacated 12C in
+  // April, and Ruben moved in on 1 May.
+  await prisma.bedAssignment.create({
+    data: {
+      bedId: mensBeds[2].id,
+      stayId: alumStay.id,
+      cohort: 'MEN',
+      startedAt: new Date('2025-11-03T15:00:00Z'),
+      endedAt: new Date('2026-04-15T16:00:00Z'),
+      endedReason: 'discharge',
+      assignedById: manager.id,
+    },
+  })
+
   // Maintenance is raised against the APARTMENT. Bed 12D carries its own
   // out-of-service note; the two read as related without being linked.
   await prisma.maintenanceRequest.create({
@@ -146,9 +190,11 @@ async function main() {
   Seeded:
     ${await prisma.apartment.count()} apartments (1 men's, 1 women's)
     ${await prisma.bed.count()} beds (1 out of service)
-    ${await prisma.resident.count()} residents, all with an active bed
+    ${await prisma.resident.count()} residents (5 housed, 1 awaiting a bed, 1 discharged)
     ${await prisma.user.count()} staff users
     ${await prisma.maintenanceRequest.count()} maintenance requests (1 open urgent, 1 resolved)
+
+  Any account you created with scripts/create-user.js was kept.
 
   Sign in with any of:
     admin@facility.test     (ADMIN)

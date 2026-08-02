@@ -3,6 +3,7 @@ import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '../generated/prisma/client.js'
 import { getRequestContext } from '../lib/requestContext.js'
 import { AUDIT_ACTION, AUDITED_MODELS, SOFT_DELETE_MODELS } from '../domain/constants.js'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { getDbActor } from '../lib/dbContext.js'
 
 if (!process.env.DATABASE_URL) {
@@ -133,7 +134,40 @@ const RLS_MODELS = new Set([
  * soft-delete extension's internal writes, which would otherwise run on the
  * bare client and be refused by a fail-closed policy.
  */
+/**
+ * The transaction currently in scope, if any. Set by runInTransaction so that
+ * withRlsClient reuses it instead of opening a nested one — Prisma cannot nest
+ * interactive transactions, and re-entering would also discard the actor
+ * context already established on the outer one.
+ */
+const txStorage = new AsyncLocalStorage()
+
+/**
+ * Runs a multi-step unit of work atomically, with the actor context set once.
+ *
+ * Intake is the motivating case: a Resident, a Stay and a BedAssignment must
+ * all exist or none of them. Without this each operation would commit
+ * separately and a failure halfway would leave a resident with no stay.
+ */
+export function runInTransaction(cb) {
+  const actor = getDbActor()
+  if (!actor) {
+    return Promise.reject(
+      new Error('runInTransaction needs a database actor context (runAsSystem or a request).'),
+    )
+  }
+  return base.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT set_config('app.actor_kind', ${actor.kind}, true),
+                                set_config('app.resident_id', ${actor.residentId ?? ''}, true)`
+    return txStorage.run(tx, () => cb())
+  })
+}
+
 function withRlsClient(model, cb) {
+  // Already inside a unit of work — reuse its transaction and its context.
+  const open = txStorage.getStore()
+  if (open) return cb(open)
+
   const actor = getDbActor()
 
   if (!actor) {

@@ -8,6 +8,7 @@
  * Run against a DISPOSABLE database:  node scripts/verify-constraints.js
  */
 import './lib/as-owner.js'
+import { resetFacilityData } from './lib/reset.js'
 import { prisma } from '../src/db/client.js'
 import { runAsSystem } from '../src/lib/dbContext.js'
 import { runWithRequestContext } from '../src/lib/requestContext.js'
@@ -47,11 +48,9 @@ async function mustAllow(name, fn) {
 
 async function main() {
   console.log('\nResetting test data…')
-  await prisma.$executeRawUnsafe(`
-    TRUNCATE "bed_assignments","stays","documents","emergency_contacts",
-             "beds","apartments","residents","users","programs"
-    RESTART IDENTITY CASCADE`)
-  await prisma.$executeRawUnsafe(`DELETE FROM "audit_log"`)
+  // Shared with seed.js so this cannot drift and quietly delete a real
+  // administrator account, which is exactly what it used to do.
+  await resetFacilityData(prisma, { quiet: true })
 
   // ── Seed ──────────────────────────────────────────────────────────────────
   const staff = await prisma.user.create({

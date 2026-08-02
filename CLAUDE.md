@@ -57,8 +57,17 @@ Use these terms in code, schema, and UI. Do not invent synonyms.
 Rough build order. Each is roughly one vertical slice.
 
 ### 1. Residents & intake
-Profile, emergency contacts, referral source, program/phase, intake date, expected
-discharge. Documents (agreements, IDs). Discharge with type and reason.
+**Built.** Roster table (search, include-discharged toggle) → full-width record page.
+Intake creates the person, their stay and optionally their bed **in one transaction**.
+Beds can be assigned, moved or released from the record. Discharge records a type and a
+required reason, closes the stay, frees the bed, and **cannot be undone** — a mistake is
+corrected by a new intake, not by editing the record.
+
+Managers and admins intake, discharge and move beds; techs read the roster.
+
+**Documents are deferred.** The `Document` table exists but nothing uploads yet: storing
+scanned IDs and agreements needs object storage, encryption at rest, and access brokered
+through the API so every read is authorised and audited. That is its own slice.
 
 ### 2. Beds & census
 Apartment → Bed. Assign, transfer, hold, mark out-of-service. The census view is the app's
@@ -293,6 +302,10 @@ sober-living/
 - **The frontends never touch the database.** All data access is HTTP to `server/`.
 - **Authorization lives in one shared middleware**, applied per route. No route is public
   by default — routes opt out of auth explicitly, never by omission.
+- **Multi-table writes go through `runInTransaction()`** from `db/client.js`. The RLS
+  extension opens a transaction per operation and Prisma cannot nest them, so an outer
+  `prisma.$transaction` would fail — this helper opens one, sets the actor context once,
+  and every operation inside reuses it. Intake is the motivating case.
 - **Always import the extended client from `db/client.js`, never a bare
   `new PrismaClient()`.** A bare client bypasses the soft-delete and audit extensions,
   which is exactly the failure mode they exist to prevent. `$queryRaw` deserves the same
@@ -365,8 +378,12 @@ USER_PASSWORD='...' node scripts/create-user.js \
 ```
 
 It upserts, so it can be re-run to reset a password, and it **revokes that user's live
-sessions** when the password changes. Note `seed.js` TRUNCATEs `users` — re-seeding
-removes accounts made this way, so re-run `create-user.js` afterwards.
+sessions** when the password changes.
+
+Accounts made this way **survive a reseed** — `seed.js` removes only the three
+`@facility.test` demo logins and leaves everything else alone. That is also why its reset
+uses a mix of TRUNCATE and DELETE rather than one TRUNCATE CASCADE: `users.residentId`
+references `residents`, so cascading from there would take the accounts with it.
 
 Two verification suites, both run against a live database:
 
@@ -375,6 +392,8 @@ Two verification suites, both run against a live database:
 - `node scripts/verify-apartments.js` — 24 assertions on apartments, beds and
   maintenance, including the admin/manager field split and the rules the database
   cannot enforce
+- `node scripts/verify-residents.js` — 24 assertions on the roster, intake,
+  bed moves and discharge
 - `npm run verify:rls` — 16 assertions proving a resident actor cannot read, count or
   write another resident's rows, and that the app role cannot bypass the policies
 
@@ -385,6 +404,7 @@ its users will be gone and every login assertion fails:
 npm run verify:constraints && node scripts/seed.js \
   && node scripts/verify-auth.js && node scripts/seed.js \
   && node scripts/verify-apartments.js && node scripts/seed.js \
+  && node scripts/verify-residents.js && node scripts/seed.js \
   && npm run verify:rls
 ```
 
