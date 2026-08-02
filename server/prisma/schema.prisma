@@ -108,17 +108,10 @@ model Apartment {
   name   String @unique
   cohort Cohort
 
-  /// IANA zone, e.g. "America/Chicago". Curfews, med windows and pass returns
-  /// are local-time concepts that cross midnight — every scheduled local time
-  /// is interpreted against this.
-  timezone String
-
-  addressLine1 String?
-  unitNumber   String?
-  city         String?
-  state        String?
-  postalCode   String?
-
+  /// No timezone or address here on purpose: the facility is a single site at a
+  /// single address, so both are facility-wide rather than per-unit. The
+  /// timezone lives in FACILITY_TIMEZONE. If a second site in another zone ever
+  /// opens, that is the assumption to revisit.
   beds                Bed[]
   maintenanceRequests MaintenanceRequest[]
 

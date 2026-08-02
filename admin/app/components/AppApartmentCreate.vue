@@ -12,7 +12,7 @@ const canCreate = computed(() => user.value?.role === STAFF_ROLE.ADMIN)
 const open = ref(false)
 const pending = ref(false)
 const error = ref('')
-const form = reactive({ name: '', cohort: 'MEN', timezone: 'America/Chicago' })
+const form = reactive({ name: '', cohort: 'MEN' })
 
 const cohorts = [
   { label: 'Men', value: 'MEN' },
@@ -26,7 +26,7 @@ async function submit() {
     await createApartment({ ...form })
     toast.add({ title: `${form.name} added`, color: 'success', icon: 'i-lucide-check' })
     open.value = false
-    Object.assign(form, { name: '', cohort: 'MEN', timezone: 'America/Chicago' })
+    Object.assign(form, { name: '', cohort: 'MEN' })
     emit('created')
   } catch (err) {
     error.value = err?.data?.error ?? 'Could not add the apartment.'
@@ -54,14 +54,6 @@ async function submit() {
           description="An apartment serves one cohort. This cannot be changed once it has beds."
         >
           <USelect v-model="form.cohort" :items="cohorts" value-key="value" class="w-full" />
-        </UFormField>
-
-        <UFormField
-          label="Timezone"
-          name="timezone"
-          description="Curfews and med windows are local times interpreted against this."
-        >
-          <UInput v-model="form.timezone" placeholder="America/Chicago" class="w-full" required />
         </UFormField>
 
         <div class="flex justify-end gap-2 pt-1">

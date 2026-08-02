@@ -49,13 +49,11 @@ async function main() {
     prisma.program.create({ data: { name: 'Phase 1', level: 1 } }),
     prisma.program.create({ data: { name: 'Phase 2', level: 2 } }),
   ])
-
-  const tz = 'America/Chicago'
   const apt12 = await prisma.apartment.create({
-    data: { name: 'Apt 12', cohort: 'MEN', timezone: tz, city: 'Austin', state: 'TX' },
+    data: { name: 'Apt 12', cohort: 'MEN' },
   })
   const apt14 = await prisma.apartment.create({
-    data: { name: 'Apt 14', cohort: 'WOMEN', timezone: tz, city: 'Austin', state: 'TX' },
+    data: { name: 'Apt 14', cohort: 'WOMEN' },
   })
 
   const mensBeds = await Promise.all(

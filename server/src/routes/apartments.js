@@ -18,15 +18,11 @@ const router = Router()
 // Admins own the physical layout; managers and techs read it.
 const adminOnly = requireRole(STAFF_ROLE.ADMIN)
 
+// No timezone or address: the facility is one site at one address. See
+// FACILITY_TIMEZONE.
 const apartmentBody = z.object({
   name: z.string().trim().min(1).max(80),
   cohort: z.enum(['MEN', 'WOMEN']),
-  timezone: z.string().trim().min(1).max(64),
-  addressLine1: z.string().trim().max(160).optional().nullable(),
-  unitNumber: z.string().trim().max(32).optional().nullable(),
-  city: z.string().trim().max(80).optional().nullable(),
-  state: z.string().trim().max(32).optional().nullable(),
-  postalCode: z.string().trim().max(16).optional().nullable(),
 })
 
 const bedsBody = z

@@ -33,12 +33,6 @@ watch(open, (isOpen) => {
   Object.assign(form, {
     name: props.apartment.name ?? '',
     cohort: props.apartment.cohort ?? 'MEN',
-    timezone: props.apartment.timezone ?? '',
-    addressLine1: props.apartment.addressLine1 ?? '',
-    unitNumber: props.apartment.unitNumber ?? '',
-    city: props.apartment.city ?? '',
-    state: props.apartment.state ?? '',
-    postalCode: props.apartment.postalCode ?? '',
   })
 })
 
@@ -113,35 +107,6 @@ async function destroy() {
             class="w-full"
           />
         </UFormField>
-
-        <UFormField
-          label="Timezone"
-          name="timezone"
-          description="Curfews, med windows and pass returns are local times read against this."
-        >
-          <UInput v-model="form.timezone" placeholder="America/Chicago" class="w-full" required />
-        </UFormField>
-
-        <div class="flex gap-3">
-          <UFormField label="Address" name="addressLine1" class="flex-1">
-            <UInput v-model="form.addressLine1" class="w-full" />
-          </UFormField>
-          <UFormField label="Unit" name="unitNumber" class="w-24">
-            <UInput v-model="form.unitNumber" class="w-full" />
-          </UFormField>
-        </div>
-
-        <div class="flex gap-3">
-          <UFormField label="City" name="city" class="flex-1">
-            <UInput v-model="form.city" class="w-full" />
-          </UFormField>
-          <UFormField label="State" name="state" class="w-20">
-            <UInput v-model="form.state" class="w-full" />
-          </UFormField>
-          <UFormField label="Postal code" name="postalCode" class="w-28">
-            <UInput v-model="form.postalCode" class="w-full" />
-          </UFormField>
-        </div>
 
         <div class="flex items-center justify-between gap-2 border-t border-[var(--color-hairline)] pt-4">
           <UButton

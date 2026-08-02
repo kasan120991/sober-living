@@ -70,13 +70,13 @@ async function main() {
   const techCreate = await admin('/apartments')
   const techTry = await tech('/apartments', {
     method: 'POST',
-    body: JSON.stringify({ name: 'Nope', cohort: 'MEN', timezone: 'America/Chicago' }),
+    body: JSON.stringify({ name: 'Nope', cohort: 'MEN' }),
   })
   techTry.status === 403 ? ok('a tech cannot create an apartment') : bad('tech blocked', techTry.status)
 
   const mgrTry = await manager('/apartments', {
     method: 'POST',
-    body: JSON.stringify({ name: 'Nope', cohort: 'MEN', timezone: 'America/Chicago' }),
+    body: JSON.stringify({ name: 'Nope', cohort: 'MEN' }),
   })
   mgrTry.status === 403
     ? ok('a house manager cannot create an apartment')
@@ -128,7 +128,7 @@ async function main() {
 
   const fresh = await admin('/apartments', {
     method: 'POST',
-    body: JSON.stringify({ name: `Apt Test ${Date.now() % 100000}`, cohort: 'WOMEN', timezone: 'America/Chicago' }),
+    body: JSON.stringify({ name: `Apt Test ${Date.now() % 100000}`, cohort: 'WOMEN' }),
   })
   fresh.status === 201 ? ok('an admin can create an apartment') : bad('create apartment', JSON.stringify(fresh.body))
 

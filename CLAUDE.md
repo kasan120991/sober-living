@@ -34,7 +34,7 @@ Use these terms in code, schema, and UI. Do not invent synonyms.
 
 | Term | Meaning |
 |---|---|
-| **Apartment** | The physical unit. A facility runs several. Serves exactly **one cohort** — this is how men and women stay housed separately. `Apartment` in code; there is no "house" or "property" entity. |
+| **Apartment** | The physical unit. A facility runs several. Serves exactly **one cohort** — this is how men and women stay housed separately. `Apartment` in code; there is no "house" or "property" entity. Carries no timezone or address: the facility is a **single site at one address**. |
 | **Cohort** | The housing and scheduling track: `MEN` or `WOMEN`. Distinct from gender identity, which is a separate concern with separate disclosure rules. Never overload the two. |
 | **Bed** | The unit of capacity. Lives directly in an Apartment — there is no room level. Beds are assigned, not apartments. |
 | **Resident** | A person living in the facility. Prefer this over "client" or "patient" in UI. `Resident` in code. |
@@ -463,8 +463,10 @@ no longer the default.
 - **JSDoc on domain functions and query modules.** Enough for editor autocomplete on
   `Resident`, `Bed`, `ScreenResult` shapes without adopting TS.
 - Timezone-aware timestamps stored as UTC. Curfews, passes, and med windows are
-  time-critical and cross midnight — always store the facility timezone alongside
-  scheduled local times.
+  time-critical and cross midnight, so every scheduled local time is read against the
+  facility timezone — a **single value in `FACILITY_TIMEZONE`**, not a column. The
+  facility is one site; if a second site in another zone ever opens, that is the
+  assumption to revisit.
 - Mobile-first CSS for anything a tech touches in the hallway.
 - Seed data should look like a real facility: several apartments across both cohorts, a
   full census, a few residents out on pass, one overdue sign-out.

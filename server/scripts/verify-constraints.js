@@ -64,10 +64,10 @@ async function main() {
   })
 
   const mensApt = await prisma.apartment.create({
-    data: { name: 'Apt 12', cohort: 'MEN', timezone: 'America/Chicago' },
+    data: { name: 'Apt 12', cohort: 'MEN' },
   })
   const womensApt = await prisma.apartment.create({
-    data: { name: 'Apt 14', cohort: 'WOMEN', timezone: 'America/Chicago' },
+    data: { name: 'Apt 14', cohort: 'WOMEN' },
   })
 
   const mensBed = await prisma.bed.create({
