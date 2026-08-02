@@ -78,10 +78,10 @@ const fmt = (d) =>
           <p class="text-muted-foreground mt-1 text-xs">
             <template v-if="showApartment && r.apartmentName">{{ r.apartmentName }} · </template>
             Reported by {{ r.reportedBy?.fullName ?? 'unknown' }} on
-            <span class="font-mono">{{ fmt(r.reportedAt) }}</span>
+            <span class="tabular-nums">{{ fmt(r.reportedAt) }}</span>
             <template v-if="r.resolvedAt">
               · Closed by {{ r.resolvedBy?.fullName }} on
-              <span class="font-mono">{{ fmt(r.resolvedAt) }}</span>
+              <span class="tabular-nums">{{ fmt(r.resolvedAt) }}</span>
             </template>
           </p>
 

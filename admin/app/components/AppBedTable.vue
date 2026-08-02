@@ -79,7 +79,7 @@ async function destroy(bed) {
         </thead>
         <tbody>
           <tr v-for="bed in beds" :key="bed.id" class="bg-card">
-            <td class="h-12 border-b px-3 font-mono text-[12.5px] font-semibold">{{ bed.label }}</td>
+            <td class="h-12 border-b px-3 font-semibold">{{ bed.label }}</td>
 
             <!-- Out of service and available are the two states a manager hunts
                  for, so they are the two that get a chip. -->

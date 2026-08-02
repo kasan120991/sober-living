@@ -195,7 +195,7 @@ async function submitRequest() {
                the last existing bed rather than restarting, which is easy to
                get wrong in your head. -->
           <p class="text-muted-foreground text-xs">
-            Will create <span class="text-foreground font-mono">{{ preview.join(', ') }}</span>
+            Will create <span class="text-foreground font-medium">{{ preview.join(', ') }}</span>
           </p>
         </template>
 

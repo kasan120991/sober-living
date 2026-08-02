@@ -96,15 +96,21 @@ inset or it will report a false failure.
 
 - Base unit 4px; app scale 4 · 8 · 12 · 16 · 24 · 32. No 64/96/128 — that is marketing rhythm.
 - Table rows 48px, cells `px-3`.
-- **Mono is for DATA ONLY** — bed labels, times, dates, IDs, phone numbers. They are read
-  in columns, and monospace is what makes a column of dates scannable. Pair with
-  `tabular-nums`.
-- **Labels and headings are not mono.** Section headings, table headers, badges and eyebrow
-  labels use the sans face. Monospace on a label is decoration; on a date it is function.
-  The rule of thumb: if you would ever compare it against the value on the row above, mono.
-  Otherwise sans.
-- Mono resolves to the system monospace stack — the preset loads Inter and Geist Sans only,
-  and there is no reason to pull down a third family for a handful of table cells.
+- **There is no monospace in this app.** Not on labels, not on bed labels, dates, IDs or
+  phone numbers. `font-mono` appears nowhere outside the vendored `ui/` folder, and adding
+  it back is a deliberate decision, not a default.
+  Two things made it worth removing rather than merely restricting. It resolved to the
+  system monospace stack, which is a different typeface on a manager's Mac than on a tech's
+  Android — so a screen that was tuned in one place was never quite right in the other.
+  And it cost roughly a point of size to sit beside Inter without looking oversized, which
+  is how the fact grid on a resident's record ended up with dates a point smaller than the
+  facts next to them.
+- **Column alignment comes from `tabular-nums`, which is what was actually wanted.**
+  Inter's tabular figures are fixed-width, so a column of dates still scans as a column.
+  Use it on dates, times, counts, currency and anything else read down a column. It is the
+  whole benefit mono was carrying, without the typeface change.
+- One family for text, then: Inter, with Geist Sans (`font-heading`) for headings.
+  Emphasis inside a sentence — a bed label, a generated name — is `font-medium`.
 - `font-heading` (Geist) for page and section headings; Inter everywhere else.
 - Wide tables scroll inside their own `overflow-x-auto` container — the page never scrolls
   sideways.

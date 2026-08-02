@@ -44,7 +44,7 @@ async function place(row) {
         </NuxtLink>
         has no bed.
         <template v-if="row.freeBed">
-          <span class="font-mono">{{ row.freeBed.label }}</span> is free in their cohort.
+          <span class="font-medium">{{ row.freeBed.label }}</span> is free in their cohort.
         </template>
         <template v-else>No bed is free in their cohort.</template>
       </span>

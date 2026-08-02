@@ -122,9 +122,9 @@ async function dropContact(id) {
 
 const FACTS = [
   { k: 'Program', v: (r) => r.current.program?.name ?? '—' },
-  { k: 'Intake', v: (r) => isoDate(r.current.intakeAt), mono: true },
-  { k: 'Expected out', v: (r) => isoDate(r.current.expectedDischargeAt) ?? '—', mono: true },
-  { k: 'Day', v: (r) => r.current.dayOfStay, mono: true },
+  { k: 'Intake', v: (r) => isoDate(r.current.intakeAt), num: true },
+  { k: 'Expected out', v: (r) => isoDate(r.current.expectedDischargeAt) ?? '—', num: true },
+  { k: 'Day', v: (r) => r.current.dayOfStay, num: true },
   { k: 'Referral', v: (r) => r.current.referralSource ?? '—' },
 ]
 </script>
@@ -157,14 +157,14 @@ const FACTS = [
         <div class="bg-card grid grid-cols-2 gap-x-6 gap-y-4 rounded-md border p-4 sm:grid-cols-3 lg:grid-cols-6">
           <div class="flex flex-col">
             <span class="text-muted-foreground text-[11.5px]">Bed</span>
-            <span v-if="resident.current.bed" class="font-mono text-[12.5px]">
+            <span v-if="resident.current.bed" class="text-[13.5px] font-medium">
               {{ resident.current.bed.apartmentName }} · {{ resident.current.bed.label }}
             </span>
             <span v-else class="text-warning text-[13px] font-medium">Awaiting a bed</span>
           </div>
           <div v-for="f in FACTS" :key="f.k" class="flex flex-col">
             <span class="text-muted-foreground text-[11.5px]">{{ f.k }}</span>
-            <span :class="f.mono ? 'font-mono text-[12.5px] tabular-nums' : 'text-[13.5px] font-medium'">
+            <span class="text-[13.5px] font-medium" :class="f.num && 'tabular-nums'">
               {{ f.v(resident) }}
             </span>
           </div>
@@ -205,7 +205,7 @@ const FACTS = [
               </span>
             </div>
             <div class="flex items-center gap-2">
-              <span class="font-mono text-[12.5px]">{{ c.phone }}</span>
+              <span class="tabular-nums">{{ c.phone }}</span>
               <Button v-if="canManage" variant="ghost" size="sm" :aria-label="`Remove ${c.name}`"
                       @click="dropContact(c.id)">
                 <X class="size-4" />
@@ -237,11 +237,11 @@ const FACTS = [
               </thead>
               <tbody>
                 <tr v-for="s in resident.stays" :key="s.id" class="bg-card">
-                  <td class="h-12 whitespace-nowrap border-b px-3 font-mono text-[12.5px] tabular-nums">
+                  <td class="h-12 whitespace-nowrap border-b px-3 tabular-nums">
                     {{ isoDate(s.intakeAt) }}
                   </td>
                   <td class="h-12 whitespace-nowrap border-b px-3">
-                    <span v-if="s.dischargedAt" class="font-mono text-[12.5px] tabular-nums">
+                    <span v-if="s.dischargedAt" class="tabular-nums">
                       {{ isoDate(s.dischargedAt) }}
                     </span>
                     <Badge v-else variant="outline" class="border-dashed">Current</Badge>
@@ -252,7 +252,7 @@ const FACTS = [
                   <td class="text-muted-foreground h-12 max-w-[32ch] truncate border-b px-3">
                     {{ s.dischargeReason ?? '—' }}
                   </td>
-                  <td class="h-12 whitespace-nowrap border-b px-3 font-mono text-[12px]">
+                  <td class="h-12 whitespace-nowrap border-b px-3">
                     {{ s.beds.map((b) => b.label).join(', ') || '—' }}
                   </td>
                 </tr>

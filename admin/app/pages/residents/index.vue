@@ -104,23 +104,23 @@ const COLUMNS = ['Resident', 'Cohort', 'Bed', 'Phase', 'Intake', 'Expected out',
                 <!-- "No bed" is the one exception state on this screen, so it is
                      the only thing here that gets colour. design.md §4. -->
                 <td class="h-12 whitespace-nowrap border-b border-border px-3">
-                  <span v-if="r.bed" class="font-mono text-[12.5px] text-foreground">
+                  <span v-if="r.bed" class="text-foreground">
                     {{ r.bed.apartmentName }} · {{ r.bed.label }}
                   </span>
                   <Badge v-else-if="r.status === 'ACTIVE'" variant="outline" class="border-warning/40 bg-warning/15 text-warning">No bed</Badge>
                   <span v-else class="text-muted-foreground/60">—</span>
                 </td>
 
-                <td class="h-12 whitespace-nowrap border-b border-border px-3 font-mono text-[12px]">
+                <td class="h-12 whitespace-nowrap border-b border-border px-3">
                   {{ r.program?.name ?? '—' }}
                 </td>
-                <td class="h-12 whitespace-nowrap border-b border-border px-3 font-mono text-[12.5px] tabular-nums">
+                <td class="h-12 whitespace-nowrap border-b border-border px-3 tabular-nums">
                   {{ isoDate(r.intakeAt) ?? '—' }}
                 </td>
-                <td class="h-12 whitespace-nowrap border-b border-border px-3 font-mono text-[12.5px] tabular-nums">
+                <td class="h-12 whitespace-nowrap border-b border-border px-3 tabular-nums">
                   {{ isoDate(r.expectedDischargeAt) ?? '—' }}
                 </td>
-                <td class="h-12 whitespace-nowrap border-b border-border px-3 font-mono text-[12.5px] tabular-nums">
+                <td class="h-12 whitespace-nowrap border-b border-border px-3 tabular-nums">
                   <span v-if="r.status === 'ACTIVE'">{{ r.dayOfStay }}</span>
                   <span v-else class="text-muted-foreground/60">discharged</span>
                 </td>
