@@ -1,0 +1,28 @@
+node_modules/
+dist/
+.output/
+.nuxt/
+.DS_Store
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+
+# Prisma generated client
+server/src/generated/
+
+*.log
+
+# Playwright MCP output
+.playwright-mcp/
+*.png
+!public/**/*.png
+
+# Nuxt
+.data/
+.nitro/
+.cache/
+
+# JetBrains
+.idea/

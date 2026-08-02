@@ -1,0 +1,514 @@
+// SoberLife — core data model
+//
+// Scope: apartments, beds, residents, stays, bed history, staff, audit.
+// Event tables (apartment checks, screens, med pass, service hours, sign-outs,
+// passes) come in later slices and follow the amendment pattern noted at the
+// bottom of this file. The schedule design is also noted there — decided, not
+// yet built.
+
+// Prisma 7: the connection URL is NOT declared here. It lives in
+// server/prisma.config.js for migrations, and reaches the client via the
+// driver adapter (@prisma/adapter-pg) in src/db/client.js.
+datasource db {
+  provider = "postgresql"
+}
+
+// `prisma-client-js` (the pre-v7 generator), NOT the v7 default `prisma-client`.
+// The v7 generator emits TypeScript, which this project does not use — see
+// CLAUDE.md. This one emits real .js plus .d.ts, so we get editor autocomplete
+// on every model without adopting a build step.
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Enums — mirrored as constants in server/src/domain/
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The housing + scheduling track. NOT a gender-identity field — see the note
+/// on Resident.cohort. An apartment serves exactly one cohort.
+enum Cohort {
+  MEN
+  WOMEN
+}
+
+enum StaffRole {
+  ADMIN
+  HOUSE_MANAGER
+  STAFF
+  RESIDENT
+}
+
+/// Physical state of the bed only. Occupancy is NOT stored here — it is derived
+/// from BedAssignment so the two can never disagree.
+enum BedStatus {
+  ACTIVE
+  OUT_OF_SERVICE
+}
+
+enum StayStatus {
+  ACTIVE
+  DISCHARGED
+}
+
+enum DischargeType {
+  SUCCESSFUL
+  AMA // left against medical advice / self-discharge
+  ADMINISTRATIVE // discharged by the facility
+  TRANSFER
+}
+
+enum AuditAction {
+  READ
+  CREATE
+  UPDATE
+  AMEND
+  SOFT_DELETE
+  LOGIN
+  LOGIN_FAILED
+  EXPORT
+}
+
+enum DocumentType {
+  RESIDENT_AGREEMENT
+  PHOTO_ID
+  INSURANCE
+  REFERRAL
+  INTAKE_FORM
+  DISCHARGE_SUMMARY
+  OTHER
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Property: Apartment → Bed
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The physical unit. Beds hang directly off it — there is no room level, and
+/// inspections are apartment checks rather than room checks.
+///
+/// An apartment serves exactly ONE cohort. This is the mechanism that keeps men
+/// and women housed separately: it is a property of the unit, not a filter
+/// applied at query time.
+model Apartment {
+  id     String @id @default(uuid(7))
+  name   String @unique
+  cohort Cohort
+
+  /// IANA zone, e.g. "America/Chicago". Curfews, med windows and pass returns
+  /// are local-time concepts that cross midnight — every scheduled local time
+  /// is interpreted against this.
+  timezone String
+
+  addressLine1 String?
+  unitNumber   String?
+  city         String?
+  state        String?
+  postalCode   String?
+
+  beds Bed[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  /// Referenced by Bed's composite foreign key — the first link in the chain
+  /// that makes a cohort mismatch impossible at the database level.
+  ///
+  /// Consequence worth knowing: Postgres will refuse to flip an apartment's
+  /// cohort while it still has beds. Converting a men's apartment to women's
+  /// is therefore an explicit, deliberate operation, not an UPDATE someone can
+  /// fire while people are living in it.
+  @@unique([id, cohort])
+  @@map("apartments")
+}
+
+model Bed {
+  id          String @id @default(uuid(7))
+  apartmentId String
+
+  /// Carried down from the apartment so the composite FK below can exist. A bed
+  /// cannot claim a cohort its apartment does not have.
+  cohort    Cohort
+  apartment Apartment @relation(fields: [apartmentId, cohort], references: [id, cohort])
+
+  /// Bed label within the apartment — "A", "B", "1". Combined with the
+  /// apartment name this is what staff say out loud: "12B".
+  label String
+
+  status           BedStatus @default(ACTIVE)
+  outOfServiceNote String?
+
+  assignments BedAssignment[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@unique([apartmentId, label])
+  /// Referenced by BedAssignment's composite foreign key.
+  @@unique([id, cohort])
+  @@map("beds")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// People
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A person. Survives discharge and readmission — the episode lives on Stay.
+model Resident {
+  id        String @id @default(uuid(7))
+  firstName String
+  lastName  String
+
+  dateOfBirth DateTime? @db.Date
+  phone       String?
+  email       String?
+
+  /// Which housing/scheduling track this resident is on. Deliberately separate
+  /// from gender identity: this drives bed eligibility and schedule scoping.
+  /// If the facility ever needs to record gender identity or pronouns, that is
+  /// a distinct field with distinct disclosure rules — do not overload this.
+  cohort Cohort
+
+  stays             Stay[]
+  emergencyContacts EmergencyContact[]
+  documents         Document[]
+  user              User?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([lastName, firstName])
+  /// Referenced by Stay's composite foreign key — see Stay.
+  @@unique([id, cohort])
+  @@map("residents")
+}
+
+/// One episode of residency: intake → discharge. A resident who returns gets a
+/// second Stay, so history stays clean and readmission is a first-class case.
+model Stay {
+  id String @id @default(uuid(7))
+
+  /// `cohort` is carried here so the relation below can be a COMPOSITE foreign
+  /// key, and so BedAssignment can join stay and bed on a matching cohort.
+  ///
+  /// Note there is deliberately NO apartmentId on Stay. The apartment a
+  /// resident currently lives in is derived from their active bed assignment —
+  /// storing it here too would create a second copy that a transfer could leave
+  /// stale, and would contradict the bed they are actually in.
+  residentId String
+  cohort     Cohort
+  resident   Resident @relation(fields: [residentId, cohort], references: [id, cohort])
+
+  programId String?
+  program   Program? @relation(fields: [programId], references: [id])
+
+  status              StayStatus @default(ACTIVE)
+  intakeAt            DateTime
+  expectedDischargeAt DateTime?
+
+  dischargedAt  DateTime?
+  dischargeType DischargeType?
+  /// Required by policy whenever dischargeType is set. Enforced in the service
+  /// layer — a discharge without a stated reason is not defensible later.
+  dischargeReason String?
+
+  /// Free text for now; likely becomes its own table once we know whether
+  /// referral sources need contact details and reporting.
+  referralSource String?
+
+  bedAssignments BedAssignment[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([status])
+  @@index([residentId])
+  /// Referenced by BedAssignment's composite foreign key.
+  @@unique([id, cohort])
+  @@map("stays")
+}
+
+model EmergencyContact {
+  id         String   @id @default(uuid(7))
+  residentId String
+  resident   Resident @relation(fields: [residentId], references: [id])
+
+  name         String
+  relationship String?
+  phone        String
+  isPrimary    Boolean @default(false)
+
+  /// 42 CFR Part 2: being listed as a contact does NOT authorize disclosure.
+  /// Consent is tracked separately before anything is shared with this person.
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([residentId])
+  @@map("emergency_contacts")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bed history — permanent, never deleted
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Answers "who was in bed 12B on March 12" for as long as the record is kept.
+/// Rows are never updated except to set endedAt, and never soft-deleted: this
+/// table has no deletedAt on purpose.
+///
+/// Note this records *assignment*, not physical presence — a resident out on a
+/// travel pass still holds their bed. Presence is a separate question answered
+/// by sign-outs and passes.
+model BedAssignment {
+  id String @id @default(uuid(7))
+
+  /// Both relations are COMPOSITE and share `cohort`, which is what closes the
+  /// loop: an assignment can only pair a bed and a stay whose cohorts match,
+  /// and since the bed's cohort comes from its apartment, a resident can never
+  /// be placed in a bed in the other cohort's apartment. Postgres enforces it —
+  /// there is no route, script, or manual query that can produce a violation.
+  cohort Cohort
+
+  bedId  String
+  bed    Bed    @relation(fields: [bedId, cohort], references: [id, cohort])
+  stayId String
+  stay   Stay   @relation(fields: [stayId, cohort], references: [id, cohort])
+
+  startedAt DateTime
+  /// Null means current. See the partial unique indexes noted below — they are
+  /// what actually prevent double-booking.
+  endedAt DateTime?
+
+  /// Why the assignment ended: "transfer to 12A", "discharge", "unit repair".
+  endedReason String?
+
+  assignedById String
+  assignedBy   User   @relation(fields: [assignedById], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([bedId, startedAt])
+  @@index([stayId])
+  @@map("bed_assignments")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Program / phase
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Phase privileges are FACILITY POLICY, not defaults to invent. Every
+/// privilege field below is nullable and ships empty — they get filled in from
+/// the facility's actual rules before this is used to gate anything.
+model Program {
+  id   String @id @default(uuid(7))
+  name String @unique
+  /// Ordering only — 1, 2, 3. Not a privilege level by itself.
+  level Int
+
+  curfewLocalTime      String? // "22:00", interpreted in the Apartment timezone
+  serviceHoursRequired Int?
+  passEligible         Boolean?
+  minDaysBeforePass    Int?
+
+  stays Stay[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("programs")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Documents
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Document {
+  id         String   @id @default(uuid(7))
+  residentId String
+  resident   Resident @relation(fields: [residentId], references: [id])
+
+  type     DocumentType
+  fileName String
+
+  /// Object-storage key, never a public URL. Access is brokered by the API so
+  /// every read is authorized and audited — files must not be publicly
+  /// reachable by guessing a link.
+  storageKey String
+  mimeType   String
+  sizeBytes  Int
+
+  uploadedById String
+  uploadedBy   User   @relation(fields: [uploadedById], references: [id])
+
+  createdAt DateTime  @default(now())
+  deletedAt DateTime?
+
+  @@index([residentId])
+  @@map("documents")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Staff & access
+// ─────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id           String    @id @default(uuid(7))
+  email        String    @unique
+  passwordHash String
+  fullName     String
+  role         StaffRole
+
+  /// Set only for RESIDENT accounts. Whether residents get accounts at intake
+  /// is still open — see CLAUDE.md open questions.
+  residentId String?   @unique
+  resident   Resident? @relation(fields: [residentId], references: [id])
+
+  isActive    Boolean   @default(true)
+  lastLoginAt DateTime?
+
+  /// Lockout after repeated failures. Counted per account, reset on success.
+  failedLoginCount Int       @default(0)
+  lockedUntil      DateTime?
+
+  bedAssignments BedAssignment[]
+  documents      Document[]
+  auditEntries   AuditLog[]
+  sessions       Session[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("users")
+}
+
+/// Server-side sessions, deliberately NOT stateless JWTs.
+///
+/// CLAUDE.md requires server-enforced idle timeout and the ability to end a
+/// session immediately — when a staff member is terminated, or a shared house
+/// phone goes missing. A JWT cannot be revoked without a blocklist, and a
+/// blocklist is this table with extra steps.
+///
+/// The cookie carries only a random opaque id. `tokenHash` means a database
+/// leak does not hand over live sessions.
+model Session {
+  id        String @id @default(uuid(7))
+  tokenHash String @unique
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  /// Sliding: bumped on each authenticated request. Idle past this and the
+  /// session is dead regardless of absoluteExpiresAt.
+  idleExpiresAt DateTime
+  /// Hard ceiling. A session cannot be kept alive forever by staying active.
+  absoluteExpiresAt DateTime
+
+  revokedAt     DateTime?
+  revokedReason String?
+
+  ipAddress String?
+  userAgent String?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, revokedAt])
+  @@index([idleExpiresAt])
+  @@map("sessions")
+}
+
+/// Append-only. Never updated, never deleted, no deletedAt. Written by the
+/// Prisma client extension so it cannot be forgotten at a call site.
+///
+/// IDs ONLY — no names, no screen results, no med details. This table will be
+/// read by people who are not authorized to see the underlying records.
+model AuditLog {
+  id String   @id @default(uuid(7))
+  at DateTime @default(now())
+
+  actorId   String?
+  actor     User?      @relation(fields: [actorId], references: [id])
+  actorRole StaffRole?
+
+  action AuditAction
+  /// Model name, e.g. "Resident".
+  entity   String
+  entityId String?
+
+  /// Which resident's data this touched, when applicable — lets us answer
+  /// "show every access to this resident's record" without scanning payloads.
+  subjectResidentId String?
+
+  ipAddress String?
+  userAgent String?
+  requestId String?
+
+  @@index([subjectResidentId, at])
+  @@index([actorId, at])
+  @@index([entity, entityId])
+  @@map("audit_log")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NOT EXPRESSIBLE IN PRISMA — add as raw SQL to the first migration
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// 1. One live occupant per bed:
+//      CREATE UNIQUE INDEX one_active_assignment_per_bed
+//        ON bed_assignments (bed_id) WHERE ended_at IS NULL;
+//
+// 2. One live bed per stay:
+//      CREATE UNIQUE INDEX one_active_bed_per_stay
+//        ON bed_assignments (stay_id) WHERE ended_at IS NULL;
+//
+// 3. Row-level security policies (see CLAUDE.md) — resident accounts must not
+//    be able to read rows belonging to other residents.
+//
+// (Bed-to-apartment consistency needs nothing here: with Stay.apartmentId gone,
+// the active bed assignment IS the apartment, so the two cannot disagree.)
+//
+// Prisma cannot express partial unique indexes, so these go into the generated
+// migration before it is applied.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// SCHEDULE DESIGN — decided, not yet built
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Some events are men-only, some women-only, and some are attended by both —
+// often at DIFFERENT times, which is the whole point of gendered scheduling.
+// So the cohort does not live on the event; it lives on the occurrence:
+//
+//   ScheduleEvent  { id, title, description, location, apartmentId?, recurrence }
+//   ScheduleEventCohort { eventId, cohort, startsAtLocal, endsAtLocal }
+//         @@unique([eventId, cohort])
+//
+//   men-only        → one row  (MEN)
+//   women-only      → one row  (WOMEN)
+//   both, same time → two rows, same time
+//   both, staggered → two rows, different times   ← the realistic case
+//
+// A resident's schedule is always a join through their cohort. There is no
+// nullable `cohort` column that silently means "everyone", which is the failure
+// mode CLAUDE.md warns about — a forgotten filter would otherwise show a
+// resident the other cohort's meeting times.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// AMENDMENT PATTERN — for the event tables in later slices
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Apartment checks, drug screens, med logs and service hours are evidence. They
+// are never updated in place. Each of those tables carries:
+//
+//   supersedesId    String?  @unique   // the entry this one corrects
+//   supersededById  String?  @unique   // set on the original when corrected
+//   amendmentReason String?            // required when supersedesId is set
+//   recordedById    String             // who authored this version
+//
+// A correction INSERTs a new row pointing at the original and marks the
+// original superseded. Reads filter to `supersededById IS NULL` for the current
+// view; the full chain stays available for audit.

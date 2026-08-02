@@ -1,0 +1,116 @@
+@import "tailwindcss";
+@import "@nuxt/ui";
+
+/* ─── SOBERLIFE DESIGN TOKENS ────────────────────────────────────────────
+   Transcribed from design.md, which is the source of truth. This block is
+   COPIED into each app, never imported across admin/ and client/ — see
+   CLAUDE.md on why the two apps share tokens but not code.
+   ──────────────────────────────────────────────────────────────────────── */
+@theme {
+  /* ── Ink & surface (Geist) ── */
+  --color-ink: #171717;
+  --color-body: #4d4d4d;
+  --color-mute: #8f8f8f;
+  --color-faint: #a1a1a1;
+  --color-hairline: #ebebeb;
+  --color-hairline-soft: #f2f2f2;
+  --color-canvas: #fafafa;
+  --color-elevated: #ffffff;
+
+  /* ── Neutral scale (Nuxt UI `neutral` — named "geist", NOT "slate": Tailwind ships a built-in
+     slate that is blue-tinted, and reusing the name silently loses our greys) ── */
+  --color-geist-50: #fafafa;
+  --color-geist-100: #f2f2f2;
+  --color-geist-200: #ebebeb;
+  --color-geist-300: #d4d4d4;
+  --color-geist-400: #a1a1a1;
+  --color-geist-500: #8f8f8f;
+  --color-geist-600: #4d4d4d;
+  --color-geist-700: #333333;
+  --color-geist-800: #262626;
+  --color-geist-900: #171717;
+  --color-geist-950: #0a0a0a;
+
+  /* ── Status — success is OURS, not Vercel's. See design.md §4. ── */
+  --color-success: #16a34a;
+  --color-success-soft: #dcfce7;
+  --color-success-deep: #15803d;
+
+  --color-warning: #f5a623;
+  --color-warning-soft: #ffefcf;
+  --color-warning-deep: #ab570a;
+
+  --color-error: #ee0000;
+  --color-error-soft: #ffe5e5;
+  --color-error-deep: #c50000;
+
+  --color-info: #0070f3;
+  --color-info-soft: #d3e5ff;
+  --color-info-deep: #0761d1;
+
+  /* ── Type ──
+     Geist is self-hosted via @nuxt/fonts (no third-party CDN — no request
+     carrying our URLs to an outside host). See CLAUDE.md compliance posture. */
+  --font-sans: "Geist", "Inter", system-ui, sans-serif;
+  --font-mono: "Geist Mono", "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+
+:root {
+  /* Geist's primary is a flat near-black. Nuxt UI rejects shadeless colors in
+     app.config, so it is set here directly. Hover/active derive via alpha. */
+  --ui-primary: var(--color-ink);
+
+  --ui-radius: 6px; /* Geist app chrome: tight 6px squares */
+  --ui-container: 90rem; /* wide — this app is data-dense */
+}
+
+/* MUST be inside @layer base.
+   Cascade layers rank UNLAYERED styles above layered ones, so an unlayered
+   `body { color }` here silently outranks every Tailwind and Nuxt UI utility —
+   inputs lose their ring color and fall back to currentColor, text-muted stops
+   working, and the whole component library quietly renders in body grey. */
+@layer base {
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-body);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-ink);
+    outline-offset: 2px;
+  }
+}
+
+/* ─── Nuxt UI semantic tokens → our tokens ───────────────────────────────
+   Mapped explicitly rather than inferred from the neutral ramp, so a Nuxt UI
+   upgrade cannot quietly restyle every surface in the app. */
+:root {
+  /* `bg-default` is the surface components sit ON (inputs, cards, menus), so it
+     is white — not the page canvas. The page background comes from the @layer
+     base rule above. design.md §3: white inputs, hairline border, flat. */
+  --ui-bg: var(--color-elevated);
+  --ui-bg-muted: var(--color-canvas);
+  --ui-bg-elevated: var(--color-hairline-soft);
+  --ui-bg-accented: var(--color-hairline);
+
+  --ui-border: var(--color-hairline);
+  --ui-border-muted: var(--color-hairline);
+  --ui-border-accented: var(--color-hairline);
+
+  --ui-text-dimmed: var(--color-faint);
+  --ui-text-muted: var(--color-mute);
+  --ui-text-toned: var(--color-body);
+  --ui-text: var(--color-body);
+  --ui-text-highlighted: var(--color-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
