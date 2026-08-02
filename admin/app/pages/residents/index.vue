@@ -85,11 +85,21 @@ const shownCapacity = computed(() => {
 
 <template>
   <AppPage title="Residents">
-    <template #actions>
-      <AppResidentIntake v-if="canIntake" @intaken="load" />
-    </template>
-
     <div class="flex flex-col gap-4">
+      <AppPageHeading title="Residents">
+        <template #description>
+          <span class="tabular-nums">{{ counts.ALL }}</span> in the house across two cohorts.
+          <template v-if="unhoused.length">
+            <span class="tabular-nums">{{ unhoused.length }}</span>
+            awaiting placement.
+          </template>
+          <template v-else>Everyone has a bed.</template>
+        </template>
+        <template #actions>
+          <AppResidentIntake v-if="canIntake" @intaken="load" />
+        </template>
+      </AppPageHeading>
+
       <div class="flex flex-wrap items-center gap-3">
         <Tabs v-model="cohort">
           <TabsList>

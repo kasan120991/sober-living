@@ -50,8 +50,12 @@ defineProps({
       </BreadcrumbList>
     </Breadcrumb>
 
+    <!-- The bell is last on every page and belongs to the shell, not to any
+         screen: it is the same three situations whether you are on the roster
+         or in an apartment. Page actions sit to its left. -->
     <div class="ml-auto flex shrink-0 items-center gap-2">
       <slot name="actions" />
+      <AppNotifications />
     </div>
   </header>
 </template>

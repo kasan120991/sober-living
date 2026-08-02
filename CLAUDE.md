@@ -160,6 +160,24 @@ violation as "already recorded", not as an error. **Before writing that integrat
 the Stripe note under Compliance posture** — what may be sent to Stripe is a 42 CFR Part 2
 question, not a technical one.
 
+### 12. Notifications
+**Built.** A bell in the app header on every page, showing situations rather than messages:
+an unplaced resident, an urgent open maintenance request, a bed out of service.
+
+**There is no Notification table, deliberately.** Everything is derived from current state
+on each read, which means it cannot go stale, cannot be dismissed into a lie, and needs no
+job to keep it honest — a resident leaves the list the moment they get a bed, not when
+somebody remembers to mark it read. The cost is that "unread" cannot mean anything, so the
+badge is a live count of open situations. If per-user dismissal is ever wanted, that is a
+real table *and* a real decision about whether one person dismissing hides it from everyone.
+
+The badge counts only `action` items. A bed out of service is worth seeing and is not a
+number anyone should feel behind on.
+
+**Nothing from modules 5 or 6 goes in the bell without a separate think.** A name against
+"has no bed" is operational. A name against a screen result is a disclosure to whoever is
+standing behind the person holding the phone.
+
 ### Likely later
 Incident reports, rent/fee ledger, staff shifts and handoff notes, curfew tracking,
 resident chores, visitor log, waitlist, reporting/exports for licensing and referral
@@ -279,6 +297,11 @@ The preset owns colour and type. What it does not decide, and we do:
   actually wanted; the face itself resolved to whatever the device happened to have.
 - **Fonts are self-hosted** by `@nuxt/fonts`. The preset ships Google Fonts CDN `@import`s,
   which would put a third-party request on every page load.
+- **The app header is shell, not page.** Trigger, breadcrumb, page actions, then the
+  notification bell, always last. A page that wants a visible heading uses `AppPageHeading`
+  in the body and moves its primary action there — the roster does. That repeats the
+  breadcrumb title deliberately: since matching sidebar-08 the breadcrumb is 14px regular,
+  right for a trail and too quiet to open a page with.
 - **Forms use `AppField`**, not shadcn's `Form` — that one is vee-validate based and we
   validate server-side with zod. **Toasts go through `useNotify()`**, not `vue-sonner`
   directly. **Page headers go through `AppPageHeader`.** That header has no bottom rule and
@@ -508,8 +531,8 @@ Two verification suites, both run against a live database:
 - `node scripts/verify-apartments.js` — 24 assertions on apartments, beds and
   maintenance, including the admin/manager field split and the rules the database
   cannot enforce
-- `node scripts/verify-residents.js` — 24 assertions on the roster, intake,
-  bed moves and discharge
+- `node scripts/verify-residents.js` — 30 assertions on the roster, intake,
+  bed moves, discharge and the notification bell
 - `node scripts/verify-ledger.js` — 25 assertions on derived balances, the append-only
   guards, dollar-to-cent parsing, and processor-reference idempotency
 - `npm run verify:rls` — 18 assertions proving a resident actor cannot read, count or

@@ -192,6 +192,65 @@ async function main() {
     ? ok('the discharged resident leaves the default roster')
     : bad('roster excludes discharged', 'still listed')
 
+  console.log('\n\x1b[1mThe bell\x1b[0m')
+
+  // Notifications are derived from current state, never stored — so the test
+  // is that they track reality, not that a row was written somewhere.
+  const notif = await tech('/notifications')
+  notif.status === 200 && Array.isArray(notif.body?.items)
+    ? ok('any staff role can read notifications')
+    : bad('notifications readable', `${notif.status}`)
+
+  // Gated on the roster rather than assumed: this suite mutates as it runs, and
+  // an assertion that only holds on a freshly seeded database is a trap for
+  // whoever runs it twice.
+  const kinds = new Set((notif.body?.items ?? []).map((i) => i.kind))
+  const rosterUnhoused = (await admin('/residents')).body.unhoused.length
+  rosterUnhoused === 0 || kinds.has('UNHOUSED')
+    ? ok(
+        rosterUnhoused
+          ? 'an unplaced resident surfaces in the bell'
+          : 'nobody is unplaced, and the bell agrees',
+      )
+    : bad('unhoused surfaces', [...kinds].join(', ') || 'no items')
+
+  const actionable = (notif.body?.items ?? []).filter((i) => i.level === 'action').length
+  notif.body?.actionCount === actionable
+    ? ok(`the badge counts only actionable items (${actionable} of ${notif.body.items.length})`)
+    : bad('badge count', `${notif.body?.actionCount} vs ${actionable}`)
+
+  const watchOnly = (notif.body?.items ?? []).filter((i) => i.level === 'watch')
+  watchOnly.every((i) => i.kind === 'BED_OUT_OF_SERVICE')
+    ? ok('an out-of-service bed is shown but does not inflate the badge')
+    : bad('watch level', JSON.stringify(watchOnly.map((i) => i.kind)))
+
+  // The point of deriving rather than storing is that the bell cannot drift
+  // from reality. Assert exactly that: the set of unhoused notifications is the
+  // set of unhoused residents, no more and no less.
+  //
+  // Checked by comparison rather than by placing someone in a bed — a suite
+  // that mutates to prove a point cannot be run twice, and this one is run
+  // between other suites.
+  // Compared against the roster's own rows rather than its `unhoused` helper,
+  // so this asserts the invariant itself — a flagged stay is a stay with no bed
+  // — and not the behaviour of one convenience query.
+  const roster = (await tech('/notifications')).body
+  const rosterRows = (await admin('/residents')).body.residents
+  const flagged = new Set(
+    (roster.items ?? []).filter((i) => i.kind === 'UNHOUSED').map((i) => i.id.split(':')[1]),
+  )
+  const bedless = new Set(
+    rosterRows.filter((r) => r.status === 'ACTIVE' && !r.bed).map((r) => r.stayId),
+  )
+  flagged.size === bedless.size && [...flagged].every((id) => bedless.has(id))
+    ? ok(`the bell matches the roster exactly (${flagged.size} unplaced)`)
+    : bad('bell matches roster', `flagged ${[...flagged]} vs bedless ${[...bedless]}`)
+
+  const housedFlagged = rosterRows.filter((r) => r.bed && flagged.has(r.stayId))
+  housedFlagged.length === 0
+    ? ok('nobody with a bed is flagged — the item clears itself, with nothing to dismiss')
+    : bad('stale notification', housedFlagged.map((r) => r.fullName).join(', '))
+
   console.log('\n\x1b[1mAudit\x1b[0m')
 
   const { prisma } = await import('../src/db/client.js')
