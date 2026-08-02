@@ -79,6 +79,8 @@ async function main() {
     { first: 'Marisol', last: 'Ferrer', cohort: 'WOMEN', bed: womensBeds[1], program: phase1 },
   ]
 
+  const seededStays = []
+
   for (const p of people) {
     const resident = await prisma.resident.create({
       data: { firstName: p.first, lastName: p.last, cohort: p.cohort },
@@ -111,6 +113,7 @@ async function main() {
         isPrimary: true,
       },
     })
+    seededStays.push({ person: p, stayId: stay.id })
   }
 
   // Two states the roster has to handle, seeded so they are always visible:
@@ -159,6 +162,110 @@ async function main() {
     },
   })
 
+  // ── Fee ledger ────────────────────────────────────────────────────────────
+  // Not only rent: laundry, trips and damages land on the same balance. Seeded
+  // so the roster shows the four states that actually occur — square, part-paid,
+  // badly behind, and in credit — because a column where every row reads $0.00
+  // tells you nothing about whether the column works.
+  const CENTS = (dollars) => Math.round(dollars * 100)
+  const MONTHS = ['2026-05', '2026-06', '2026-07']
+
+  /** How much of the rent each person has actually paid, by month. */
+  const paymentProfile = {
+    Whitfield: [1, 1, 1], // square
+    Ocampo: [1, 1, 0], // a month behind
+    Castillo: [1, 0.5, 0], // badly behind — the one a manager needs to see
+    Boone: [1, 1, 1],
+    Ferrer: [1, 1, 1], // plus a credit below, so one row shows a negative
+  }
+
+  for (const { person, stayId } of seededStays) {
+    const paid = paymentProfile[person.last] ?? [1, 1, 1]
+
+    for (const [i, month] of MONTHS.entries()) {
+      await prisma.ledgerEntry.create({
+        data: {
+          stayId,
+          type: 'CHARGE',
+          category: 'RENT',
+          amountCents: CENTS(650),
+          description: `Rent ${month}`,
+          occurredAt: new Date(`${month}-01T12:00:00Z`),
+          recordedById: manager.id,
+        },
+      })
+
+      const share = paid[i] ?? 0
+      if (share > 0) {
+        await prisma.ledgerEntry.create({
+          data: {
+            stayId,
+            type: 'PAYMENT',
+            amountCents: CENTS(650 * share),
+            description: share === 1 ? `Rent ${month} paid` : `Rent ${month} part payment`,
+            occurredAt: new Date(`${month}-03T12:00:00Z`),
+            recordedById: manager.id,
+            // Stripe-shaped, and unique: a webhook delivered twice must not be
+            // able to post this payment a second time.
+            externalRef: `pi_seed_${stayId.slice(-8)}_${month}`,
+          },
+        })
+      }
+    }
+
+    // The fees that make this a fee ledger rather than a rent ledger.
+    await prisma.ledgerEntry.create({
+      data: {
+        stayId,
+        type: 'CHARGE',
+        category: 'LAUNDRY',
+        amountCents: CENTS(20),
+        description: 'Laundry — July',
+        occurredAt: new Date('2026-07-05T12:00:00Z'),
+        recordedById: tech.id,
+      },
+    })
+  }
+
+  const byLast = (last) => seededStays.find((x) => x.person.last === last)?.stayId
+
+  await prisma.ledgerEntry.create({
+    data: {
+      stayId: byLast('Boone'),
+      type: 'CHARGE',
+      category: 'TRIP',
+      amountCents: CENTS(35),
+      description: 'Group outing — transport share',
+      occurredAt: new Date('2026-07-19T12:00:00Z'),
+      recordedById: tech.id,
+    },
+  })
+
+  await prisma.ledgerEntry.create({
+    data: {
+      stayId: byLast('Castillo'),
+      type: 'CHARGE',
+      category: 'DAMAGE',
+      amountCents: CENTS(85),
+      description: 'Replaced bedroom door handle',
+      occurredAt: new Date('2026-06-22T12:00:00Z'),
+      recordedById: manager.id,
+    },
+  })
+
+  // A credit, so one resident sits in credit and the roster has to render a
+  // negative balance rather than assuming money only ever flows one way.
+  await prisma.ledgerEntry.create({
+    data: {
+      stayId: byLast('Ferrer'),
+      type: 'CREDIT',
+      amountCents: CENTS(120),
+      description: 'Program fee waived — hardship, approved by director',
+      occurredAt: new Date('2026-07-11T12:00:00Z'),
+      recordedById: manager.id,
+    },
+  })
+
   // Maintenance is raised against the APARTMENT. Bed 12D carries its own
   // out-of-service note; the two read as related without being linked.
   await prisma.maintenanceRequest.create({
@@ -193,6 +300,7 @@ async function main() {
     ${await prisma.resident.count()} residents (5 housed, 1 awaiting a bed, 1 discharged)
     ${await prisma.user.count()} staff users
     ${await prisma.maintenanceRequest.count()} maintenance requests (1 open urgent, 1 resolved)
+    ${await prisma.ledgerEntry.count()} ledger entries (rent, laundry, a trip, a damage, one credit)
 
   Any account you created with scripts/create-user.js was kept.
 

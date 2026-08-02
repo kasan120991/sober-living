@@ -1,6 +1,7 @@
 import { prisma, runInTransaction } from '../db/client.js'
 import { HttpError } from '../middleware/authorize.js'
 import { STAY_STATUS } from '../domain/constants.js'
+import { balancesByStay, balanceOfStay } from './ledger.js'
 
 /**
  * A resident's current stay is the one that has not been discharged. There is
@@ -68,7 +69,12 @@ export async function listResidents({ includeDischarged = false } = {}) {
   const rows = residents.map(shapeRow)
   // A resident with no active stay has been discharged. Hidden by default —
   // the roster is about who is here now.
-  return includeDischarged ? rows : rows.filter((r) => r.status === STAY_STATUS.ACTIVE)
+  const visible = includeDischarged ? rows : rows.filter((r) => r.status === STAY_STATUS.ACTIVE)
+
+  // One grouped query for every balance on screen, rather than one per row.
+  // Derived here and never stored — see services/ledger.js.
+  const balances = await balancesByStay(visible.map((r) => r.stayId))
+  return visible.map((r) => ({ ...r, balanceCents: r.stayId ? (balances.get(r.stayId) ?? 0) : null }))
 }
 
 export async function getResident(id) {
@@ -104,6 +110,7 @@ export async function getResident(id) {
     emergencyContacts: resident.emergencyContacts,
     current: current
       ? {
+          balanceCents: await balanceOfStay(current.id),
           stayId: current.id,
           intakeAt: current.intakeAt,
           expectedDischargeAt: current.expectedDischargeAt,

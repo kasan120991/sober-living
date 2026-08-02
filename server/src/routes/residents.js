@@ -19,6 +19,7 @@ import {
   updateContact,
   updateResident,
 } from '../services/residents.js'
+import { activeStayIdFor, listEntries, postEntry } from '../services/ledger.js'
 
 const router = Router()
 
@@ -60,6 +61,35 @@ const residentPatch = z.object({
 const dischargeBody = z.object({
   dischargeType: z.enum(['SUCCESSFUL', 'AMA', 'ADMINISTRATIVE', 'TRANSFER']),
   dischargeReason: z.string().trim().min(1).max(2000),
+})
+
+// Money is entered in dollars by a human and stored in cents. Parsing here
+// rather than trusting a client-side multiply: 12.10 * 100 is 1209.9999... in
+// float, and a cent lost on every charge is a ledger nobody can reconcile.
+const dollarsToCents = z
+  .union([z.number(), z.string()])
+  .transform((v, ctx) => {
+    const s = String(v).trim().replace(/[$,]/g, '')
+    if (!/^\d+(\.\d{1,2})?$/.test(s)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Enter an amount like 650 or 650.50' })
+      return z.NEVER
+    }
+    const [whole, frac = ''] = s.split('.')
+    const cents = Number(whole) * 100 + Number(frac.padEnd(2, '0'))
+    if (cents <= 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Amount must be more than zero' })
+      return z.NEVER
+    }
+    return cents
+  })
+
+const ledgerBody = z.object({
+  type: z.enum(['CHARGE', 'PAYMENT', 'CREDIT']),
+  category: z.enum(['RENT', 'LAUNDRY', 'TRIP', 'PROGRAM_FEE', 'DAMAGE', 'OTHER']).optional().nullable(),
+  amount: dollarsToCents,
+  description: z.string().trim().min(1).max(300),
+  occurredAt: iso.optional().nullable(),
+  correctsId: z.string().min(1).optional().nullable(),
 })
 
 const contactBody = z.object({
@@ -140,6 +170,41 @@ router.delete(
   handler(async (req, res) => {
     const reason = typeof req.body?.reason === 'string' ? req.body.reason : null
     res.json(await releaseBed(req.params.id, reason))
+  }),
+)
+
+// ── Fee ledger ────────────────────────────────────────────────────────────
+// Read is open to any staff member: a tech asked "what do I owe" at the door
+// should be able to answer without finding a manager. Posting to it is not.
+router.get(
+  '/:id/ledger',
+  handler(async (req, res) => {
+    const stayId = await activeStayIdFor(req.params.id)
+    if (!stayId) return res.json({ entries: [], balanceCents: 0, stayId: null })
+    res.json({ ...(await listEntries(stayId)), stayId })
+  }),
+)
+
+router.post(
+  '/:id/ledger',
+  managers,
+  handler(async (req, res) => {
+    const data = parseBody(ledgerBody, req.body)
+    const stayId = await activeStayIdFor(req.params.id)
+    if (!stayId) throw new Error('This resident has no active stay to bill.')
+    const entry = await postEntry(
+      {
+        stayId,
+        type: data.type,
+        category: data.category ?? null,
+        amountCents: data.amount,
+        description: data.description,
+        occurredAt: data.occurredAt,
+        correctsId: data.correctsId ?? null,
+      },
+      req.session.userId,
+    )
+    res.status(201).json(entry)
   }),
 )
 

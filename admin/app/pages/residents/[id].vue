@@ -186,6 +186,15 @@ const FACTS = [
         </div>
       </section>
 
+      <!-- The lines behind the balance shown on the roster. A total nobody can
+           break down is not defensible to a resident who disputes it. -->
+      <AppLedger
+        v-if="resident.current"
+        :resident-id="resident.id"
+        :can-post="isCurrent"
+        @posted="load"
+      />
+
       <!-- Emergency contacts -->
       <section class="flex flex-col gap-3">
         <div class="flex items-center justify-between gap-3">

@@ -49,6 +49,8 @@ Use these terms in code, schema, and UI. Do not invent synonyms.
 | **Med pass** | The scheduled window in which staff observe residents taking their own medication. |
 | **Community service** | Hours a resident owes and works off. Tracked against a target. |
 | **Intake / Discharge** | Entering and leaving the program. Discharge has a type (successful, AMA, administrative). |
+| **Ledger** | A stay's fee history — rent, laundry, trips, program fees, damages, and the payments and credits against them. Append-only. |
+| **Balance** | What a resident owes, always `SUM(charges) − SUM(payments + credits)`. **Derived, never stored.** Negative means they are in credit. |
 
 ---
 
@@ -126,6 +128,38 @@ Any staff may file one; admin and house managers close them, and closing require
 resolution note. Deliberately independent of `Bed.status` — maintenance is a property of
 the unit, out-of-service is a property of the bed, and neither drives the other.
 
+### 11. Fee ledger
+**Built (partly).** Not a rent ledger — a balance carries rent, laundry, trips, program
+fees and damages, categorised so "what did we bill in laundry last quarter" is answerable
+without grepping descriptions.
+
+Three properties do the work:
+
+- **The balance is derived on every read**, never stored. A stored total is a second source
+  of truth, and the day it disagrees with the lines beneath it there is no way to tell which
+  is wrong. `verify-ledger.js` asserts no `balance` column exists anywhere.
+- **The table is append-only**, more strictly than `bed_assignments` — no updates at all.
+  A mistake is corrected by a new entry with `correctsId` pointing at the one it fixes, and
+  a correction must stay inside its own stay. Enforced by trigger and by revoked privilege,
+  so it holds against a direct `psql` session, not just against our routes.
+- **The amount is always positive**; the sign lives in `type`. A negative charge and a
+  payment would be two ways to write the same fact, and every sum would then depend on
+  which one whoever typed it happened to pick.
+
+Entries hang off **Stay**, not Resident: a resident who leaves and returns gets a new stay,
+and money from the previous episode belongs to that episode.
+
+Any staff member may read a balance — a tech asked "what do I owe" at the door should not
+have to find a manager. Only admins and house managers may post to it.
+
+**Still to build: Stripe.** `LedgerEntry.externalRef` is unique and reserved for the
+processor's own id, which is the piece that is painful to retrofit — webhooks are delivered
+at-least-once and this table cannot be corrected by deleting a row, so without it one
+retried webhook is a permanent duplicate payment. A handler should treat the unique
+violation as "already recorded", not as an error. **Before writing that integration, read
+the Stripe note under Compliance posture** — what may be sent to Stripe is a 42 CFR Part 2
+question, not a technical one.
+
 ### Likely later
 Incident reports, rent/fee ledger, staff shifts and handoff notes, curfew tracking,
 resident chores, visitor log, waitlist, reporting/exports for licensing and referral
@@ -175,6 +209,23 @@ Non-negotiables, from day one:
 - **Tokens in httpOnly cookies, never localStorage.** Two frontends against one API means
   cross-origin auth; an XSS on the resident app must not hand over a session that can read
   PHI. Lock CORS to the two known origins.
+
+**Payment processors are third parties, and this is the sharpest case.** The mere fact that
+someone is in a SUD program is protected. A Stripe Customer named "Ruben Castillo" with an
+email address, attached to an account belonging to a sober living facility, discloses
+exactly that — to Stripe, to anyone with access to that dashboard, and to any subprocessor
+downstream. It is a disclosure whether or not a card is ever charged.
+
+So, for the Stripe work when it happens:
+
+- **Send no resident name, email, phone or date of birth.** Metadata carries opaque ids
+  only, the same rule the audit log already follows.
+- Prefer the resident paying through a link they open themselves, so the payment method
+  and any identity live with them rather than in our Stripe account.
+- The facility's own legal name on the statement descriptor is a disclosure to whoever
+  reads the resident's bank statement. Check what the facility wants there.
+- Whether any of this is permissible without written consent is a question for whoever
+  advises the facility. Do not settle it from this file.
 
 **Georgia.** The specific licensing or certification body and the retention period are
 still unverified — see open question 1. Until they are, the app's posture is deliberately
@@ -243,9 +294,11 @@ The preset owns colour and type. What it does not decide, and we do:
 
 Five things that will trip you up:
 
-1. **Never pass `--overwrite` to `shadcn-vue add`.** It rewrites `main.css` from the preset
-   and silently restores the Google Fonts CDN imports. Adding a component plainly does not
-   touch the CSS. If you do run it, `git diff app/assets/css/main.css` before committing.
+1. **`shadcn-vue add` rewrites `main.css` every time**, silently restoring the Google Fonts
+   CDN `@import`s — a third-party request on every page load, which this file forbids. It is
+   not the `--overwrite` flag; a plain `add` does it too. **Always** run
+   `git checkout admin/app/assets/css/main.css` after adding a component, or at minimum
+   `git diff` it before committing.
 2. **`components:` in `nuxt.config.js` needs `extensions: ['vue']`** on the `ui` folder, or
    Nuxt registers each `index.ts` barrel as a component too.
 3. **Composables exported from a component barrel are not auto-imported** — `useSidebar` has
@@ -370,6 +423,9 @@ sober-living/
   `new PrismaClient()`.** A bare client bypasses the soft-delete and audit extensions,
   which is exactly the failure mode they exist to prevent. `$queryRaw` deserves the same
   scrutiny, for the same reason.
+- **Money is integer cents**, everywhere — database, API and UI. Dollars are parsed to
+  cents once, on the server, so one rounding rule applies to everyone; `12.10 * 100` in
+  JavaScript is `1209.9999…`, and a cent lost per charge is a ledger nobody can reconcile.
 - Domain constants (`SCREEN_RESULT`, `DISCHARGE_TYPE`, `MED_LOG_STATUS`) live in
   `server/src/domain/` and are copied into the frontends, not imported across folders.
   They must match the `enum` blocks in `schema.prisma`.
@@ -454,8 +510,11 @@ Two verification suites, both run against a live database:
   cannot enforce
 - `node scripts/verify-residents.js` — 24 assertions on the roster, intake,
   bed moves and discharge
-- `npm run verify:rls` — 16 assertions proving a resident actor cannot read, count or
-  write another resident's rows, and that the app role cannot bypass the policies
+- `node scripts/verify-ledger.js` — 25 assertions on derived balances, the append-only
+  guards, dollar-to-cent parsing, and processor-reference idempotency
+- `npm run verify:rls` — 18 assertions proving a resident actor cannot read, count or
+  write another resident's rows — including their ledger — and that the app role cannot
+  bypass the policies
 
 **`verify:constraints` TRUNCATEs as it runs**, so reseed before running the auth suite or
 its users will be gone and every login assertion fails:
@@ -465,6 +524,7 @@ npm run verify:constraints && node scripts/seed.js \
   && node scripts/verify-auth.js && node scripts/seed.js \
   && node scripts/verify-apartments.js && node scripts/seed.js \
   && node scripts/verify-residents.js && node scripts/seed.js \
+  && node scripts/verify-ledger.js && node scripts/seed.js \
   && npm run verify:rls
 ```
 
@@ -577,7 +637,11 @@ Resolve these as they come up; update this file when they do.
    with data to migrate?
 5. Do residents get accounts at intake, or is it staff-entry-only for phase 1?
 6. Are drug screens read in-house, sent to a lab, or both?
-7. Billing/rent — in scope, or handled elsewhere?
+7. ~~Billing/rent — in scope?~~ **In scope, and broader than rent:** laundry, trips and
+   program fees all land on the same balance, and payment will come through Stripe. Still
+   open: what counts as "behind" (the roster deliberately does not colour a balance,
+   because that threshold is facility policy), whether residents see their own balance
+   before the resident app exists, and who may waive a fee.
 8. Where does this deploy, and does that host offer managed Postgres? Encryption at rest
    and immutable audit logs both depend on the answer.
 

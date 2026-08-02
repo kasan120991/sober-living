@@ -52,6 +52,27 @@ enum StayStatus {
   DISCHARGED
 }
 
+/// The sign of a ledger line lives here, not in the amount. A negative CHARGE
+/// and a PAYMENT would be two ways to write the same thing, and the balance
+/// would then depend on which one whoever typed it happened to pick.
+enum LedgerEntryType {
+  CHARGE // rent, fees, damages — increases what is owed
+  PAYMENT // money received — decreases it
+  CREDIT // a waiver, a write-off, or an overcharge corrected — also decreases it
+}
+
+/// What a charge is FOR. The ledger is not a rent ledger — a resident's balance
+/// carries laundry, trips, program fees and damages too, and "how much did we
+/// bill in laundry last quarter" is not answerable by grepping descriptions.
+enum LedgerCategory {
+  RENT
+  LAUNDRY
+  TRIP
+  PROGRAM_FEE
+  DAMAGE
+  OTHER
+}
+
 enum DischargeType {
   SUCCESSFUL
   AMA // left against medical advice / self-discharge
@@ -270,6 +291,7 @@ model Stay {
   referralSource String?
 
   bedAssignments BedAssignment[]
+  ledgerEntries  LedgerEntry[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -344,6 +366,74 @@ model BedAssignment {
   @@index([bedId, startedAt])
   @@index([stayId])
   @@map("bed_assignments")
+}
+
+/// One line on a resident's rent ledger.
+///
+/// The balance is SUM(charges) - SUM(payments + credits), derived on every read
+/// and never stored. A stored balance is a second source of truth that drifts
+/// from the entries meant to justify it, and the entries are the evidence — the
+/// balance is only their sum.
+///
+/// Append-only, like BedAssignment and AuditLog: a mistake is corrected by a
+/// new entry pointing at the old one, never by editing or deleting a row. This
+/// is money in a regulated setting, and "what did this resident actually owe on
+/// 30 June" has to stay answerable after someone fixes a typo in July.
+///
+/// Hangs off Stay rather than Resident: a resident who leaves and returns gets
+/// a new stay, and the money from the previous episode belongs to that episode.
+model LedgerEntry {
+  id String @id @default(uuid(7))
+
+  stayId String
+  stay   Stay   @relation(fields: [stayId], references: [id])
+
+  type LedgerEntryType
+
+  /// Integer cents, and always POSITIVE — see LedgerEntryType. Floats are not
+  /// an option for money. A CHECK constraint in the migration enforces the sign,
+  /// because the one place this can go wrong is a caller passing a negative to
+  /// "undo" something instead of writing the correcting entry.
+  amountCents Int
+
+  /// What the line is for: "Rent 1-15 July", "Damage to 12B door". Required —
+  /// an unexplained charge is not defensible to a resident or an auditor.
+  description String
+
+  /// Set on a CHARGE, null on a payment or credit — enforced by a CHECK in the
+  /// migration, since Prisma cannot make one column's nullability depend on
+  /// another's value.
+  category LedgerCategory?
+
+  /// The payment processor's own id for this money — a Stripe PaymentIntent,
+  /// say. Null for cash, a cheque, or anything recorded by hand.
+  ///
+  /// UNIQUE, and that is the whole point of having it: processor webhooks are
+  /// delivered at-least-once, and this table cannot be corrected by deleting a
+  /// row. Without this, one retried webhook is a permanent duplicate payment on
+  /// a resident's balance. The insert fails instead, which is the right failure.
+  externalRef String? @unique
+
+  /// The date the line APPLIES to, which is not the date it was typed. July rent
+  /// entered on 3 August is dated July, or every month-end total is wrong.
+  occurredAt DateTime
+
+  recordedById String
+  recordedBy   User   @relation(fields: [recordedById], references: [id])
+
+  /// Set when this entry corrects an earlier one, so a reader can follow a
+  /// correction back to what it fixed instead of finding two contradictory
+  /// lines and having to guess which is current.
+  correctsId  String?
+  corrects    LedgerEntry?  @relation("LedgerCorrection", fields: [correctsId], references: [id])
+  correctedBy LedgerEntry[] @relation("LedgerCorrection")
+
+  createdAt DateTime @default(now())
+  // Deliberately no updatedAt and no deletedAt. Nothing here is ever updated or
+  // deleted, so a column implying otherwise would be a lie in the schema.
+
+  @@index([stayId, occurredAt])
+  @@map("ledger_entries")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -426,6 +516,7 @@ model User {
   lockedUntil      DateTime?
 
   bedAssignments   BedAssignment[]
+  ledgerEntries    LedgerEntry[]
   documents        Document[]
   auditEntries     AuditLog[]
   sessions         Session[]

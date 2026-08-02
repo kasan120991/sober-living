@@ -1,0 +1,177 @@
+import { prisma } from '../db/client.js'
+import { HttpError } from '../middleware/authorize.js'
+import { LEDGER_ENTRY_TYPE, LEDGER_SIGN, STAY_STATUS } from '../domain/constants.js'
+
+/**
+ * The resident fee ledger.
+ *
+ * A balance is never stored. It is SUM(charges) - SUM(payments + credits),
+ * computed from the entries every time it is asked for, because the entries are
+ * the evidence and the balance is only their sum. A stored total is a second
+ * source of truth, and the day it disagrees with the lines beneath it there is
+ * no way to tell which one is wrong.
+ *
+ * Nothing here updates or deletes. The database refuses both — see the
+ * `ledger_entries` migration — so a mistake is corrected by posting a new entry
+ * that points at the one it fixes.
+ */
+
+/** Cents, positive when the resident owes, negative when they are in credit. */
+function foldBalance(rows) {
+  return rows.reduce((total, r) => total + LEDGER_SIGN[r.type] * (r._sum.amountCents ?? 0), 0)
+}
+
+/**
+ * Balances for many stays in one query — the roster needs one per row, and a
+ * per-row query would be a dozen round trips to render one table.
+ *
+ * @param {string[]} stayIds
+ * @returns {Promise<Map<string, number>>} stayId → balance in cents
+ */
+export async function balancesByStay(stayIds) {
+  const ids = stayIds.filter(Boolean)
+  if (!ids.length) return new Map()
+
+  const sums = await prisma.ledgerEntry.groupBy({
+    by: ['stayId', 'type'],
+    where: { stayId: { in: ids } },
+    _sum: { amountCents: true },
+  })
+
+  const byStay = new Map(ids.map((id) => [id, 0]))
+  for (const row of sums) {
+    byStay.set(row.stayId, byStay.get(row.stayId) + LEDGER_SIGN[row.type] * (row._sum.amountCents ?? 0))
+  }
+  return byStay
+}
+
+/** The single-stay case, so callers do not have to unwrap a one-entry Map. */
+export async function balanceOfStay(stayId) {
+  const sums = await prisma.ledgerEntry.groupBy({
+    by: ['type'],
+    where: { stayId },
+    _sum: { amountCents: true },
+  })
+  return foldBalance(sums)
+}
+
+/**
+ * Every line on a stay, oldest first, with a running balance attached so the
+ * UI does not have to recompute it and risk a different answer from the total.
+ */
+export async function listEntries(stayId) {
+  const entries = await prisma.ledgerEntry.findMany({
+    where: { stayId },
+    orderBy: [{ occurredAt: 'asc' }, { createdAt: 'asc' }],
+    include: {
+      recordedBy: { select: { id: true, fullName: true } },
+      corrects: { select: { id: true, description: true, occurredAt: true } },
+    },
+  })
+
+  let running = 0
+  const rows = entries.map((e) => {
+    running += LEDGER_SIGN[e.type] * e.amountCents
+    return {
+      id: e.id,
+      type: e.type,
+      category: e.category,
+      amountCents: e.amountCents,
+      description: e.description,
+      occurredAt: e.occurredAt,
+      externalRef: e.externalRef,
+      corrects: e.corrects,
+      recordedBy: e.recordedBy,
+      recordedAt: e.createdAt,
+      runningCents: running,
+    }
+  })
+
+  // Newest first for display; the running balance was computed oldest first,
+  // which is the only order in which a running total means anything.
+  return { entries: rows.reverse(), balanceCents: running }
+}
+
+/**
+ * Post a line. The only write this module has.
+ *
+ * @param {object} input
+ * @param {string} actorId user id of the staff member recording it
+ */
+export async function postEntry(input, actorId) {
+  const {
+    stayId,
+    type,
+    category = null,
+    amountCents,
+    description,
+    occurredAt,
+    correctsId = null,
+    externalRef = null,
+  } = input
+
+  const stay = await prisma.stay.findUnique({ where: { id: stayId }, select: { id: true, status: true } })
+  if (!stay) throw new HttpError(404, 'Stay not found')
+
+  // A discharged stay can still take entries: a final water bill or a payment
+  // that lands after someone leaves is normal, and refusing it would push the
+  // money into a note nobody can total. Bed assignments are the opposite case
+  // and are closed at discharge — money outlives the bed.
+
+  if (type === LEDGER_ENTRY_TYPE.CHARGE && !category) {
+    throw new HttpError(400, 'A charge must say what it is for.')
+  }
+  if (type !== LEDGER_ENTRY_TYPE.CHARGE && category) {
+    throw new HttpError(400, 'Only a charge carries a category.')
+  }
+  if (externalRef && type !== LEDGER_ENTRY_TYPE.PAYMENT) {
+    throw new HttpError(400, 'A processor reference belongs to a payment.')
+  }
+  if (!Number.isInteger(amountCents) || amountCents <= 0) {
+    throw new HttpError(400, 'Amount must be a positive whole number of cents.')
+  }
+
+  if (correctsId) {
+    const target = await prisma.ledgerEntry.findUnique({
+      where: { id: correctsId },
+      select: { id: true, stayId: true },
+    })
+    if (!target || target.stayId !== stayId) {
+      throw new HttpError(400, 'A correction must reference an entry on the same stay.')
+    }
+  }
+
+  try {
+    return await prisma.ledgerEntry.create({
+      data: {
+        stayId,
+        type,
+        category,
+        amountCents,
+        description: description.trim(),
+        occurredAt: occurredAt ? new Date(occurredAt) : new Date(),
+        correctsId,
+        externalRef,
+        recordedById: actorId,
+      },
+      include: { recordedBy: { select: { id: true, fullName: true } } },
+    })
+  } catch (err) {
+    // A duplicate processor reference is the at-least-once webhook arriving
+    // twice, not an error the caller can fix. Say so plainly; a handler should
+    // treat it as "already recorded".
+    if (err?.code === 'P2002' && String(err?.meta?.target ?? '').includes('externalRef')) {
+      throw new HttpError(409, 'That payment has already been recorded.')
+    }
+    throw err
+  }
+}
+
+/** The active stay for a resident, which is what the ledger UI operates on. */
+export async function activeStayIdFor(residentId) {
+  const stay = await prisma.stay.findFirst({
+    where: { residentId, status: STAY_STATUS.ACTIVE },
+    select: { id: true },
+  })
+  return stay?.id ?? null
+}

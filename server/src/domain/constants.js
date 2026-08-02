@@ -31,6 +31,31 @@ export const DISCHARGE_TYPE = Object.freeze({
   TRANSFER: 'TRANSFER',
 })
 
+export const LEDGER_ENTRY_TYPE = Object.freeze({
+  CHARGE: 'CHARGE',
+  PAYMENT: 'PAYMENT',
+  CREDIT: 'CREDIT',
+})
+
+/// Set on a CHARGE, never on a payment or credit — the database enforces it.
+export const LEDGER_CATEGORY = Object.freeze({
+  RENT: 'RENT',
+  LAUNDRY: 'LAUNDRY',
+  TRIP: 'TRIP',
+  PROGRAM_FEE: 'PROGRAM_FEE',
+  DAMAGE: 'DAMAGE',
+  OTHER: 'OTHER',
+})
+
+/// Which way each type moves a balance. Used to derive the balance rather than
+/// spelling the arithmetic out at each call site, where one wrong sign would be
+/// a resident being told they owe money they do not.
+export const LEDGER_SIGN = Object.freeze({
+  CHARGE: 1,
+  PAYMENT: -1,
+  CREDIT: -1,
+})
+
 export const AUDIT_ACTION = Object.freeze({
   READ: 'READ',
   CREATE: 'CREATE',
@@ -88,6 +113,7 @@ export const AUDITED_MODELS = Object.freeze([
   'EmergencyContact',
   'BedAssignment',
   'Document',
+  'LedgerEntry',
   // Facility configuration
   'Apartment',
   'Bed',

@@ -10,8 +10,9 @@
  * exactly this. Real accounts use real domains and survive.
  *
  * The TRUNCATE/DELETE split is load-bearing:
- *   - `bed_assignments` and `audit_log` have triggers that REFUSE DELETE, so
- *     they can only be cleared with TRUNCATE, which does not fire row triggers.
+ *   - `bed_assignments`, `audit_log` and `ledger_entries` have triggers that
+ *     REFUSE DELETE, so they can only be cleared with TRUNCATE, which does not
+ *     fire row triggers.
  *   - `residents` must be DELETEd, not TRUNCATEd. `users.residentId` references
  *     it, so TRUNCATE ... CASCADE would take `users` with it — which is exactly
  *     what this function exists to prevent.
@@ -19,7 +20,10 @@
 export async function resetFacilityData(prisma, { quiet = false } = {}) {
   const sql = (q) => prisma.$executeRawUnsafe(q)
 
-  await sql('TRUNCATE "bed_assignments", "sessions", "audit_log" RESTART IDENTITY')
+  // ledger_entries goes in this list, not the DELETE list below, for the same
+  // reason as bed_assignments: its append-only trigger refuses DELETE outright.
+  // It must also be cleared BEFORE stays, which it references.
+  await sql('TRUNCATE "ledger_entries", "bed_assignments", "sessions", "audit_log" RESTART IDENTITY')
 
   await sql('DELETE FROM "documents"')
   await sql('DELETE FROM "emergency_contacts"')

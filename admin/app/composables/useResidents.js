@@ -27,6 +27,14 @@ export function useResidents() {
   const availableBeds = (cohort) =>
     api(`/residents/available-beds?cohort=${cohort}`).then((r) => r.beds)
 
+  /** Every line on the resident's active stay, newest first, plus the balance. */
+  const listLedger = (id) => api(`/residents/${id}/ledger`)
+
+  /** `amount` goes over as the string a human typed; the server parses it to
+   *  cents. Multiplying by 100 in the browser loses a cent on values like
+   *  12.10, and a ledger that is off by cents cannot be reconciled. */
+  const postLedgerEntry = (id, body) => api(`/residents/${id}/ledger`, { method: 'POST', body })
+
   const addContact = (id, body) => api(`/residents/${id}/contacts`, { method: 'POST', body })
   const removeContact = (contactId) =>
     api(`/residents/contacts/${contactId}`, { method: 'DELETE' })
@@ -40,6 +48,8 @@ export function useResidents() {
     assignBed,
     releaseBed,
     availableBeds,
+    listLedger,
+    postLedgerEntry,
     addContact,
     removeContact,
   }

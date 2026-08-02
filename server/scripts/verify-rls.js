@@ -36,7 +36,7 @@ async function main() {
   )
   const { rows: forced } = await owner.query(
     `SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class
-      WHERE relname IN ('residents','stays','emergency_contacts','documents','bed_assignments')
+      WHERE relname IN ('residents','stays','emergency_contacts','documents','bed_assignments','ledger_entries')
       ORDER BY relname`,
   )
   await owner.end()
@@ -45,9 +45,9 @@ async function main() {
     ? ok('soberlife_app is neither superuser nor BYPASSRLS')
     : bad('runtime role cannot bypass', JSON.stringify(role[0]))
 
-  const allForced = forced.length === 5 && forced.every((t) => t.relrowsecurity && t.relforcerowsecurity)
+  const allForced = forced.length === 6 && forced.every((t) => t.relrowsecurity && t.relforcerowsecurity)
   allForced
-    ? ok(`RLS is enabled AND forced on all 5 resident tables (${forced.map((t) => t.relname).join(', ')})`)
+    ? ok(`RLS is enabled AND forced on all 6 resident tables (${forced.map((t) => t.relname).join(', ')})`)
     : bad('RLS enabled and forced', JSON.stringify(forced))
 
   const usingApp = (process.env.APP_DATABASE_URL ?? '').includes('soberlife_app')
@@ -103,6 +103,23 @@ async function main() {
   assignments.length > 0 && assignments.every((a) => ownStayIds.has(a.stayId))
     ? ok('bed assignments are scoped through the stay')
     : bad('assignments scoped', `${assignments.length} rows`)
+
+  // A ledger entry is scoped through its stay, exactly as a bed assignment is.
+  // Money is the case where getting this wrong is most obviously indefensible:
+  // one resident seeing another's balance is a disclosure that also tells them
+  // the other person is in the programme.
+  const ledger = await asAlice(() => prisma.ledgerEntry.findMany())
+  ledger.every((e) => ownStayIds.has(e.stayId))
+    ? ok(`a resident sees only their own ledger (${ledger.length} rows, all theirs)`)
+    : bad('ledger scoped', `${ledger.length} rows, some belonging to someone else`)
+
+  const ledgerTotal = await asAlice(() => prisma.ledgerEntry.aggregate({ _sum: { amountCents: true } }))
+  const ownTotal = await asAlice(() =>
+    prisma.ledgerEntry.aggregate({ _sum: { amountCents: true }, where: { stayId: { in: [...ownStayIds] } } }),
+  )
+  ledgerTotal._sum.amountCents === ownTotal._sum.amountCents
+    ? ok('aggregates over the ledger are scoped — no leaking the house total')
+    : bad('ledger aggregate scoped', `${ledgerTotal._sum.amountCents} vs ${ownTotal._sum.amountCents}`)
 
   const count = await asAlice(() => prisma.resident.count())
   count === 1
