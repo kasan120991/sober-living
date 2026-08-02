@@ -95,8 +95,8 @@ async function destroy() {
           name="cohort"
           :description="
             cohortLocked
-              ? 'Locked while this apartment has beds. Remove them first — this is what keeps men and women from sharing a unit.'
-              : 'An apartment serves exactly one cohort.'
+              ? 'Locked while this apartment has beds.'
+              : 'An apartment serves one cohort.'
           "
         >
           <USelect
