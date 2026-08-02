@@ -82,9 +82,24 @@ floor is baked into the vendored source:
 | `input/Input.vue` | `h-11` |
 | `select/SelectTrigger.vue` | `h-11` both sizes |
 | `switch/Switch.vue` | `after:-inset-y-3` — a 20px track with a 44px hit area |
+| `sidebar/index.ts` | `max-md:h-11 pointer-coarse:h-11` on the `default` and `sm` menu button — see below |
 
 `sm` is not shorter than `default`. It has tighter padding and smaller type; the floor is
 about the finger, not the label.
+
+**The sidebar is the one conditional case.** Everywhere else the floor is unconditional,
+because a screen has a handful of controls and 44px costs nothing. The sidebar carries
+thirteen at once, and raising them all would push the nav past a laptop viewport for the
+admin and house manager, who work in it on a desktop all day. So it stays at 36px under a
+mouse and goes to 44px when either condition holds:
+
+- `max-md:` — below `md` the nav **is** the mobile sheet. Same breakpoint shadcn uses to
+  switch from rail to sheet, and it shows up when you resize a desktop browser to check.
+- `pointer-coarse:` — a tablet or touch laptop wider than `md`, where the rail is showing
+  but the finger is still a finger.
+
+Neither alone is enough: `max-md` misses the tablet, and `pointer-coarse` is invisible when
+you test mobile by resizing rather than on hardware.
 
 Note the Switch: its tap area comes from an `::after` pseudo-element, so
 `getBoundingClientRect()` **under-reports it**. Any assertion has to add the pseudo-element
@@ -128,6 +143,28 @@ inset or it will report a false failure.
 - **Icons are imported**, not named: `import { Plus } from '@lucide/vue'`.
 - Destructive and corrective actions confirm, and amendments capture a reason — see CLAUDE.md.
 
+### The shell
+
+The app shell follows shadcn's **sidebar-08** block: `Sidebar variant="inset"` on a
+`bg-sidebar` ground, the content pane a rounded card, a two-line brand block in the header,
+and a secondary nav group pinned to the bottom with `mt-auto`. `SidebarRail` is gone with
+it — the rail is the grab affordance for a sidebar flush against the window edge, and an
+inset one has no edge. The trigger in the page header does that job.
+
+Two deviations from the block, both deliberate:
+
+- **No collapsible submenus.** sidebar-08's `NavMain` nests a `Collapsible` under each item.
+  We have no second-level navigation, and inventing one to fill the shape would be IA
+  written to match a template.
+- **Breadcrumb ancestors stay visible on mobile.** The block hides them below `md`. Ours
+  replaced a back arrow on the resident record, so hiding them would remove the only way
+  back on the device where it matters most. Our trails are two deep and fit.
+
+Every page header goes through **`AppPageHeader`** — trigger, rule, breadcrumb, actions.
+Its `md:rounded-t-2xl` has to match `SidebarInset`'s corner or the card shows as a sliver
+outside the header. Note that is `2xl`, not the `xl` shadcn ships: the preset restyled
+`SidebarInset`, and the two have to agree.
+
 ### Four things that will trip you up
 
 1. **`components.json` has `typescript: true`, but the app is JavaScript.** The vendored
@@ -141,3 +178,8 @@ inset or it will report a false failure.
    as a component too — two files resolving to the same name, for every component.
 4. **Reka's `Select` rejects an empty-string item value.** It reserves `''` for "selection
    cleared". Use a sentinel like `'all'` and map it to `undefined` at the query boundary.
+5. **Never pass `--overwrite` to `shadcn-vue add`.** It rewrites `main.css` from the preset,
+   which silently restores the `@import url('https://fonts.googleapis.com/…')` lines — a
+   third-party request on every page load, which CLAUDE.md forbids. Adding a component
+   plainly (`npx shadcn-vue@latest add <name>`) does not touch the CSS. If you ever do run
+   it, `git diff app/assets/css/main.css` before committing.

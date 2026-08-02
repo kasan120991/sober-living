@@ -43,9 +43,24 @@ export const sidebarMenuButtonVariants = cva(
         default: 'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
         outline: 'bg-background hover:bg-sidebar-accent hover:text-sidebar-accent-foreground shadow-[0_0_0_1px_var(--sidebar-border)] hover:shadow-[0_0_0_1px_var(--sidebar-accent)]',
       },
+      // Vendored change: the 44px floor from design.md §3. shadcn ships 36px
+      // and 32px here, which is fine under a mouse but not for a tech opening
+      // the mobile sheet one-handed.
+      //
+      // Unlike button/index.ts this is conditional, and deliberately so: the
+      // sidebar carries thirteen of these at once, and raising them all
+      // unconditionally pushes the nav past a laptop viewport for the two
+      // roles who live in it on a desktop.
+      //
+      // Two conditions, because each misses a case the other catches:
+      //   max-md      — below md the nav IS the mobile sheet, so this is the
+      //                 same breakpoint that decides sheet vs rail, and it
+      //                 shows up when you resize a desktop browser to check
+      //   pointer-coarse — a tablet or touch laptop wider than md, where the
+      //                 rail is showing but the finger is still a finger
       size: {
-        default: 'h-9 text-sm',
-        sm: 'h-8 text-xs',
+        default: 'h-9 max-md:h-11 pointer-coarse:h-11 text-sm',
+        sm: 'h-8 max-md:h-11 pointer-coarse:h-11 text-xs',
         lg: 'h-14 px-3 text-sm group-data-[collapsible=icon]:p-0!',
       },
     },

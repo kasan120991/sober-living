@@ -1,5 +1,5 @@
 <script setup>
-import { ArrowLeft, Plus, X } from '@lucide/vue'
+import { Plus, X } from '@lucide/vue'
 import { DISCHARGE_TYPES, isoDate } from '~/composables/useResidents.js'
 import { STAFF_ROLE } from '~/utils/roles.js'
 
@@ -130,23 +130,29 @@ const FACTS = [
 </script>
 
 <template>
-  <header class="bg-background sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b px-4">
-    <Button as-child variant="ghost" size="sm" aria-label="Back to residents">
-      <NuxtLink to="/residents"><ArrowLeft class="size-4" /></NuxtLink>
-    </Button>
-    <h1 class="font-heading text-[15px] font-semibold tracking-tight">
-      {{ resident?.fullName ?? 'Resident' }}
-    </h1>
-    <div v-if="resident" class="ml-auto flex items-center gap-3">
-      <Badge variant="outline" class="text-[10px] uppercase tracking-wider">
-        {{ cohortLabel }}
-      </Badge>
-      <Badge v-if="!isCurrent" variant="secondary">Discharged</Badge>
-      <Button v-if="canManage && isCurrent" size="sm" variant="outline" @click="dischargeOpen = true">
-        Discharge
-      </Button>
-    </div>
-  </header>
+  <!-- The breadcrumb replaces what was a back arrow: same job, and it also says
+       where you are rather than only where you can go. -->
+  <AppPageHeader
+    :title="resident?.fullName ?? 'Resident'"
+    :parents="[{ label: 'Residents', to: '/residents' }]"
+  >
+    <template #actions>
+      <template v-if="resident">
+        <Badge variant="outline" class="text-[10px] uppercase tracking-wider">
+          {{ cohortLabel }}
+        </Badge>
+        <Badge v-if="!isCurrent" variant="secondary">Discharged</Badge>
+        <Button
+          v-if="canManage && isCurrent"
+          size="sm"
+          variant="outline"
+          @click="dischargeOpen = true"
+        >
+          Discharge
+        </Button>
+      </template>
+    </template>
+  </AppPageHeader>
 
   <div class="flex flex-1 flex-col gap-7 p-4">
     <div v-if="pending" class="text-muted-foreground text-sm">Loading…</div>

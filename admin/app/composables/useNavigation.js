@@ -72,6 +72,15 @@ const GROUPS = [
       // apartment check should be able to file it there and then. Consequence —
       // techs now see a Facility group containing only this.
       { label: 'Maintenance', icon: Wrench, to: '/maintenance', roles: ALL_STAFF },
+    ],
+  },
+  {
+    // sidebar-08's secondary group: pinned to the bottom, smaller, unlabelled.
+    // Administration rather than operations — nobody opens these on shift, and
+    // sitting them under "Facility" implied they were part of running the house.
+    id: 'admin',
+    secondary: true,
+    items: [
       { label: 'Staff', icon: IdCard, to: '/staff', roles: ADMIN_ONLY },
       { label: 'Audit Log', icon: ScrollText, to: '/audit', roles: ADMIN_ONLY },
     ],
@@ -92,9 +101,19 @@ export function useNavigation() {
     return GROUPS.map((group) => ({
       id: group.id,
       label: group.label ?? null,
+      secondary: group.secondary ?? false,
       items: group.items.filter((item) => item.roles.includes(role)),
     })).filter((group) => group.items.length > 0)
   }
 
-  return { itemsFor }
+  /** The operational nav, and the administrative group pinned below it. */
+  const sections = computed(() => {
+    const groups = itemsFor()
+    return {
+      main: groups.filter((g) => !g.secondary),
+      secondary: groups.find((g) => g.secondary)?.items ?? [],
+    }
+  })
+
+  return { itemsFor, sections }
 }

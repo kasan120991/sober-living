@@ -1,38 +1,38 @@
 <script setup>
-// The staff app shell, on shadcn-vue's Sidebar.
+// The staff app shell, shaped after shadcn's sidebar-08.
 //
-// Three Nuxt UI workarounds disappear with this:
-//   - collapse state persists in a `sidebar_state` cookie by default, so the
-//     explicit id="main" fix for Nuxt UI's useId() key bug is gone
-//   - the mobile pane is a Sheet with a real title, so the `menu` prop patch
-//     for a missing locale key is gone
-//   - 44px targets are baked into the vendored component source instead of
-//     being fought through app.config.ts slot overrides
-import { Home } from '@lucide/vue'
+// `variant="inset"` is the visible part: the page ground becomes bg-sidebar,
+// the sidebar floats in it, and the content pane is a rounded card. It also
+// replaces SidebarRail — the rail is the collapse affordance for a sidebar
+// flush against the window edge, and an inset one has no edge to grab. The
+// trigger in the page header does that job.
+import { BedDouble } from '@lucide/vue'
 
-const { itemsFor } = useNavigation()
+const { sections } = useNavigation()
 const route = useRoute()
 
-// Flat list; the group headings come from the group objects themselves.
-const groups = computed(() => itemsFor(false))
 const isActive = (to) => (to === '/' ? route.path === '/' : route.path.startsWith(to))
 </script>
 
 <template>
   <SidebarProvider>
-    <Sidebar collapsible="icon">
+    <Sidebar variant="inset" collapsible="icon">
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" as-child>
               <NuxtLink to="/" aria-label="SoberLife — census">
                 <div
-                  class="bg-primary text-primary-foreground flex aspect-square size-8 items-center justify-center rounded-lg"
+                  class="bg-sidebar-primary text-sidebar-primary-foreground flex aspect-square size-8 items-center justify-center rounded-lg"
                 >
-                  <Home class="size-4" />
+                  <BedDouble class="size-4" />
                 </div>
-                <div class="grid flex-1 text-left leading-tight">
+                <div class="grid flex-1 text-left text-sm leading-tight">
                   <span class="font-heading truncate font-semibold">SoberLife</span>
+                  <!-- Second line names which app this is. There are two against
+                       one API and they must never be confused for each other.
+                       Becomes the facility name once facility config exists. -->
+                  <span class="truncate text-xs">Staff</span>
                 </div>
               </NuxtLink>
             </SidebarMenuButton>
@@ -41,7 +41,7 @@ const isActive = (to) => (to === '/' ? route.path === '/' : route.path.startsWit
       </SidebarHeader>
 
       <SidebarContent>
-        <SidebarGroup v-for="(group, i) in groups" :key="i">
+        <SidebarGroup v-for="group in sections.main" :key="group.id">
           <SidebarGroupLabel v-if="group.label">{{ group.label }}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
@@ -58,13 +58,33 @@ const isActive = (to) => (to === '/' ? route.path === '/' : route.path.startsWit
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        <!-- mt-auto pins this to the bottom of the scroll area, so admin links
+             sit apart from the work without being a separate labelled group. -->
+        <SidebarGroup v-if="sections.secondary.length" class="mt-auto">
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem v-for="item in sections.secondary" :key="item.to">
+                <SidebarMenuButton
+                  as-child
+                  size="sm"
+                  :is-active="isActive(item.to)"
+                  :tooltip="item.label"
+                >
+                  <NuxtLink :to="item.to">
+                    <component :is="item.icon" class="size-4" />
+                    <span>{{ item.label }}</span>
+                  </NuxtLink>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
       </SidebarContent>
 
       <SidebarFooter>
         <AppUserMenu />
       </SidebarFooter>
-
-      <SidebarRail />
     </Sidebar>
 
     <SidebarInset>

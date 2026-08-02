@@ -22,14 +22,11 @@ const listHiddenOnMobile = computed(() => Boolean(selectedId.value))
 </script>
 
 <template>
-  <header class="bg-background sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b px-4">
-    <SidebarTrigger class="-ml-1" />
-    <Separator orientation="vertical" class="mr-2 h-4" />
-    <h1 class="font-heading text-[15px] font-semibold tracking-tight">Apartments &amp; Beds</h1>
-    <div class="ml-auto">
+  <AppPageHeader title="Apartments &amp; Beds">
+    <template #actions>
       <AppApartmentCreate @created="refresh" />
-    </div>
-  </header>
+    </template>
+  </AppPageHeader>
 
   <div class="flex min-h-0 flex-1">
     <aside

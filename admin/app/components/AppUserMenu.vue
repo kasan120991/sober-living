@@ -6,9 +6,7 @@ import { initialsOf, roleLabel } from '~/utils/roles.js'
 import { useSidebar } from '~/components/ui/sidebar'
 
 const { user, signOut } = useAuth()
-// `state` is 'expanded' | 'collapsed'; in the icon rail we show the avatar
-// alone and let the dropdown carry the identity.
-const { state, isMobile } = useSidebar()
+const { isMobile } = useSidebar()
 </script>
 
 <template>
@@ -18,7 +16,7 @@ const { state, isMobile } = useSidebar()
         <DropdownMenuTrigger as-child>
           <SidebarMenuButton
             size="lg"
-            class="data-[state=open]:bg-sidebar-accent"
+            class="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
             :aria-label="`Signed in as ${user?.fullName}. Open account menu`"
           >
             <Avatar class="size-8 rounded-lg">
@@ -35,10 +33,10 @@ const { state, isMobile } = useSidebar()
         </DropdownMenuTrigger>
 
         <DropdownMenuContent
-          class="w-56 rounded-lg"
-          :side="isMobile ? 'bottom' : state === 'collapsed' ? 'right' : 'top'"
+          class="w-(--reka-dropdown-menu-trigger-width) min-w-56 rounded-lg"
+          :side="isMobile ? 'bottom' : 'right'"
           align="end"
-          :side-offset="8"
+          :side-offset="4"
         >
           <!-- Identity is stated, not decorative: on a shared house phone this
                is the name that gets stamped on the next med pass or screen. -->
