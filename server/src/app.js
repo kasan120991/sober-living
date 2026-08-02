@@ -8,6 +8,9 @@ import { sessionMiddleware } from './middleware/session.js'
 import { errorHandler, notFound } from './middleware/errorHandler.js'
 import healthRouter from './routes/health.js'
 import authRouter from './routes/auth.js'
+import apartmentsRouter from './routes/apartments.js'
+import bedsRouter from './routes/beds.js'
+import maintenanceRouter from './routes/maintenance.js'
 
 export function createApp() {
   const app = express()
@@ -34,8 +37,11 @@ export function createApp() {
   app.use('/health', healthRouter)
   app.use('/auth', authRouter)
 
-  // Every route added from here is authenticated. See middleware/authorize.js —
-  // no route is public by default.
+  // Everything below is authenticated. See middleware/authorize.js — no route
+  // is public by default.
+  app.use('/apartments', apartmentsRouter)
+  app.use('/beds', bedsRouter)
+  app.use('/maintenance', maintenanceRouter)
 
   app.use(notFound)
   app.use(errorHandler)

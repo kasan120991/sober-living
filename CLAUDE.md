@@ -43,6 +43,7 @@ Use these terms in code, schema, and UI. Do not invent synonyms.
 | **Sign-out** | A resident leaving the property and returning the same day. Has an expected return time. |
 | **Travel pass** | An overnight or multi-day approved absence. Requires approval; bed is held. |
 | **Apartment check** | A scheduled or random inspection of an apartment. Produces a pass/fail with findings. |
+| **Maintenance request** | Work needed on an **apartment** — never a bed. Has a reporter, a priority and a lifecycle; closing one requires a note saying what was done. Whether a specific bed is usable is a separate fact on the bed itself. |
 | **Stay** | One episode of residency, intake → discharge. A resident who returns gets a new Stay; the Resident record is the person and persists across both. |
 | **UA / drug screen** | A urinalysis or other test. Has a result, a collection witness, and chain-of-custody notes. |
 | **Med pass** | The scheduled window in which staff observe residents taking their own medication. |
@@ -109,6 +110,12 @@ an unreturned resident is the highest-urgency state in the app.
 ### 9. Travel passes
 Multi-day, approval-gated. Request → review → approve/deny with a reason. Blackout rules
 by program phase. Bed is held, and the census reflects "out on pass" rather than empty.
+
+### 10. Maintenance
+**Built.** Requests raised against an apartment: title, description, priority, status.
+Any staff may file one; admin and house managers close them, and closing requires a
+resolution note. Deliberately independent of `Bed.status` — maintenance is a property of
+the unit, out-of-service is a property of the bed, and neither drives the other.
 
 ### Likely later
 Incident reports, rent/fee ledger, staff shifts and handoff notes, curfew tracking,
@@ -244,6 +251,11 @@ Verified against Prisma CLI 7.9.1, not remembered:
 - Run `npx prisma validate` after schema edits. It catches composite-relation and
   uniqueness mistakes without needing a live database.
 
+The audit list is `AUDITED_MODELS` in `server/src/domain/constants.js` (renamed from
+`PHI_MODELS` once facility config joined it). It covers resident data *and* Apartment, Bed
+and MaintenanceRequest — changing config changes how historical records read, so an
+auditor asking "why does 12D show empty in March" has an answer.
+
 **Log IDs only in the audit extension** — never names, screen results, or med details.
 Set Prisma's `log` to `['error']` in production; query logging prints parameter values,
 which would put PHI in stdout.
@@ -327,13 +339,21 @@ Two verification suites, both run against a live database:
 
 - `npm run verify:constraints` — 20 assertions on the database-level invariants
 - `node scripts/verify-auth.js` — 15 assertions on the login/session/audit flow
+- `node scripts/verify-apartments.js` — 24 assertions on apartments, beds and
+  maintenance, including the admin/manager field split and the rules the database
+  cannot enforce
 
 **`verify:constraints` TRUNCATEs as it runs**, so reseed before running the auth suite or
 its users will be gone and every login assertion fails:
 
 ```
-npm run verify:constraints && node scripts/seed.js && node scripts/verify-auth.js
+npm run verify:constraints && node scripts/seed.js \
+  && node scripts/verify-auth.js && node scripts/seed.js \
+  && node scripts/verify-apartments.js && node scripts/seed.js
 ```
+
+`verify-apartments.js` creates a test apartment and leaves it behind, so finish with a
+seed to get back to a clean facility.
 
 ### Auth decisions (built)
 

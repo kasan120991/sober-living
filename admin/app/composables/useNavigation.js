@@ -30,10 +30,10 @@ const GROUPS = [
     id: 'daily',
     label: 'Daily',
     items: [
-      { label: 'Apartment checks', icon: 'i-lucide-clipboard-check', to: '/checks', roles: ALL_STAFF },
-      { label: 'Drug screens', icon: 'i-lucide-flask-conical', to: '/screens', roles: ALL_STAFF },
-      { label: 'Med pass', icon: 'i-lucide-pill', to: '/meds', roles: ALL_STAFF },
-      { label: 'Sign-outs', icon: 'i-lucide-door-open', to: '/sign-outs', roles: ALL_STAFF },
+      { label: 'Apartment Checks', icon: 'i-lucide-clipboard-check', to: '/checks', roles: ALL_STAFF },
+      { label: 'Drug Screens', icon: 'i-lucide-flask-conical', to: '/screens', roles: ALL_STAFF },
+      { label: 'Med Pass', icon: 'i-lucide-pill', to: '/meds', roles: ALL_STAFF },
+      { label: 'Sign-Outs', icon: 'i-lucide-door-open', to: '/sign-outs', roles: ALL_STAFF },
     ],
   },
   {
@@ -41,8 +41,8 @@ const GROUPS = [
     label: 'Planning',
     items: [
       { label: 'Schedule', icon: 'i-lucide-calendar-days', to: '/schedule', roles: ALL_STAFF },
-      { label: 'Travel passes', icon: 'i-lucide-plane', to: '/passes', roles: ALL_STAFF },
-      { label: 'Community service', icon: 'i-lucide-hand-heart', to: '/service', roles: ALL_STAFF },
+      { label: 'Travel Passes', icon: 'i-lucide-plane', to: '/passes', roles: ALL_STAFF },
+      { label: 'Community Service', icon: 'i-lucide-hand-heart', to: '/service', roles: ALL_STAFF },
     ],
   },
   {
@@ -50,8 +50,12 @@ const GROUPS = [
     label: 'Facility',
     items: [
       { label: 'Apartments & Beds', icon: 'i-lucide-building-2', to: '/apartments', roles: MANAGERS },
+      // Visible to every staff role: a tech who finds a broken latch during an
+      // apartment check should be able to file it there and then. Consequence —
+      // techs now see a Facility group containing only this.
+      { label: 'Maintenance', icon: 'i-lucide-wrench', to: '/maintenance', roles: ALL_STAFF },
       { label: 'Staff', icon: 'i-lucide-id-card', to: '/staff', roles: ADMIN_ONLY },
-      { label: 'Audit log', icon: 'i-lucide-scroll-text', to: '/audit', roles: ADMIN_ONLY },
+      { label: 'Audit Log', icon: 'i-lucide-scroll-text', to: '/audit', roles: ADMIN_ONLY },
     ],
   },
 ]

@@ -19,7 +19,7 @@ async function main() {
   console.log('Seeding…')
   await prisma.$executeRawUnsafe(`
     TRUNCATE "sessions","bed_assignments","stays","documents","emergency_contacts",
-             "beds","apartments","residents","users","programs"
+             "maintenance_requests","beds","apartments","residents","users","programs"
     RESTART IDENTITY CASCADE`)
 
   const passwordHash = await hashPassword(DEV_PASSWORD)
@@ -115,12 +115,40 @@ async function main() {
     })
   }
 
+  // Maintenance is raised against the APARTMENT. Bed 12D carries its own
+  // out-of-service note; the two read as related without being linked.
+  await prisma.maintenanceRequest.create({
+    data: {
+      apartmentId: apt12.id,
+      title: 'Window latch broken — work order 118',
+      description: 'Bedroom window will not latch shut. Vendor scheduled.',
+      priority: 'URGENT',
+      status: 'OPEN',
+      reportedById: manager.id,
+      reportedAt: new Date('2026-07-28T14:10:00Z'),
+    },
+  })
+  await prisma.maintenanceRequest.create({
+    data: {
+      apartmentId: apt12.id,
+      title: 'Kitchen faucet dripping',
+      priority: 'LOW',
+      status: 'RESOLVED',
+      reportedById: tech.id,
+      reportedAt: new Date('2026-06-02T09:00:00Z'),
+      resolvedById: manager.id,
+      resolvedAt: new Date('2026-06-04T16:30:00Z'),
+      resolutionNote: 'Replaced washer and seated the cartridge. No leak after 24h.',
+    },
+  })
+
   console.log(`
   Seeded:
     ${await prisma.apartment.count()} apartments (1 men's, 1 women's)
     ${await prisma.bed.count()} beds (1 out of service)
     ${await prisma.resident.count()} residents, all with an active bed
     ${await prisma.user.count()} staff users
+    ${await prisma.maintenanceRequest.count()} maintenance requests (1 open urgent, 1 resolved)
 
   Sign in with any of:
     admin@facility.test     (ADMIN)

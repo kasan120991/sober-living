@@ -2,7 +2,7 @@ import 'dotenv/config'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '../generated/prisma/client.js'
 import { getRequestContext } from '../lib/requestContext.js'
-import { AUDIT_ACTION, PHI_MODELS, SOFT_DELETE_MODELS } from '../domain/constants.js'
+import { AUDIT_ACTION, AUDITED_MODELS, SOFT_DELETE_MODELS } from '../domain/constants.js'
 
 if (!process.env.DATABASE_URL) {
   throw new Error('DATABASE_URL is not set. Copy .env.example to .env.')
@@ -19,7 +19,7 @@ const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL })
 const base = new PrismaClient({ adapter, log: ['error'] })
 
 const softDeletable = new Set(SOFT_DELETE_MODELS)
-const audited = new Set(PHI_MODELS)
+const audited = new Set(AUDITED_MODELS)
 
 const READ_OPS = new Set([
   'findMany',

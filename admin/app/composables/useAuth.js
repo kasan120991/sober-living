@@ -11,9 +11,7 @@
  */
 export function useAuth() {
   const user = useState('auth.user', () => null)
-  const config = useRuntimeConfig()
-  const api = (path, options = {}) =>
-    $fetch(path, { baseURL: config.public.apiBase, credentials: 'include', ...options })
+  const api = useApi()
 
   async function signIn(email, password) {
     const { user: signedIn } = await api('/auth/login', {

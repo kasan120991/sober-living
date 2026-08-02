@@ -52,13 +52,46 @@ export const DOCUMENT_TYPE = Object.freeze({
   OTHER: 'OTHER',
 })
 
-/// Models carrying resident data. Every read and write of these is audited.
-export const PHI_MODELS = Object.freeze([
+export const MAINTENANCE_STATUS = Object.freeze({
+  OPEN: 'OPEN',
+  IN_PROGRESS: 'IN_PROGRESS',
+  RESOLVED: 'RESOLVED',
+  CANCELLED: 'CANCELLED',
+})
+
+export const MAINTENANCE_PRIORITY = Object.freeze({
+  LOW: 'LOW',
+  NORMAL: 'NORMAL',
+  URGENT: 'URGENT',
+})
+
+/// A request in one of these states is finished and needs a resolution note.
+export const MAINTENANCE_CLOSED_STATUSES = Object.freeze([
+  MAINTENANCE_STATUS.RESOLVED,
+  MAINTENANCE_STATUS.CANCELLED,
+])
+
+/**
+ * Models whose every read and write is written to the audit log.
+ *
+ * Named for what it does, not for what it holds: the first five carry resident
+ * data and are the 42 CFR Part 2 concern, while Apartment, Bed and
+ * MaintenanceRequest are facility configuration. Config is audited because
+ * changing it changes the meaning of historical records — renaming an apartment
+ * or taking a bed out of service alters how past bed history reads, and an
+ * auditor asking "why does 12D show empty in March" deserves an answer.
+ */
+export const AUDITED_MODELS = Object.freeze([
+  // Resident data
   'Resident',
   'Stay',
   'EmergencyContact',
   'BedAssignment',
   'Document',
+  // Facility configuration
+  'Apartment',
+  'Bed',
+  'MaintenanceRequest',
 ])
 
 /// Models with a deletedAt column. Everything here is filtered on read, and
@@ -73,4 +106,5 @@ export const SOFT_DELETE_MODELS = Object.freeze([
   'Program',
   'Document',
   'User',
+  'MaintenanceRequest',
 ])

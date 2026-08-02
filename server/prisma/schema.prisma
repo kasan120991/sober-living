@@ -70,6 +70,19 @@ enum AuditAction {
   EXPORT
 }
 
+enum MaintenanceStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CANCELLED
+}
+
+enum MaintenancePriority {
+  LOW
+  NORMAL
+  URGENT
+}
+
 enum DocumentType {
   RESIDENT_AGREEMENT
   PHOTO_ID
@@ -106,7 +119,8 @@ model Apartment {
   state        String?
   postalCode   String?
 
-  beds Bed[]
+  beds                Bed[]
+  maintenanceRequests MaintenanceRequest[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -149,6 +163,49 @@ model Bed {
   /// Referenced by BedAssignment's composite foreign key.
   @@unique([id, cohort])
   @@map("beds")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Maintenance
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Work needed on an apartment: a broken latch, a dead water heater, a leak.
+///
+/// Raised against an APARTMENT, never a bed. Maintenance is a property of the
+/// unit. Whether a specific bed is usable is a separate fact recorded on the bed
+/// itself (`Bed.status` + `outOfServiceNote`), and neither drives the other —
+/// filing a request does not take a bed out of service, and resolving one does
+/// not put it back.
+model MaintenanceRequest {
+  id          String    @id @default(uuid(7))
+  apartmentId String
+  apartment   Apartment @relation(fields: [apartmentId], references: [id])
+
+  title       String
+  description String?
+  status      MaintenanceStatus   @default(OPEN)
+  priority    MaintenancePriority @default(NORMAL)
+
+  reportedById String
+  reportedBy   User     @relation("reportedRequests", fields: [reportedById], references: [id])
+  reportedAt   DateTime @default(now())
+
+  resolvedById String?
+  resolvedBy   User?     @relation("resolvedRequests", fields: [resolvedById], references: [id])
+  resolvedAt   DateTime?
+
+  /// Required whenever status becomes RESOLVED or CANCELLED. Enforced in the
+  /// route layer — a request that just disappears leaves no record of what was
+  /// actually done to the unit.
+  resolutionNote String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([apartmentId, status])
+  @@index([status, priority])
+  @@map("maintenance_requests")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -375,10 +432,12 @@ model User {
   failedLoginCount Int       @default(0)
   lockedUntil      DateTime?
 
-  bedAssignments BedAssignment[]
-  documents      Document[]
-  auditEntries   AuditLog[]
-  sessions       Session[]
+  bedAssignments   BedAssignment[]
+  documents        Document[]
+  auditEntries     AuditLog[]
+  sessions         Session[]
+  reportedRequests MaintenanceRequest[] @relation("reportedRequests")
+  resolvedRequests MaintenanceRequest[] @relation("resolvedRequests")
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
