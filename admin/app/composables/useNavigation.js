@@ -38,9 +38,8 @@ const GROUPS = [
   {
     id: 'main',
     items: [
-      // Labelled "Home" in the nav, though the page itself is the census board.
-      // The nav says where you go; the page says what it is.
-      { label: 'Home', icon: Home, to: '/', roles: ALL_STAFF },
+      // The landing page is the census board, and the nav names it as such.
+      { label: 'Census', icon: Home, to: '/', roles: ALL_STAFF },
       { label: 'Residents', icon: Users, to: '/residents', roles: ALL_STAFF },
     ],
   },

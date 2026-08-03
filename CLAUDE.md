@@ -39,7 +39,7 @@ Use these terms in code, schema, and UI. Do not invent synonyms.
 | **Bed** | The unit of capacity. Lives directly in an Apartment — there is no room level. Beds are assigned, not apartments. |
 | **Resident** | A person living in the facility. Prefer this over "client" or "patient" in UI. `Resident` in code. |
 | **Program** | The track a resident is on (e.g. Phase 1 / 2 / 3). Drives privileges: curfew time, pass eligibility, required service hours. |
-| **Census** | Who is in which bed right now. The single most-viewed screen, and the app's landing page. Note the sidebar links to it as **Home** — the nav says where you go, the page heading says what it is. |
+| **Census** | Who is in which bed right now. The single most-viewed screen, and the app's landing page. The sidebar links to it as **Census** — it was "Home" briefly, but naming the destination by the domain term is what keeps the glossary honest in the UI. |
 | **Sign-out** | A resident leaving the property and returning the same day. Has an expected return time. |
 | **Travel pass** | An overnight or multi-day approved absence. Requires approval; bed is held. |
 | **Apartment check** | A scheduled or random inspection of an apartment. Produces a pass/fail with findings. |
