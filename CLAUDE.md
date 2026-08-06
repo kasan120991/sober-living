@@ -1437,6 +1437,16 @@ Verified against Prisma CLI 7.9.1, not remembered:
   `.d.ts`, so editors still autocomplete every model and field.
 - **`prisma.config.js` does not auto-load `.env`.** Load `dotenv` explicitly or the URL
   will be undefined.
+- **Use `process.env.DATABASE_URL` there, not `@prisma/config`'s `env()`.** `env()` throws
+  the moment the config is *loaded*, and the config is loaded for every command — including
+  `prisma generate`, which needs no datasource at all (only `generate --sql` does). That
+  eager throw made `npm install` fail on a fresh clone once `postinstall` ran generate,
+  before anyone had copied `.env`. `process.env` is also the shape `prisma init` emits.
+  Commands that really need the URL still fail, with a clearer message, at the point they
+  need it.
+- **`postinstall` runs `prisma generate`.** The client is generated into `src/generated/`,
+  which is gitignored, so without the hook a fresh clone gets `ERR_MODULE_NOT_FOUND` from
+  the first script it runs.
 - Run `npx prisma validate` after schema edits. It catches composite-relation and
   uniqueness mistakes without needing a live database.
 

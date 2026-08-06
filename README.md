@@ -39,8 +39,7 @@ level rather than per route.
 # 1. Database + schema + demo data
 cd server
 cp .env.example .env          # local Docker throwaways; fine as-is for development
-npm install
-npx prisma generate           # REQUIRED on a fresh clone — the client is gitignored
+npm install                   # postinstall generates the Prisma client
 npm run db:up                 # postgres:17 on 5432 — user/pass/db all "soberlife"
 npx prisma migrate deploy
 node scripts/seed.js
