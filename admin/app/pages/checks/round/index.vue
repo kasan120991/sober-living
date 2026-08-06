@@ -46,11 +46,12 @@ const checkedCount = computed(
 const total = computed(() => data.value?.apartments.length ?? 0)
 const allChecked = computed(() => total.value > 0 && checkedCount.value === total.value)
 
-const sheetOpen = ref(false)
-const sheetApartment = ref(null)
+// A full-screen STEP, not a drawer. On this hardware the check is the whole
+// job, and a sheet over the picker spends a third of a 390px viewport on the
+// screen you just left. The drawer is the desktop shell — see AppCheckForm.
+const router = useRouter()
 function openCheck(a) {
-  sheetApartment.value = { id: a.id, name: a.name }
-  sheetOpen.value = true
+  router.push(`/checks/round/${a.id}`)
 }
 </script>
 
@@ -63,7 +64,6 @@ function openCheck(a) {
       </template>
     </template>
 
-    <AppCheckSheet v-model:open="sheetOpen" :apartment="sheetApartment" @saved="load" />
 
     <p v-if="pending" class="text-muted-foreground text-sm">Loading…</p>
 
