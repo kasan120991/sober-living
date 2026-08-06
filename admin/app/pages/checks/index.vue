@@ -165,7 +165,11 @@ function accountedLabel(b) {
         </NuxtLink>
       </Button>
 
-      <section>
+      <!-- DESKTOP ONLY. These cards are the picker on a desktop; on the phone
+           and the tablet the round mode above is the picker, and showing the
+           same apartments twice makes the button look like one of two ways to
+           do the same thing. The hour's progress still reads in the heading. -->
+      <section v-if="!isHallway">
         <h2 class="text-muted-foreground mb-2 text-[10.5px] font-semibold tracking-[0.1em] uppercase">
           This hour
         </h2>
