@@ -130,23 +130,46 @@ async function main() {
 
   console.log('\n\x1b[1mBeds\x1b[0m')
 
+  // Intake above filled both cohorts' free beds, so make one of each. This also
+  // proves a bed created through the apartments API is immediately assignable.
+  //
+  // The men's bed matters for more than tidiness. Without a free one the cohort
+  // check below posted `bedId: undefined` and got back "400 Invalid bedId" —
+  // which the old `>= 400` assertion accepted, so cohort enforcement through the
+  // API was never actually being tested. It only looked like it was.
+  const apts = await admin('/apartments')
+  const mensApt = apts.body.apartments.find((a) => a.cohort === 'MEN')
+  const womensApt = apts.body.apartments.find((a) => a.cohort === 'WOMEN')
+  for (const apt of [mensApt, womensApt]) {
+    await admin(`/apartments/${apt.id}/beds`, {
+      method: 'POST',
+      body: JSON.stringify({ count: 1, scheme: 'alpha' }),
+    })
+  }
+
   const mensBeds = await admin('/residents/available-beds?cohort=MEN')
+  const mensBedId = mensBeds.body.beds[0]?.id
   const wrongCohort = await manager(`/residents/${nadia.body.id}/bed`, {
     method: 'POST',
-    body: JSON.stringify({ bedId: mensBeds.body.beds[0]?.id }),
+    body: JSON.stringify({ bedId: mensBedId }),
   })
-  wrongCohort.status >= 400
-    ? ok('moving a woman into a MEN bed is refused (composite FK holds through the API)')
-    : bad('cohort enforced on transfer', wrongCohort.status)
+  // Was `>= 400`, which passed on the 500 a raw composite-FK violation used to
+  // produce. assignBedTo now answers the mismatch itself, so this asserts the
+  // friendly 409 — the foreign keys are still the enforcement underneath.
+  wrongCohort.status === 409 && /other cohort/.test(wrongCohort.body?.error ?? '')
+    ? ok('moving a woman into a MEN bed is refused with a 409, not a 500')
+    : bad('cohort enforced on transfer', `${wrongCohort.status} ${wrongCohort.body?.error ?? ''}`)
 
-  // Intake took the last free women's bed, so make another. This also proves
-  // a bed created through the apartments API is immediately assignable.
-  const apts = await admin('/apartments')
-  const womensApt = apts.body.apartments.find((a) => a.cohort === 'WOMEN')
-  await admin(`/apartments/${womensApt.id}/beds`, {
+  // The census board now offers bed assignment from a free tile, and techs can
+  // see that board. The affordance is hidden from them client-side; this is the
+  // assertion that the actual boundary is the server's.
+  const techAssign = await tech(`/residents/${nadia.body.id}/bed`, {
     method: 'POST',
-    body: JSON.stringify({ count: 1, scheme: 'alpha' }),
+    body: JSON.stringify({ bedId: mensBedId }),
   })
+  techAssign.status === 403
+    ? ok('a tech cannot assign a bed (403), however the census renders the tile')
+    : bad('tech refused bed assignment', techAssign.status)
 
   const joyBeds = await admin('/residents/available-beds?cohort=WOMEN')
   const place = await manager(`/residents/${joy.id}/bed`, {

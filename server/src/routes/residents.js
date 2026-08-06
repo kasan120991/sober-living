@@ -21,6 +21,25 @@ import {
   updateResident,
 } from '../services/residents.js'
 import { activeStayIdFor, listEntries, postEntry } from '../services/ledger.js'
+import { residentSchedule } from '../services/schedule/read.js'
+// Aliased: the ledger exports a listEntries too, and this file imports both.
+import {
+  listEntries as listServiceEntries,
+  logEntry,
+  setStayTarget,
+} from '../services/communityService.js'
+import { hoursToMinutes } from './service.js'
+
+const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD')
+
+const serviceBody = z.object({
+  hours: hoursToMinutes,
+  workedOn: dateOnly,
+  location: z.string().trim().min(1).max(140),
+  supervisorName: z.string().trim().max(140).optional().nullable(),
+  supervisorPhone: z.string().trim().max(40).optional().nullable(),
+  note: z.string().trim().max(500).optional().nullable(),
+})
 
 const router = Router()
 
@@ -206,6 +225,54 @@ router.delete(
     const reason = typeof req.body?.reason === 'string' ? req.body.reason : null
     res.json(await releaseBed(req.params.id, reason))
   }),
+)
+
+// ── Community service ─────────────────────────────────────────────────────
+// Reading and LOGGING are all-staff; setting the target is not. See
+// routes/service.js for the verification half and the reasoning.
+router.get(
+  '/:id/service',
+  handler(async (req, res) => {
+    const stayId = await activeStayIdFor(req.params.id)
+    if (!stayId) return res.json({ entries: [], stayId: null })
+    res.json({ entries: await listServiceEntries(stayId), stayId })
+  }),
+)
+
+router.post(
+  '/:id/service',
+  handler(async (req, res) => {
+    const data = parseBody(serviceBody, req.body)
+    const stayId = await activeStayIdFor(req.params.id)
+    if (!stayId) throw new HttpError(409, 'This resident has no active stay.')
+    const { hours, ...rest } = data
+    res.status(201).json(await logEntry({ ...rest, stayId, minutes: hours }, req.session.userId))
+  }),
+)
+
+router.patch(
+  '/:id/service-target',
+  managers,
+  handler(async (req, res) => {
+    const { hours } = parseBody(
+      z.object({ hours: z.number().int().min(0).max(2000).nullable() }),
+      req.body,
+    )
+    const stayId = await activeStayIdFor(req.params.id)
+    if (!stayId) throw new HttpError(409, 'This resident has no active stay.')
+    await setStayTarget(stayId, hours)
+    res.status(204).end()
+  }),
+)
+
+// ── Schedule ──────────────────────────────────────────────────────────────
+// Read-only here: the record answers what this person is scheduled for, and the
+// event itself is edited from the schedule module. A join through THEIR
+// ATTENDEE ROWS, never a query on their cohort — so a resident on nothing gets
+// an empty list rather than everything their cohort does.
+router.get(
+  '/:id/schedule',
+  handler(async (req, res) => res.json(await residentSchedule(req.params.id))),
 )
 
 // ── Fee ledger ────────────────────────────────────────────────────────────

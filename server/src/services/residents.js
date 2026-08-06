@@ -2,6 +2,7 @@ import { prisma, runInTransaction } from '../db/client.js'
 import { HttpError } from '../middleware/authorize.js'
 import { STAY_STATUS } from '../domain/constants.js'
 import { balancesByStay, balanceOfStay } from './ledger.js'
+import { serviceSummary } from './communityService.js'
 import { STAFF_ROLE } from '../domain/constants.js'
 
 /// Who may see the last four of an SSN. Techs do not need it to run a med pass
@@ -112,7 +113,11 @@ export async function getResident(id, { viewerRole } = {}) {
       stays: {
         orderBy: { intakeAt: 'desc' },
         include: {
-          program: { select: { id: true, name: true, level: true } },
+          // serviceHoursRequired is selected because effectiveTarget() falls
+          // back to it when the stay carries no override.
+          program: {
+            select: { id: true, name: true, level: true, serviceHoursRequired: true },
+          },
           bedAssignments: {
             orderBy: { startedAt: 'desc' },
             include: { bed: { include: { apartment: { select: { id: true, name: true } } } } },
@@ -143,6 +148,10 @@ export async function getResident(id, { viewerRole } = {}) {
     current: current
       ? {
           balanceCents: await balanceOfStay(current.id),
+          // Minutes throughout, so nothing downstream ever compares an hour to
+          // a minute. This is what lights the rail's amber dot — see
+          // sectionDots() in the admin app, and servicePace() for the rule.
+          service: await serviceSummary(current, dayOfStay(current.intakeAt)),
           stayId: current.id,
           intakeAt: current.intakeAt,
           expectedDischargeAt: current.expectedDischargeAt,
@@ -245,10 +254,22 @@ export async function intakeResident(input, actorId) {
  * Cohort is passed through rather than trusted from the bed: the composite
  * foreign keys refuse a mismatch, so a wrong value fails loudly at the database
  * instead of housing someone in the other cohort's apartment.
+ *
+ * The cohort check below does NOT replace that — the foreign keys are still the
+ * enforcement, and still hold against a direct psql session. It only gives the
+ * mismatch a friendly face: without it a wrong pairing surfaces as a raw Prisma
+ * error, which the error handler turns into a 500 "Internal server error" for
+ * what is a correctable mistake. Assigning bed-first from the census board is
+ * where getting these two arguments the wrong way round became reachable.
  */
 async function assignBedTo(stayId, bedId, cohort, actorId, reason = 'transfer') {
   const bed = await prisma.bed.findUnique({ where: { id: bedId } })
   if (!bed) throw new HttpError(404, 'Bed not found')
+  // Before the out-of-service check: the harder constraint should not be masked
+  // by a softer message on a bed that could never have been used anyway.
+  if (bed.cohort !== cohort) {
+    throw new HttpError(409, 'That bed is in an apartment that serves the other cohort.')
+  }
   if (bed.status !== 'ACTIVE') {
     throw new HttpError(409, 'That bed is out of service and cannot be assigned.')
   }
@@ -447,4 +468,51 @@ export async function unhousedWithOptions() {
     if (bed) taken.add(bed.id)
     return { id: r.id, fullName: r.fullName, cohort: r.cohort, freeBed: bed }
   })
+}
+
+/**
+ * Active residents of the given cohorts, for a schedule roster picker.
+ *
+ * Takes a LIST because an event may be for the men, the women, or both, and a
+ * both-cohorts event is picked from one combined roster. One query and one sort
+ * rather than two client-side calls, which would interleave badly and put the
+ * ordering in the browser.
+ *
+ * Returns `stayId` alongside the name, and callers need it rather than the
+ * resident id: schedule attendee rows hang off the STAY, the same as sign-outs
+ * and the ledger, so that a discharge drops someone off every future session
+ * with no write at all.
+ *
+ * The cohorts are a hard filter, not a convenience — and the caller must ask
+ * for both explicitly. Everything downstream refuses a mismatch anyway, but a
+ * picker that could show a cohort the event is not for is a merged schedule
+ * waiting to be created by whoever is in a hurry.
+ */
+export async function listActiveResidentsByCohorts(cohorts) {
+  const stays = await prisma.stay.findMany({
+    where: { cohort: { in: cohorts }, status: STAY_STATUS.ACTIVE },
+    include: {
+      resident: { select: { id: true, firstName: true, lastName: true } },
+      program: { select: { id: true, name: true, level: true } },
+      bedAssignments: {
+        where: { endedAt: null },
+        include: { bed: { include: { apartment: { select: { name: true } } } } },
+      },
+    },
+  })
+
+  return stays
+    .map((s) => ({
+      stayId: s.id,
+      residentId: s.resident.id,
+      fullName: `${s.resident.firstName} ${s.resident.lastName}`,
+      cohort: s.cohort,
+      programName: s.program?.name ?? null,
+      // Shown in the picker so two residents sharing a first name are
+      // distinguishable without opening anything.
+      bedLabel: s.bedAssignments[0]
+        ? `${s.bedAssignments[0].bed.apartment.name} · ${s.bedAssignments[0].bed.label}`
+        : null,
+    }))
+    .sort((a, b) => a.fullName.localeCompare(b.fullName))
 }

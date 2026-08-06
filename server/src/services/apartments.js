@@ -1,4 +1,4 @@
-import { prisma } from '../db/client.js'
+import { prisma, runInTransaction } from '../db/client.js'
 import { HttpError } from '../middleware/authorize.js'
 import { PRISMA } from '../lib/http.js'
 import { BED_STATUS, MAINTENANCE_STATUS } from '../domain/constants.js'
@@ -116,10 +116,64 @@ export async function createApartment(data) {
     return await prisma.apartment.create({ data })
   } catch (err) {
     if (err.code === PRISMA.UNIQUE_VIOLATION) {
-      throw new HttpError(409, 'An apartment with that name already exists')
+      // The name may be held by an apartment that was removed — invisible in
+      // every list, but the unique index still knows it. Naming the actual
+      // fix beats a "already exists" that points at nothing.
+      const removed = await prisma.apartment.findFirst({
+        where: { name: data.name, deletedAt: { not: null } },
+        select: { id: true },
+      })
+      throw new HttpError(
+        409,
+        removed
+          ? `"${data.name}" belongs to a removed apartment. Restore it instead of creating a new one.`
+          : 'An apartment with that name already exists',
+      )
     }
     throw err
   }
+}
+
+/**
+ * Apartments an admin has removed, newest removal first. Reachable because
+ * the query names `deletedAt` explicitly — the soft-delete extension only
+ * imposes its filter on queries that say nothing (see db/client.js).
+ */
+export async function listRemovedApartments() {
+  const apartments = await prisma.apartment.findMany({
+    where: { deletedAt: { not: null } },
+    orderBy: { deletedAt: 'desc' },
+    include: { beds: { where: { deletedAt: { not: null } }, select: { id: true } } },
+  })
+  return apartments.map((a) => ({
+    id: a.id,
+    name: a.name,
+    cohort: a.cohort,
+    deletedAt: a.deletedAt,
+    bedCount: a.beds.length,
+  }))
+}
+
+/**
+ * The undo of deleteApartment: clears deletedAt on the apartment and on every
+ * bed it holds. All of them, deliberately — removing an apartment requires
+ * removing its beds first, so its beds' deletions are part of the same act,
+ * and statuses and out-of-service notes come back exactly as they were. If a
+ * resurrected bed is unwanted, removing it again is one action.
+ *
+ * Assignment history was never touched by any of this: "who slept in 12B in
+ * June" is answerable whether or not the apartment currently exists.
+ */
+export async function restoreApartment(id) {
+  return runInTransaction(async () => {
+    const apartment = await prisma.apartment.findFirst({
+      where: { id, deletedAt: { not: null } },
+    })
+    if (!apartment) throw new HttpError(404, 'No removed apartment with that id')
+
+    await prisma.bed.updateMany({ where: { apartmentId: id }, data: { deletedAt: null } })
+    return prisma.apartment.update({ where: { id }, data: { deletedAt: null } })
+  })
 }
 
 export async function updateApartment(id, data) {

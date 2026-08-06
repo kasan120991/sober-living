@@ -116,6 +116,9 @@ const RLS_MODELS = new Set([
   'EmergencyContact',
   'Document',
   'BedAssignment',
+  'ScheduleAttendee',
+  'ScheduleAttendance',
+  'ServiceEntry',
 ])
 
 /**
@@ -252,7 +255,14 @@ export const prisma = base
             operation === 'aggregate' ||
             operation === 'groupBy'
           ) {
-            args.where = { ...args.where, deletedAt: null }
+            // Default-closed, deliberately open: the filter is added only when
+            // the query says nothing about deletedAt. Forgetting still means
+            // filtered; reaching removed rows takes an explicit clause — which
+            // is what restore does (services/apartments.js), on purpose,
+            // through this client, so the read is still audited and RLS'd.
+            if (args.where?.deletedAt === undefined) {
+              args.where = { ...args.where, deletedAt: null }
+            }
             return query(args)
           }
 

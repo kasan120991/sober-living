@@ -23,8 +23,26 @@ export async function resetFacilityData(prisma, { quiet = false } = {}) {
   // ledger_entries goes in this list, not the DELETE list below, for the same
   // reason as bed_assignments: its append-only trigger refuses DELETE outright.
   // It must also be cleared BEFORE stays, which it references.
-  await sql('TRUNCATE "ledger_entries", "bed_assignments", "sessions", "audit_log" RESTART IDENTITY')
+  // service_entries joins this list rather than the DELETE list below for the
+  // same reason as ledger_entries: its never-DELETE trigger refuses row
+  // deletion even to the owner, and TRUNCATE does not fire row triggers. It
+  // must also be cleared BEFORE stays, which it references.
+  await sql(
+    'TRUNCATE "service_entries", "ledger_entries", "bed_assignments", "sessions", "audit_log" RESTART IDENTITY',
+  )
 
+  // The schedule, in foreign-key order and all of it BEFORE stays, which the
+  // attendee and attendance rows reference. Plain DELETE throughout: all five
+  // revoke DELETE from the app role, but this runs as the owner.
+  await sql('DELETE FROM "schedule_attendance"')
+  await sql('DELETE FROM "schedule_attendees"')
+  await sql('DELETE FROM "schedule_sessions"')
+  await sql('DELETE FROM "schedule_occurrences"')
+  await sql('DELETE FROM "schedule_events"')
+
+  // Before stays, which it references. Plain DELETE: sign_outs revokes DELETE
+  // from the app role, but this runs as the owner.
+  await sql('DELETE FROM "sign_outs"')
   await sql('DELETE FROM "documents"')
   await sql('DELETE FROM "emergency_contacts"')
   await sql('DELETE FROM "insurance_policies"')

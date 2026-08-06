@@ -4,6 +4,8 @@ import cors from 'cors'
 import cookieParser from 'cookie-parser'
 
 import { requestContextMiddleware } from './lib/requestContext.js'
+import { corsOrigins } from './lib/origins.js'
+import { broadcastChanged } from './lib/realtime.js'
 import { sessionMiddleware } from './middleware/session.js'
 import { dbActorMiddleware } from './middleware/dbActor.js'
 import { errorHandler, notFound } from './middleware/errorHandler.js'
@@ -15,6 +17,10 @@ import maintenanceRouter from './routes/maintenance.js'
 import notificationsRouter from './routes/notifications.js'
 import searchRouter from './routes/search.js'
 import residentsRouter from './routes/residents.js'
+import censusRouter from './routes/census.js'
+import signOutsRouter from './routes/signOuts.js'
+import scheduleRouter from './routes/schedule.js'
+import serviceRouter from './routes/service.js'
 
 export function createApp() {
   const app = express()
@@ -26,15 +32,31 @@ export function createApp() {
   app.use(helmet())
 
   // Explicit origin list, credentials on. No wildcard: the two frontends are
-  // the only clients, and the session rides on an httpOnly cookie.
-  const origins = (process.env.CORS_ORIGINS ?? '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-  app.use(cors({ origin: origins, credentials: true }))
+  // the only clients, and the session rides on an httpOnly cookie. Shared with
+  // the Socket.IO server — see lib/origins.js.
+  app.use(cors({ origin: corsOrigins(), credentials: true }))
 
   app.use(express.json({ limit: '1mb' }))
   app.use(cookieParser())
+
+  // Realtime invalidation: any successful mutation, on any route present or
+  // future, tells every connected staff screen to refetch. `finish` fires
+  // after the response left, which is after the route awaited its transaction
+  // — a client's refetch can never observe pre-commit state. /auth is skipped:
+  // login and logout change nothing another screen shows, and broadcasting on
+  // login would announce sign-in cadence for no benefit.
+  //
+  // req.originalUrl, not req.path: Express rewrites req.path when descending
+  // into mounted routers, and at finish time it may be router-relative.
+  app.use((req, res, next) => {
+    res.on('finish', () => {
+      if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return
+      if (res.statusCode >= 400) return
+      if (req.originalUrl.split('?')[0].startsWith('/auth')) return
+      broadcastChanged()
+    })
+    next()
+  })
   app.use(requestContextMiddleware)
   app.use(sessionMiddleware)
   // After the session: what the database may show is derived from the verified
@@ -52,6 +74,10 @@ export function createApp() {
   app.use('/notifications', notificationsRouter)
   app.use('/search', searchRouter)
   app.use('/residents', residentsRouter)
+  app.use('/census', censusRouter)
+  app.use('/sign-outs', signOutsRouter)
+  app.use('/schedule', scheduleRouter)
+  app.use('/service', serviceRouter)
 
   app.use(notFound)
   app.use(errorHandler)

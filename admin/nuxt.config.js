@@ -10,7 +10,20 @@ export default defineNuxtConfig({
 
   modules: ['@nuxt/fonts', '@nuxtjs/color-mode'],
 
-  css: ['~/assets/css/main.css'],
+  // ORDER IS LOAD-BEARING, all four of them.
+  //
+  // FullCalendar 7 ships its themes as real stylesheets (v6 injected them from
+  // JS), so pulse arrives here rather than as a side effect of an import. Our
+  // palette must come AFTER theme.css to win, and fullcalendar.css stays a
+  // separate file because `shadcn-vue add` rewrites main.css wholesale — see
+  // CLAUDE.md. Both FullCalendar sheets are unlayered, which is what keeps them
+  // ahead of Tailwind's layered rules.
+  css: [
+    '~/assets/css/main.css',
+    '@fullcalendar/vue3/skeleton.css',
+    '@fullcalendar/vue3/themes/pulse/theme.css',
+    '~/assets/css/fullcalendar.css',
+  ],
 
   vite: {
     plugins: [tailwindcss()],

@@ -5,6 +5,8 @@ import {
   MAINTENANCE_STATUS,
   STAY_STATUS,
 } from '../domain/constants.js'
+import { formatFacilityTime } from '../lib/facilityTime.js'
+import { overdueWhere } from './signOuts.js'
 
 /**
  * What the bell knows.
@@ -30,7 +32,19 @@ import {
 const LEVEL = { ACTION: 'action', WATCH: 'watch' }
 
 export async function listNotifications() {
-  const [unhoused, urgent, staleOpen] = await Promise.all([
+  const [overdue, unhoused, urgent, staleOpen] = await Promise.all([
+    // The loudest state in the app: someone off property past their expected
+    // return (plus the grace window — see OVERDUE_GRACE_MS).
+    prisma.signOut.findMany({
+      where: overdueWhere(),
+      include: {
+        stay: {
+          select: { resident: { select: { id: true, firstName: true, lastName: true } } },
+        },
+      },
+      orderBy: { expectedReturnAt: 'asc' },
+    }),
+
     // Someone in the programme with nowhere to sleep tonight.
     prisma.stay.findMany({
       where: {
@@ -58,6 +72,21 @@ export async function listNotifications() {
   ])
 
   const items = []
+
+  for (const s of overdue) {
+    items.push({
+      id: `overdue:${s.id}`,
+      level: LEVEL.ACTION,
+      kind: 'OVERDUE_SIGN_OUT',
+      title: `${s.stay.resident.firstName} ${s.stay.resident.lastName} has not returned`,
+      // Destination is operational, and the person acting on this needs to
+      // know where to start looking.
+      detail: `Expected back ${formatFacilityTime(s.expectedReturnAt)} · ${s.destination}`,
+      to: '/sign-outs',
+      // Expected-return as the timestamp: the longest overdue sorts first.
+      at: s.expectedReturnAt,
+    })
+  }
 
   for (const stay of unhoused) {
     items.push({

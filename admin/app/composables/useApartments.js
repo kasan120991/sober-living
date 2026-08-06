@@ -15,6 +15,10 @@ export function useApartments() {
   const updateApartment = (id, body) => api(`/apartments/${id}`, { method: 'PATCH', body })
   const removeApartment = (id) => api(`/apartments/${id}`, { method: 'DELETE' })
 
+  /** Admin only — removal is soft, and this is the way back. */
+  const listRemovedApartments = () => api('/apartments/removed').then((r) => r.apartments)
+  const restoreApartment = (id) => api(`/apartments/${id}/restore`, { method: 'POST' })
+
   /** Bulk: `{ count, scheme }`. Single: `{ label }`. Never both. */
   const addBeds = (apartmentId, body) =>
     api(`/apartments/${apartmentId}/beds`, { method: 'POST', body })
@@ -36,6 +40,8 @@ export function useApartments() {
     createApartment,
     updateApartment,
     removeApartment,
+    listRemovedApartments,
+    restoreApartment,
     addBeds,
     updateBed,
     removeBed,

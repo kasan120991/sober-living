@@ -33,6 +33,25 @@ enum Cohort {
   WOMEN
 }
 
+/// How a scheduled occurrence repeats. Deliberately two values and no RRULE:
+/// every-other-week and monthly-by-nth-weekday are not things this facility
+/// runs, and a parser for them is a dependency plus a class of bug for nothing.
+/// Mon/Wed/Fri is ONE weekly occurrence with three weekdays, not three rows.
+enum Recurrence {
+  ONCE
+  WEEKLY
+}
+
+/// What happened for one person at one dated session. Absent and excused are
+/// distinct outcomes, the same way a refused screen is not a positive one —
+/// "he did not come" and "he was allowed not to come" are different facts and
+/// collapsing them destroys the one that defends the facility.
+enum AttendanceStatus {
+  ATTENDED
+  ABSENT
+  EXCUSED
+}
+
 enum StaffRole {
   ADMIN
   HOUSE_MANAGER
@@ -307,6 +326,17 @@ model Stay {
   /// and the previous episode's date is still the truth about that episode.
   sobrietyDate DateTime? @db.Date
 
+  /// Overrides Program.serviceHoursRequired for THIS episode — a court or a
+  /// case manager setting a figure that is not the phase default. Whole hours:
+  /// an order says "80 hours", never 79.75.
+  ///
+  /// On the stay rather than the resident, so a readmission starts a fresh
+  /// obligation. On the stay rather than the program, so an 80-hour order
+  /// SURVIVES A PHASE CHANGE instead of dropping to 40 when somebody moves up.
+  /// Null means use the program default; both null means no target, and
+  /// therefore no bar and no dot.
+  serviceHoursRequired Int?
+
   /// What the person doing the intake observed or was told at the door.
   /// Free text on purpose — it is a narrative note, not a field to report on.
   /// Whatever is written here is disclosable, so it belongs in the same
@@ -315,6 +345,11 @@ model Stay {
 
   bedAssignments BedAssignment[]
   ledgerEntries  LedgerEntry[]
+  signOuts       SignOut[]
+
+  scheduleAttendees   ScheduleAttendee[]
+  scheduleAttendance  ScheduleAttendance[]
+  serviceEntries      ServiceEntry[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -322,7 +357,7 @@ model Stay {
 
   @@index([status])
   @@index([residentId])
-  /// Referenced by BedAssignment's composite foreign key.
+  /// Referenced by BedAssignment's and the schedule tables' composite foreign keys.
   @@unique([id, cohort])
   @@map("stays")
 }
@@ -459,6 +494,45 @@ model LedgerEntry {
   @@map("ledger_entries")
 }
 
+/// A same-day departure: destination, expected return, and the acknowledged
+/// return that closes it. Hangs off Stay like the ledger — a returning
+/// resident's sign-outs belong to the episode they happened in.
+///
+/// Presence (in house / out / overdue) is DERIVED from returnedAt and
+/// expectedReturnAt against the clock, never stored — a stored flag would need
+/// a job to flip it and would lie the minute the job lagged.
+///
+/// One OPEN sign-out per stay, enforced by a partial unique index in raw SQL
+/// (Prisma cannot express it — see the sign_outs migration). Soft-deleted rows
+/// are excluded, so removing a record made in error frees the slot.
+model SignOut {
+  id     String @id @default(uuid(7))
+  stayId String
+  stay   Stay   @relation(fields: [stayId], references: [id])
+
+  destination String
+  purpose     String?
+
+  outAt            DateTime
+  expectedReturnAt DateTime
+  returnedAt       DateTime?
+
+  recordedById String
+  recordedBy   User   @relation("recordedSignOuts", fields: [recordedById], references: [id])
+
+  /// Who saw them come back. Arrives together with returnedAt or not at all —
+  /// a CHECK constraint holds the pair honest.
+  returnAcknowledgedById String?
+  returnAcknowledgedBy   User?   @relation("acknowledgedSignOuts", fields: [returnAcknowledgedById], references: [id])
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([stayId, outAt])
+  @@map("sign_outs")
+}
+
 /// A resident's insurance, as captured at intake.
 ///
 /// One per resident, replaced rather than versioned: unlike a screen result or
@@ -470,6 +544,319 @@ model LedgerEntry {
 /// are the most directly abusable data in the system, and keeping them in one
 /// place means access to them can be narrowed later without touching the
 /// resident record.
+/// The event itself — identity only. No cohort, no time, no day.
+///
+/// "House Meeting" is one event both cohorts attend, at ONE time. Cohort lives
+/// on the occurrence below and timing is copied identically across them, which
+/// is what makes "everyone" expressible as two rows rather than as a nullable
+/// column meaning everyone.
+model ScheduleEvent {
+  id          String  @id @default(uuid(7))
+  title       String
+  description String?
+  /// Free text: "Common room", "St Mark's basement". An apartmentId with a
+  /// composite (apartmentId, cohort) FK belongs on the OCCURRENCE rather than
+  /// here — an apartment serves one cohort and an event spans both. Deferred.
+  location    String?
+
+  occurrences ScheduleOccurrence[]
+
+  /// PROVENANCE FOR A MOVED SERIES. Set on the NEW event, pointing at the one it
+  /// continues from.
+  ///
+  /// A recurrence rule cannot be edited once anything has been recorded against
+  /// it: `expand()` gates on `occursOn` BEFORE it looks at materialized rows, so
+  /// changing the weekdays of a group with a taken roll makes that session vanish
+  /// from every read path while its attendance sits orphaned in the table. So
+  /// "the Tuesday group moved to Thursdays" is not an UPDATE — it ends the old
+  /// series the day before and starts a new one, which is what actually happened
+  /// operationally, and leaves every past date still covered by its own rule.
+  ///
+  /// Borrowed from the amendment pattern in the footer of this file: one column,
+  /// uniquely indexed, which makes a forked chain structurally impossible where a
+  /// pair of columns would need a separate guard.
+  ///
+  /// NO `@unique` HERE, deliberately — events are soft-deletable, so the rule is a
+  /// PARTIAL unique index in the migration (`one_live_successor_per_event`), the
+  /// same reasoning and the same shape as `one_live_occurrence_per_event_cohort`
+  /// below. A total index would let a successor created in error and then removed
+  /// block the original from ever being moved again.
+  ///
+  /// Nothing renders this yet. It is here because provenance is impossible to
+  /// reconstruct later — the same argument that put `LedgerEntry.externalRef` in
+  /// before Stripe existed.
+  /// Typed one-to-MANY here only because Prisma demands `@unique` on the defining
+  /// side of a one-to-one, and `@unique` is the total index we must not have. The
+  /// partial index is the real constraint; `supersededBy` is an array Postgres
+  /// guarantees holds at most one live row. Same trade as the occurrence rule.
+  supersedesId String?
+  supersedes   ScheduleEvent?  @relation("scheduleEventSuccession", fields: [supersedesId], references: [id])
+  supersededBy ScheduleEvent[] @relation("scheduleEventSuccession")
+
+  /// Why the series moved. Optional — a court order or a room change is worth
+  /// recording, "we swapped the days round" needs no ceremony.
+  moveReason String?
+
+  createdById String
+  createdBy   User   @relation("createdScheduleEvents", fields: [createdById], references: [id])
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("schedule_events")
+}
+
+/// Cohort + when. ONE ROW PER ATTENDING COHORT — CLAUDE.md module 3.
+///
+/// The timing fields are IDENTICAL across every occurrence of an event: one
+/// event has one time, entered once. `createEvent` is the only writer and
+/// copies one set of fields, so the invariant holds by construction — nothing
+/// in the database enforces it, which is why the read layer refuses to merge a
+/// pair whose times disagree rather than draw a card that lies about when the
+/// meeting starts. If a second writer or an importer ever exists, this wants a
+/// trigger.
+///
+/// The split is a STORAGE detail and is invisible above the service: it exists
+/// so the composite foreign keys can refuse a woman on a men's occurrence.
+model ScheduleOccurrence {
+  id      String        @id @default(uuid(7))
+  eventId String
+  event   ScheduleEvent @relation(fields: [eventId], references: [id])
+
+  cohort Cohort
+
+  /// WALL-CLOCK, stored as a string, and the one place in this app that
+  /// deliberately does not store a UTC instant. A weekly 6pm is 6pm on both
+  /// sides of a DST boundary; an instant would drift an hour in November.
+  /// Converted per-date by facilityWallClockToUtc() at expansion.
+  /// Precedent: Program.curfewLocalTime.
+  startsAtLocal String
+  /// Duration, not an end time. An end time that wraps midnight is a bug
+  /// factory, and every consumer wants the length anyway.
+  durationMinutes Int
+
+  recurrence Recurrence
+  /// 0=Sunday .. 6=Saturday on the facility calendar. Empty for ONCE.
+  weekdays   Int[]
+  startsOn   DateTime  @db.Date
+  /// Null means open-ended, WEEKLY only. Ending a series sets this; past
+  /// sessions and their attendance survive untouched.
+  endsOn     DateTime? @db.Date
+
+  attendees ScheduleAttendee[]
+  sessions  ScheduleSession[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([cohort, startsOn])
+  /// Referenced by the composite foreign keys on session and attendee.
+  /// Consequence, same as Apartment: Postgres refuses to flip an occurrence's
+  /// cohort while it holds either. Converting a men's group to a women's one is
+  /// a deliberate operation, not an UPDATE.
+  @@unique([id, cohort])
+  // No @@unique([eventId, cohort]) here — occurrences are soft-deletable, so
+  // that rule is a PARTIAL unique index in the migration. A plain one would
+  // refuse to re-add a cohort that had been removed.
+  @@map("schedule_occurrences")
+}
+
+/// A specific dated instance, MATERIALIZED LAZILY.
+///
+/// A row exists only because something date-specific was recorded against it:
+/// attendance taken, this date cancelled, this date's time moved. Every other
+/// date is computed from the occurrence's rule at read time. The alternative —
+/// generating rows ahead of a horizon — needs a cron job this app deliberately
+/// does not have, plus a backfill and a regeneration story when a rule changes.
+///
+/// Never soft-deleted: the row exists because it carries a record, so CANCEL is
+/// the operation and delete is not one.
+model ScheduleSession {
+  id           String             @id @default(uuid(7))
+  occurrenceId String
+  cohort       Cohort
+  occurrence   ScheduleOccurrence @relation(fields: [occurrenceId, cohort], references: [id, cohort])
+
+  /// The facility CALENDAR date, not an instant. Compare these as 'YYYY-MM-DD'
+  /// strings, never as Date objects — @db.Date round-trips as UTC midnight, and
+  /// reading it as a local Date in America/New_York moves it a day.
+  sessionDate DateTime @db.Date
+
+  /// "Moved to 7 tonight". Same 'HH:MM' format as the occurrence.
+  startsAtLocalOverride String?
+
+  cancelledAt   DateTime?
+  cancelledById String?
+  cancelledBy   User?     @relation("cancelledSessions", fields: [cancelledById], references: [id])
+  cancelReason  String?
+
+  /// What makes "the roll has been taken" a fact rather than a count. A session
+  /// where everyone happened to be absent is otherwise indistinguishable from
+  /// one nobody has marked, and those are very different records.
+  attendanceTakenAt   DateTime?
+  attendanceTakenById String?
+  attendanceTakenBy   User?     @relation("tookAttendance", fields: [attendanceTakenById], references: [id])
+
+  attendance ScheduleAttendance[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([occurrenceId, sessionDate])
+  @@index([sessionDate])
+  /// Referenced by ScheduleAttendance's composite foreign key.
+  @@unique([id, cohort])
+  @@map("schedule_sessions")
+}
+
+/// The ROSTER: who is on this occurrence. Hangs off Stay, not Resident — the
+/// same reason as sign-outs and the ledger, and it is what makes a discharge
+/// drop someone off every future session with no write at all.
+///
+/// THE RULE THIS TABLE AND ScheduleAttendance SHARE:
+///   Before attendance is taken, a session's list is the live roster.
+///   Once taken, it is the marks.
+model ScheduleAttendee {
+  id           String @id @default(uuid(7))
+  occurrenceId String
+  cohort       Cohort
+  stayId       String
+
+  /// Both composite, sharing `cohort` — mirrors BedAssignment. This is what
+  /// makes a woman on a men's occurrence impossible at the database level, with
+  /// no route, script or hand-written query able to produce one.
+  occurrence ScheduleOccurrence @relation(fields: [occurrenceId, cohort], references: [id, cohort])
+  stay       Stay               @relation(fields: [stayId, cohort], references: [id, cohort])
+
+  addedById String
+  addedBy   User   @relation("addedAttendees", fields: [addedById], references: [id])
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  /// Taking someone off a group is soft: the record of having been on it
+  /// survives, and the partial unique index lets them be added back.
+  deletedAt DateTime?
+
+  @@index([stayId])
+  @@map("schedule_attendees")
+}
+
+/// The MARK: what happened for one person at one dated session.
+///
+/// Names the STAY, not the roster row. A mark is evidence in its own right and
+/// must not dangle or vanish when somebody is later taken off the group.
+///
+/// No deletedAt, and no amendment chain: a mis-tap in a hallway is corrected by
+/// changing the status. The audit extension already writes an UPDATE row with
+/// the actor, the timestamp and the id, and that is the trail. Making a tech
+/// file an amendment to fix a fat-fingered tap is exactly the friction that
+/// puts attendance back on paper.
+model ScheduleAttendance {
+  id        String @id @default(uuid(7))
+  sessionId String
+  cohort    Cohort
+  stayId    String
+
+  session ScheduleSession @relation(fields: [sessionId, cohort], references: [id, cohort])
+  stay    Stay            @relation(fields: [stayId, cohort], references: [id, cohort])
+
+  status AttendanceStatus
+  note   String?
+
+  recordedById String
+  recordedBy   User   @relation("recordedAttendance", fields: [recordedById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([sessionId, stayId])
+  @@index([stayId, createdAt])
+  @@map("schedule_attendance")
+}
+
+/// One worked session of community service.
+///
+/// Hangs off Stay, like the ledger and sign-outs: a resident who leaves and
+/// returns gets a new stay, and hours worked in the previous episode belong to
+/// that episode.
+///
+/// EVERY COLUMN IS IMMUTABLE except the verification pair, which is WRITE-ONCE.
+/// Enforced by trigger AND by a column-level UPDATE grant, so it holds against a
+/// direct psql session and not only against our routes. A mistake is corrected
+/// by an AMENDMENT — a new row with `supersedesId` and a reason — never an edit.
+///
+/// This is the first table in the repo to implement the amendment pattern at the
+/// bottom of this file, and modules 4, 5 and 6 will copy it.
+model ServiceEntry {
+  id     String @id @default(uuid(7))
+  stayId String
+  stay   Stay   @relation(fields: [stayId], references: [id])
+
+  /// Integer MINUTES. The ledger's integer-cents reasoning applies directly:
+  /// hours are a DISPLAY unit, parsed once on the server, and 3.5h stored as
+  /// 210 sums exactly where a float does not. The TARGET stays in whole hours
+  /// and is converted in one place — services/communityService.js.
+  ///
+  /// Zero is legal only on an amendment: that is how an entry is VOIDED. You
+  /// cannot originate nothing, and a CHECK says so.
+  minutes Int
+
+  /// The facility CALENDAR date the work was done — not the date it was typed.
+  /// Same rule as LedgerEntry.occurredAt. Compare as 'YYYY-MM-DD' strings,
+  /// never as Date objects; see services/schedule/expand.js for why.
+  workedOn DateTime @db.Date
+
+  /// Required. An hour with no place is not defensible to a court.
+  location String
+
+  /// The supervisor is someone OUTSIDE the facility — the food bank
+  /// coordinator, the church custodian. Free text, the same call
+  /// Stay.referralSource made: a relation would mean a directory of external
+  /// people, consent questions, and a picker on a hallway form. The phone is
+  /// here because verifying an hour means ringing them.
+  supervisorName  String?
+  supervisorPhone String?
+
+  note String?
+
+  /// Who authored THIS version. A resident submitting from the portal is still
+  /// the author — their User row links to their Resident row.
+  recordedById String
+  recordedBy   User   @relation("recordedServiceEntries", fields: [recordedById], references: [id])
+
+  /// ONLY VERIFIED HOURS COUNT toward a target. Null until a staff member
+  /// confirms it. The pair arrives together (CHECK) and once (trigger); it is
+  /// never cleared and never re-assigned — that would move somebody's name onto
+  /// a claim they did not make. A verification made in error is corrected by
+  /// amending the entry, which drops the original and its verifier out of the
+  /// current view without erasing either.
+  verifiedAt   DateTime?
+  verifiedById String?
+  verifiedBy   User?     @relation("verifiedServiceEntries", fields: [verifiedById], references: [id])
+
+  /// AMENDMENT. One column, not two — the back-pointer is derivable, and storing
+  /// it would be a second copy that can disagree AND an UPDATE on a table that
+  /// otherwise has none. @unique is what stops a forked chain.
+  supersedesId String?       @unique
+  supersedes   ServiceEntry? @relation("ServiceAmendment", fields: [supersedesId], references: [id])
+  supersededBy ServiceEntry? @relation("ServiceAmendment")
+  /// Required whenever supersedesId is set, refused when it is not. The reason
+  /// IS the record: without it the chain shows that a number changed and
+  /// nothing about why.
+  amendmentReason String?
+
+  createdAt DateTime @default(now())
+  // Deliberately no updatedAt and no deletedAt. The two lifecycle facts carry
+  // their own clocks — verifiedAt, and an amendment's own createdAt — so an
+  // updatedAt would be a third, redundant one. Keeping both off the table is
+  // also what holds the UPDATE grant to exactly two columns.
+
+  @@index([stayId, workedOn])
+  @@map("service_entries")
+}
+
 model InsurancePolicy {
   id String @id @default(uuid(7))
 
@@ -577,6 +964,17 @@ model User {
   sessions         Session[]
   reportedRequests MaintenanceRequest[] @relation("reportedRequests")
   resolvedRequests MaintenanceRequest[] @relation("resolvedRequests")
+  recordedSignOuts     SignOut[] @relation("recordedSignOuts")
+  acknowledgedSignOuts SignOut[] @relation("acknowledgedSignOuts")
+
+  createdScheduleEvents ScheduleEvent[]      @relation("createdScheduleEvents")
+  cancelledSessions     ScheduleSession[]    @relation("cancelledSessions")
+  tookAttendance        ScheduleSession[]    @relation("tookAttendance")
+  addedAttendees        ScheduleAttendee[]   @relation("addedAttendees")
+  recordedAttendance    ScheduleAttendance[] @relation("recordedAttendance")
+
+  recordedServiceEntries ServiceEntry[] @relation("recordedServiceEntries")
+  verifiedServiceEntries ServiceEntry[] @relation("verifiedServiceEntries")
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -703,10 +1101,26 @@ model AuditLog {
 // are never updated in place. Each of those tables carries:
 //
 //   supersedesId    String?  @unique   // the entry this one corrects
-//   supersededById  String?  @unique   // set on the original when corrected
 //   amendmentReason String?            // required when supersedesId is set
 //   recordedById    String             // who authored this version
 //
-// A correction INSERTs a new row pointing at the original and marks the
-// original superseded. Reads filter to `supersededById IS NULL` for the current
-// view; the full chain stays available for audit.
+// A correction is a PURE INSERT: a new row pointing at the original. Nothing on
+// the original changes. Reads filter to `supersededBy: { is: null }` for the
+// current view; the full chain stays available for audit.
+//
+// REVISED 2026-08-05, when service_entries became the first implementor. This
+// block used to prescribe a `supersededById` back-pointer on the original as
+// well. It was dropped, and the reason generalises to every table that copies
+// this:
+//
+//   - `A.supersededById = B.id` holds IFF `B.supersedesId = A.id`. Two columns
+//     that must agree is a class of bug, and nothing needs the second one.
+//   - Setting it is an UPDATE, on a table whose whole point is that it has
+//     none. Dropping it means these tables can hold an UPDATE grant scoped to
+//     the one transition they genuinely need — for service_entries, verification.
+//   - `@unique` on `supersedesId` makes a FORKED chain structurally impossible:
+//     two rows cannot both claim to correct the same entry. The two-column
+//     version needs a separate guard for that.
+//
+// See `ServiceEntry` above for the implementation, and its migration for the
+// trigger that keeps everything except the sanctioned transition immutable.

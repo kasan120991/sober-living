@@ -34,7 +34,8 @@ const canManage = computed(() =>
 const { refresh: refreshNotifications } = useNotifications()
 
 async function load() {
-  pending.value = true
+  // First load only — a realtime refresh must not blank the table it updates.
+  pending.value = !residents.value.length
   const data = await listResidents(showDischarged.value)
   residents.value = data.residents
   capacity.value = data.capacity
@@ -50,6 +51,7 @@ async function load() {
 }
 await load()
 watch(showDischarged, load)
+onRealtimeChanged(load)
 
 const counts = computed(() => ({
   ALL: residents.value.length,
@@ -152,7 +154,9 @@ const shownCapacity = computed(() => {
            the segment rather than floating above both as a pair of cards. -->
       <AppCohortCapacity v-if="shownCapacity.length" :cohorts="shownCapacity" />
 
-      <AppUnhousedAlert :unhoused="unhoused" @assigned="load" />
+      <!-- No unhoused banner here, deliberately: the census owns that alert,
+           and this page already says it twice — the count in the description
+           and the "No bed" badge on the row itself. -->
 
       <p v-if="searching" class="text-muted-foreground text-xs">Searching across both cohorts.</p>
 

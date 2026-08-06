@@ -115,10 +115,20 @@ export const AUDITED_MODELS = Object.freeze([
   'Document',
   'LedgerEntry',
   'InsurancePolicy',
+  'SignOut',
+  'ScheduleAttendee',
+  'ScheduleAttendance',
+  'ServiceEntry',
   // Facility configuration
   'Apartment',
   'Bed',
   'MaintenanceRequest',
+  // The schedule is configuration too, and audited for the same reason as an
+  // apartment: changing it changes how historical attendance reads. An auditor
+  // asking "why does the Tuesday group show empty in March" deserves an answer.
+  'ScheduleEvent',
+  'ScheduleOccurrence',
+  'ScheduleSession',
 ])
 
 /// Models with a deletedAt column. Everything here is filtered on read, and
@@ -135,4 +145,88 @@ export const SOFT_DELETE_MODELS = Object.freeze([
   'InsurancePolicy',
   'User',
   'MaintenanceRequest',
+  'SignOut',
+  'ScheduleEvent',
+  'ScheduleOccurrence',
+  'ScheduleAttendee',
+  // ScheduleSession and ScheduleAttendance are deliberately absent, and this is
+  // not an oversight to be tidied up later. A session row exists only because
+  // it carries a record, so CANCEL is the operation and delete is not one; and
+  // a mark is corrected by changing its status, never removed.
+  //
+  // ServiceEntry is absent for the same class of reason and has no deletedAt at
+  // all: it is corrected by an AMENDMENT — a new row pointing at the original —
+  // and the database refuses both UPDATE and DELETE.
 ])
+
+/// Presence on the census board. DERIVED from a sign-out's returnedAt and
+/// expectedReturnAt against the clock — never stored, so deliberately not a
+/// schema enum. A stored flag would need a job to flip it and would lie the
+/// minute the job lagged.
+export const PRESENCE = Object.freeze({
+  IN: 'IN',
+  OUT: 'OUT',
+  OVERDUE: 'OVERDUE',
+})
+
+/// How a scheduled occurrence repeats. Matches the `Recurrence` enum in
+/// schema.prisma. Two values on purpose — see the schema comment.
+export const RECURRENCE = Object.freeze({
+  ONCE: 'ONCE',
+  WEEKLY: 'WEEKLY',
+})
+
+/// What happened for one person at one dated session. Matches the
+/// `AttendanceStatus` enum in schema.prisma. Absent and excused stay distinct.
+export const ATTENDANCE_STATUS = Object.freeze({
+  ATTENDED: 'ATTENDED',
+  ABSENT: 'ABSENT',
+  EXCUSED: 'EXCUSED',
+})
+
+/// 0..6, matching JS getUTCDay(). Computed from the facility CALENDAR date, so
+/// no timezone is involved in deciding which weekday a date is — the date
+/// string is parsed as UTC and read as UTC, start to finish.
+export const WEEKDAY = Object.freeze({
+  SUN: 0, MON: 1, TUE: 2, WED: 3, THU: 4, FRI: 5, SAT: 6,
+})
+
+/// The state of a dated session. DERIVED from cancelledAt / attendanceTakenAt
+/// and the clock — deliberately NOT a schema enum, exactly like PRESENCE above.
+/// A stored state would need a job to flip SCHEDULED to MISSED and would lie
+/// the minute the job lagged.
+export const SESSION_STATE = Object.freeze({
+  SCHEDULED: 'SCHEDULED',
+  CANCELLED: 'CANCELLED',
+  TAKEN: 'TAKEN',
+  /// Past, not cancelled, and nobody took the roll. The one that needs chasing.
+  MISSED: 'MISSED',
+})
+
+/**
+ * The expected community-service pace: twenty hours a month.
+ *
+ * Facility policy (chosen 2026-08-05). THE one knob — the amber dot on the
+ * resident record, the pace marker on the progress bar and the "behind by"
+ * figure all derive from it through servicePace(), so changing it here changes
+ * it everywhere.
+ *
+ * It is a PACE, not the obligation. The obligation is the target, which comes
+ * from Program.serviceHoursRequired or a per-stay override.
+ */
+export const MONTHLY_SERVICE_QUOTA_HOURS = 20
+
+/**
+ * A "month" of a stay, for the quota above. Thirty days from intake, not a
+ * calendar month.
+ *
+ * Calendar months would need a policy for the partial first and last one — a
+ * resident who intakes on the 28th does not owe twenty hours in three days —
+ * and thirty days from their own intake date simply does not have that problem.
+ */
+export const SERVICE_DAYS_PER_MONTH = 30
+
+/// How far ahead a schedule read may expand, in days. Bounded on purpose:
+/// expansion is cheap only while the window is, and it is clamped server-side
+/// so a hand-written `?days=3650` cannot turn a page read into a report.
+export const SCHEDULE_MAX_DAYS = 62

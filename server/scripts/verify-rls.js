@@ -36,7 +36,9 @@ async function main() {
   )
   const { rows: forced } = await owner.query(
     `SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class
-      WHERE relname IN ('residents','stays','emergency_contacts','documents','bed_assignments','ledger_entries')
+      WHERE relname IN ('residents','stays','emergency_contacts','documents','bed_assignments','ledger_entries','sign_outs',
+                        'schedule_events','schedule_occurrences','schedule_sessions','schedule_attendees','schedule_attendance',
+                        'service_entries')
       ORDER BY relname`,
   )
   await owner.end()
@@ -45,9 +47,15 @@ async function main() {
     ? ok('soberlife_app is neither superuser nor BYPASSRLS')
     : bad('runtime role cannot bypass', JSON.stringify(role[0]))
 
-  const allForced = forced.length === 6 && forced.every((t) => t.relrowsecurity && t.relforcerowsecurity)
+  // The three schedule tables that are facility CONFIGURATION rather than
+  // resident data are gated anyway, scoped through attendance. That is what
+  // makes CLAUDE.md's "a resident's schedule is a join through attendance, not
+  // through cohort" true at the database rather than only in a service.
+  const EXPECTED_FORCED = 13
+  const allForced =
+    forced.length === EXPECTED_FORCED && forced.every((t) => t.relrowsecurity && t.relforcerowsecurity)
   allForced
-    ? ok(`RLS is enabled AND forced on all 6 resident tables (${forced.map((t) => t.relname).join(', ')})`)
+    ? ok(`RLS is enabled AND forced on all ${EXPECTED_FORCED} tables (${forced.map((t) => t.relname).join(', ')})`)
     : bad('RLS enabled and forced', JSON.stringify(forced))
 
   const usingApp = (process.env.APP_DATABASE_URL ?? '').includes('soberlife_app')
@@ -121,10 +129,101 @@ async function main() {
     ? ok('aggregates over the ledger are scoped — no leaking the house total')
     : bad('ledger aggregate scoped', `${ledgerTotal._sum.amountCents} vs ${ownTotal._sum.amountCents}`)
 
+  // Sign-outs are scoped through the stay too. Who is out, where they went and
+  // when they are due back is exactly the kind of thing one resident must not
+  // be able to learn about another.
+  const signOuts = await asAlice(() => prisma.signOut.findMany())
+  signOuts.length > 0 && signOuts.every((s) => ownStayIds.has(s.stayId))
+    ? ok(`a resident sees only their own sign-outs (${signOuts.length} rows, all theirs)`)
+    : bad('sign-outs scoped', `${signOuts.length} rows`)
+
   const count = await asAlice(() => prisma.resident.count())
   count === 1
     ? ok('count() is scoped too — no leaking totals')
     : bad('count scoped', count)
+
+  // The schedule. A resident's attendee rows are scoped through the stay like
+  // everything else; the occurrences and events are scoped one and two joins
+  // further out, THROUGH those attendee rows. That second part is the one worth
+  // proving: without it a resident could read the other cohort's meeting times,
+  // which is a schedule they are not on and a roster they are not part of.
+  const attendees = await asAlice(() => prisma.scheduleAttendee.findMany())
+  attendees.every((a) => ownStayIds.has(a.stayId))
+    ? ok(`a resident sees only their own roster rows (${attendees.length} rows, all theirs)`)
+    : bad('schedule attendees scoped', `${attendees.length} rows`)
+
+  const attendance = await asAlice(() => prisma.scheduleAttendance.findMany())
+  attendance.every((a) => ownStayIds.has(a.stayId))
+    ? ok(`a resident sees only their own attendance marks (${attendance.length} rows)`)
+    : bad('schedule attendance scoped', `${attendance.length} rows`)
+
+  const ownOccurrenceIds = new Set(attendees.map((a) => a.occurrenceId))
+  const occurrences = await asAlice(() => prisma.scheduleOccurrence.findMany())
+  occurrences.every((o) => ownOccurrenceIds.has(o.id))
+    ? ok(`occurrences are scoped through attendance — the other cohort's schedule is invisible (${occurrences.length} rows)`)
+    : bad('occurrences scoped', `${occurrences.length} rows, some not theirs`)
+
+  await mustReject('adding themselves to an event is refused (staff-only write)', () =>
+    asAlice(() =>
+      prisma.scheduleAttendee.create({
+        data: {
+          occurrenceId: [...ownOccurrenceIds][0] ?? '00000000-0000-0000-0000-000000000000',
+          cohort: 'MEN',
+          stayId: [...ownStayIds][0],
+          addedById: [...ownStayIds][0],
+        },
+      }),
+    ),
+  )
+
+  // Community service. CLAUDE.md's role table promises a resident sees their
+  // OWN hours, and this is that promise at the database level — ahead of the
+  // portal that will rely on it. Logging is still staff-only until then.
+  const serviceRows = await asAlice(() => prisma.serviceEntry.findMany())
+  serviceRows.every((e) => ownStayIds.has(e.stayId))
+    ? ok(`a resident sees only their own service hours (${serviceRows.length} rows, all theirs)`)
+    : bad('service entries scoped', `${serviceRows.length} rows`)
+
+  const serviceTotal = await asAlice(() =>
+    prisma.serviceEntry.aggregate({ _sum: { minutes: true } }),
+  )
+  const ownServiceTotal = await asAlice(() =>
+    prisma.serviceEntry.aggregate({
+      _sum: { minutes: true },
+      where: { stayId: { in: [...ownStayIds] } },
+    }),
+  )
+  serviceTotal._sum.minutes === ownServiceTotal._sum.minutes
+    ? ok('aggregates over service hours are scoped — no leaking the house total')
+    : bad('service aggregate scoped', `${serviceTotal._sum.minutes} vs ${ownServiceTotal._sum.minutes}`)
+
+  await mustReject('logging service hours is refused (staff-only write)', () =>
+    asAlice(() =>
+      prisma.serviceEntry.create({
+        data: {
+          stayId: [...ownStayIds][0],
+          minutes: 60,
+          workedOn: new Date('2026-08-01T00:00:00.000Z'),
+          location: 'self-reported',
+          recordedById: [...ownStayIds][0],
+        },
+      }),
+    ),
+  )
+
+  await mustReject('marking their own attendance is refused (staff-only write)', () =>
+    asAlice(() =>
+      prisma.scheduleAttendance.create({
+        data: {
+          sessionId: '00000000-0000-0000-0000-000000000000',
+          cohort: 'MEN',
+          stayId: [...ownStayIds][0],
+          status: 'ATTENDED',
+          recordedById: [...ownStayIds][0],
+        },
+      }),
+    ),
+  )
 
   console.log('\n\x1b[1mA resident cannot write\x1b[0m')
 
@@ -134,6 +233,20 @@ async function main() {
 
   await mustReject("editing another resident's record is refused", () =>
     asAlice(() => prisma.resident.update({ where: { id: bob.id }, data: { firstName: 'Hacked' } })),
+  )
+
+  await mustReject('recording a sign-out is refused (staff-only write)', () =>
+    asAlice(() =>
+      prisma.signOut.create({
+        data: {
+          stayId: [...ownStayIds][0],
+          destination: 'X',
+          outAt: new Date(),
+          expectedReturnAt: new Date(Date.now() + 3_600_000),
+          recordedById: alice.id,
+        },
+      }),
+    ),
   )
 
   console.log('\n\x1b[1mNo context means no data\x1b[0m')

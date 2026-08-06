@@ -12,6 +12,7 @@ import {
 } from '../auth/sessions.js'
 import { HttpError, requireAuth } from '../middleware/authorize.js'
 import { getRequestContext } from '../lib/requestContext.js'
+import { disconnectSession } from '../lib/realtime.js'
 import { AUDIT_ACTION } from '../domain/constants.js'
 
 const router = Router()
@@ -123,6 +124,9 @@ router.post('/login', loginLimiter, async (req, res, next) => {
 router.post('/logout', async (req, res, next) => {
   try {
     await revokeSession(req.cookies?.[SESSION_COOKIE])
+    // sessionMiddleware already resolved the session, so the id is free — no
+    // second resolveSession, which would slide the idle expiry it just ended.
+    if (req.session) disconnectSession(req.session.id)
     res.clearCookie(SESSION_COOKIE, sessionCookieOptions())
     res.status(204).end()
   } catch (err) {

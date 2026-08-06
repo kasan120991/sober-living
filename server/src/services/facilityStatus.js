@@ -1,5 +1,6 @@
 import { prisma } from '../db/client.js'
 import { BED_STATUS, STAY_STATUS } from '../domain/constants.js'
+import { overdueWhere } from './signOuts.js'
 
 /**
  * The one number in the header pill.
@@ -18,7 +19,7 @@ import { BED_STATUS, STAY_STATUS } from '../domain/constants.js'
  * and the bell, where the detail lives.
  */
 export async function facilityStatus() {
-  const [freeBeds, unplaced] = await Promise.all([
+  const [freeBeds, unplaced, overdue] = await Promise.all([
     // Usable beds with nobody currently in them.
     prisma.bed.count({
       where: {
@@ -29,15 +30,13 @@ export async function facilityStatus() {
     prisma.stay.count({
       where: { status: STAY_STATUS.ACTIVE, bedAssignments: { none: { endedAt: null } } },
     }),
+    // The intended top priority, live at last: open sign-outs past their
+    // expected return plus the grace window.
+    prisma.signOut.count({ where: overdueWhere() }),
   ])
 
-  // Overdue sign-outs are the intended top priority and module 8 does not exist
-  // yet. Left explicit rather than silently absent, so whoever builds sign-outs
-  // finds the hook instead of rediscovering the need for it.
-  const overdue = 0
-
   if (overdue > 0) {
-    return { level: 'critical', count: overdue, label: overdue === 1 ? 'overdue' : 'overdue' }
+    return { level: 'critical', count: overdue, label: 'overdue' }
   }
   if (unplaced > 0) {
     return { level: 'warning', count: unplaced, label: 'unplaced' }

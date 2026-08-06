@@ -26,3 +26,6 @@ server/src/generated/
 
 # JetBrains
 .idea/
+
+# Claude worktrees live inside the repo; they are their own checkouts
+.claude/worktrees/

@@ -90,10 +90,111 @@ upload and it is deliberately not built, for the reason below.
 scanned IDs and agreements needs object storage, encryption at rest, and access brokered
 through the API so every read is authorised and audited. That is its own slice.
 
+**The record page is a status rail (decided 2026-08-02**, from three rendered variants — a
+tab strip and a unified compliance timeline were the others). Every module eventually shows
+something about a resident, and a tab per module does not survive twelve of them: the strip
+scrolls horizontally on a phone and whatever is off-screen may as well not exist. A vertical
+in-page rail holds twelve without scrolling and scales past that.
+
+The rail is grouped, and the groups are load-bearing rather than cosmetic —
+**Record** (Overview, Schedule, Sign-outs, Travel passes, Apartment checks), **Clinical**
+(Drug screens, Medications), **Administrative** (Community service, Ledger, Contacts, Stay
+history, Documents). Grouping is what lets a policy apply to a whole class of module at once
+instead of being re-decided per tab.
+
+- **The rail is a status board, not navigation.** Each section can carry a dot, so where
+  attention is needed reads before anything is opened. **Amber is behind on service hours;
+  red is balance overdue** (facility policy, chosen 2026-08-02). **Amber is live since
+  module 7**, and its threshold is now written down: 20 hours a month, accruing in whole
+  months from intake and capped at the target — see module 7 for why each half of that
+  matters. **Red still waits on invoicing**, because a charge has no due date and only an
+  invoice does; see module 11. A section with nothing wrong shows no dot, the same rule the
+  census tiles follow: absence of a chip means fine, which keeps a quiet record quiet.
+- **Techs see the Clinical group** (decided 2026-08-02). This does not contradict the bell
+  rule under module 13 — that one is about *ambient* disclosure, a name against a screen
+  result surfacing unbidden on a phone with residents nearby. Opening a named resident's
+  record is a deliberate navigation by someone who already knows who they are looking at,
+  and the audit log records it. The two are different acts and get different answers.
+- **Overview is "needs attention" over recent activity** — the flagged items with their
+  action, then the last few events across all sections. It is the one place the modules
+  interleave in time, because "what has been going on with this person" is the question a
+  staff meeting, a discharge review and a probation officer all actually ask, and no
+  per-section view answers it.
+- **This is in-page navigation, not app navigation.** It is not the second-level sidebar
+  menu rejected under UI rules: these sections are real and already named, not IA invented
+  to fill a template shape. Below `md` the rail collapses to a sheet.
+- Sections whose module is unbuilt render `AppStub`, so the rail is never a dead end.
+
+Still open: whether the record shows the **current stay or all stays**. Ledger entries and
+sign-outs hang off `Stay`, so a returning resident's history belongs to separate episodes —
+a stay switcher in the rail is cheap now and awkward to retrofit.
+
 ### 2. Beds & census
-Apartment → Bed. Assign, transfer, hold, mark out-of-service. The census view is the app's
-home screen for staff. Bed history is permanent — we must always be able to answer "who
-slept in bed 12B on March 12."
+**Built.** Apartment → Bed. Assign, transfer and out-of-service live under Apartments and
+the resident record; the census board is the app's home screen — one `GET /census` read
+returning figures, apartments with bed tiles, and whoever is awaiting a bed. Bed history
+is permanent — we must always be able to answer "who slept in bed 12B on March 12."
+
+**Apartment names are typed as just the number** — the create and edit dialogs show a
+fixed "Apt" prefix and compose the full name (`utils/apartments.js` in the admin app), so
+"12", "apt 12" and "Apt 12" all land as "Apt 12". The API and database still carry the
+full name; the convention is a form-level one.
+
+**Removing an apartment is soft, and admins can undo it.** `GET /apartments/removed` and
+`POST /apartments/:id/restore` (both admin-only) back a "Removed" section at the bottom of
+the apartment list; restore brings back the apartment *and every bed it held*, statuses
+and out-of-service notes intact — removal requires removing the beds first, so their
+deletions are part of the same act being undone. Because `Apartment.name` is uniquely
+indexed across removed rows too, creating an apartment whose name a removed one holds is
+refused with a message that points at restore. This rides on a deliberate rule in the
+soft-delete extension (`db/client.js`): the `deletedAt: null` filter is added only when a
+query says nothing about `deletedAt`, so reaching removed rows takes an explicit clause —
+still through the extended client, so the read is audited and RLS'd like any other.
+
+The board is the **bed-tile layout (variant A of the census mocks)**, chosen over a table
+because the screen replaces a whiteboard and a whiteboard's virtue is that absence is
+visible: a free bed and an out-of-service hole read at a glance. Three tile states —
+occupied (name, program, since), free, out of service with its note. Staff-only, never
+`RESIDENT`: the census is every housed resident by name.
+
+**Presence chips are live** now that sign-outs exist: a warning "Out · back 5:30 PM"
+chip, a destructive "Overdue 2h 41m" chip with a red-striped tile, and deliberately no
+chip when in house — absence of a chip means present, which keeps a quiet board quiet.
+The figures row counts signed-out and overdue (hidden at zero), re-derived client-side
+against the page's 30-second tick. Still deferred: **bed holds** arrive with travel
+passes (module 9), and the "on pass" chip with them. If the facility outgrows a
+screenful of tiles, the fallback is the table variant; the figures row carries over
+unchanged.
+
+**A free tile is the placement affordance** (built 2026-08-02). `unhoused` had been in the
+census response since the start and rendered nowhere; the tile is what uses it. A free bed
+becomes a *button* exactly when someone of that cohort is waiting — so clickability itself
+says where a waiting resident can go, and there is still no unhoused list on the page. With
+nobody waiting the tile stays an inert `div`: an affordance that can only open a dialog
+saying "nobody to assign" is dead weight on the most-glanced screen. Techs see the board and
+never the affordance; `managers` on the endpoint is the real boundary, asserted in
+`verify-residents.js`.
+
+The tile carries no name — candidates appear only after a deliberate click, inside the
+dialog. Same reason the tile never carries a sign-out destination: this board is read over
+somebody's shoulder.
+
+Two things that make this safe, both worth keeping if it is ever touched:
+
+- **`POST /residents/:id/bed` is assign-OR-move**, not assign-only — it closes whatever
+  assignment the stay holds. So a stale candidate list turns "assign someone unhoused" into
+  "move someone housed", writing a spurious ended/started pair into bed history, which is
+  permanent evidence. Guarded twice: the page's `candidates` is a **computed** over live
+  census data so it shrinks the moment the socket lands, and the dialog watches it and drops
+  a selection that stops being unhoused. Do *not* make the endpoint refuse a resident who
+  already has a bed — the roster's Move bed depends on that behaviour.
+- **`assignBedTo` now answers a cohort mismatch with a 409** instead of letting the
+  composite FK surface as a raw Prisma error and a 500. The foreign keys are still the
+  enforcement; this is only their friendly face, and bed-first assignment is what made a
+  swapped pair of arguments reachable. Note the old assertion for this was `>= 400` and was
+  passing on `400 Invalid bedId` because the suite had no free MEN bed to test with — so
+  cohort enforcement through the API had never actually been covered. It is now (46
+  assertions).
 
 ### 3. Gendered scheduling
 **The facility runs separate schedules for the two cohorts.** This is a hard constraint,
@@ -104,13 +205,473 @@ Cohort segregation is structural at both levels:
 
 - **Housing:** an apartment serves one cohort, and `Stay` uses composite foreign keys so
   Postgres itself rejects a resident placed in a mismatched apartment.
-- **Scheduling:** cohort lives on the event *occurrence*, not the event. Some events are
-  attended by both cohorts, usually at different times — so an event has one row per
-  attending cohort, each with its own start time. There is no nullable `cohort` column
-  that silently means "everyone."
+- **Scheduling:** cohort lives on the event *occurrence*, not the event. An event is
+  created for the men, the women, or **both**, and it has **one time** — entered once,
+  never per cohort. A both-cohorts event is still stored as one occurrence *per cohort*
+  with identical timing, because that is what keeps the composite foreign keys able to
+  refuse a woman on a men's occurrence. That split is a **storage detail and is invisible
+  in the UI**: one set of fields, one roster, one card on the board, one roll. There is no
+  nullable `cohort` column that silently means "everyone" — "everyone" is two rows, asked
+  for explicitly, never a null.
 
 Any resident-facing schedule query is a join through the resident's cohort. Never render a
 combined schedule by accident.
+
+**Attendance is explicit rows, not "everyone in the cohort" (decided 2026-08-02).** Cohort
+decides *which occurrence* an event has and when it starts; it does not decide who is on it.
+Creating an event picks a cohort and then picks attendees from that cohort's residents, so a
+group of six and a house-wide meeting are the same shape with different lists.
+
+Two consequences worth stating, because the cheaper design forecloses both:
+
+- **A resident's schedule is a join through attendance, not through cohort.** "What is
+  Marcus doing tomorrow" reads his attendee rows — it never derives a schedule from the fact
+  that he is a man. Cohort remains the segregation constraint; attendance is the roster.
+- Attendance rows are what later carry per-resident facts an event needs — attended, absent,
+  excused. A cohort-derived schedule has nowhere to put those, which is the retrofit to
+  avoid.
+
+This is the resident record's **Schedule** section (see module 1) and it is read-only there:
+the record answers what this person is scheduled for, and the event itself is edited from
+the schedule module. That split is what stops twelve rail sections each growing an editor.
+
+**The section is three bands — attendance, the diary, the history** (chosen 2026-08-05 from
+three rendered variants; a two-column split and a record-first order were the others).
+Schedule-first, because the rail already carries a dot for what needs attention and Overview is
+*defined* as the needs-attention surface, so this section does not have to be where a review
+starts. What it uniquely answers is "what is this person scheduled for".
+
+- **The diary is FullCalendar's LIST VIEW**, not a hand-rolled day-grouped list — a `list` view
+  *is* a day-grouped agenda, and pulse themes it (`listDay*`, `listItemEvent*`, `noEvents*`), so
+  the section inherits the board's typography and palette instead of approximating them. The
+  plugin is a **subpath of the already-installed package** (`@fullcalendar/vue3/list`), so it
+  adds no dependency. It is a **custom 14-day view** (`duration: { days: 14 }`) because the
+  shipped ones are 7 days or a calendar month and the endpoint's window is 14.
+- **Fed naive wall-clock strings**, never `startsAt` — the same rule as the board, for the same
+  reason.
+- **`height: 420`, not `'auto'`.** A fortnight of a daily group is eighteen rows over thirteen
+  day headers, and at auto height that pushed the attendance history a full screen below the
+  fold. Three bands you cannot see together are not three bands.
+- **A list day header has TWO cells**, `level` 0 leading and 1 trailing, and a content generator
+  replaces the text of BOTH — so overriding it without branching on `level` prints the label
+  twice, once at each end of the row. `listDayAltFormat: false` does not help: it suppresses the
+  alt *format*, not the alt *cell*. Note it is **not** `listDaySideFormat`, which was v6's name
+  and silently does nothing. The trailing cell now carries the day's session count, which is the
+  one thing a day header can say that its rows cannot.
+- Headers come from **`humanDate`** so today and tomorrow read as "Today" and "Tomorrow" — no
+  date format can produce those — and `localDateKeyOf`, not `facilityDateOf`, because
+  FullCalendar built that Date from our own naive string.
+
+**Two fields had always been on the wire and dropped.** `hasActiveStay` is why a discharged
+resident used to be told "nothing scheduled in the next two weeks" — which reads as a rota gap
+and sends somebody hunting for events that ought to be there. There are now **three** empty
+states where there was one: no active stay, active but on nothing, and no attendance recorded
+yet. And `rescheduled` now shows as the muted word "moved", matching the board.
+
+**`recent` is ordered by the SESSION's date, not `createdAt`.** It was "the ten most recently
+*typed* marks", which is a different list the moment anybody back-fills a roll — and the section
+presents it as chronological, with a summary and a "since" date reading it as a sequence. There
+is an assertion pinning the order.
+
+**Attendance reads as counts, never a percentage** — `attendanceSummary()` in
+`utils/schedule.js`. `recent` caps at ten and a new resident has one or two marks, so "1 of 2"
+carries its own sample size where "50%" would imply a measurement; it is the same "N of M" habit
+as verified-of-required hours and marked-of-roster. The summary and the bar are **hidden
+entirely** when nothing has been recorded — a 0-of-0 bar reads as a failing grade rather than as
+an absence of information. The bar is the `h-2` flex track from `AppServiceProgress` /
+`AppCohortCapacity`, deliberately not shadcn's `Progress`.
+
+**`attendanceDisplay()` sits beside `sessionStateDisplay()`**, not folded into it: a session is
+scheduled, cancelled, taken or missed; a person attended, was absent or was excused. They share
+only the tone scale, which is why they share `toneClass` — and `toneClass` gained a
+`destructive` branch for ABSENT, used nowhere on the board because red there would compete with
+`--warning` meaning "roll due".
+
+**Built.** Five tables — `ScheduleEvent` (identity only), `ScheduleOccurrence` (cohort +
+when, one row per attending cohort), `ScheduleSession` (a dated instance),
+`ScheduleAttendee` (the roster) and `ScheduleAttendance` (the mark). Recurring and one-off
+are the same shape with a different rule.
+
+Four decisions do the work, and each has a cheaper alternative that fails:
+
+- **The roster and the mark are separate tables at separate levels.** This *revises the
+  sentence above* — that bullet was written before recurrence was decided and reads as
+  though one table carries both. It cannot. A weekly group of eight over twelve weeks would
+  need 96 roster rows up front, or one roster row carrying a status overwritten every week,
+  which destroys last week's record in an app whose whole posture is that records are
+  evidence. The roster hangs off the **occurrence**, the mark off the **dated session**. The
+  rule that falls out, and which is in the schema verbatim:
+
+  > **Before attendance is taken, a session's list is the live roster. Once taken, it is the
+  > marks.**
+
+- **Sessions are computed on read and materialized LAZILY.** A `ScheduleSession` row exists
+  only because something date-specific was recorded — a roll taken, a date cancelled, a time
+  moved. Everything else is expanded from the rule at read time. Generating rows ahead of a
+  horizon needs the cron job this app is proud of not having, plus a backfill and a
+  regeneration story when a rule changes. `services/schedule/expand.js` is **pure and must
+  stay the only expander** — two of them is how the board and the resident record come to
+  disagree about whether Tuesday exists, and there is an assertion for it.
+
+- **A recurring time is stored as a wall-clock string, not an instant.** `startsAtLocal` is
+  `'HH:MM'` and is converted per date by `facilityWallClockToUtc()`. A weekly 6pm is 6pm on
+  both sides of a DST boundary; an instant drifts an hour in November. This is the one place
+  in the app that deliberately does not store UTC — precedent is `Program.curfewLocalTime`.
+  Duration is minutes, not an end time, because an end time that wraps midnight is a bug
+  factory.
+
+- **`GET /schedule` returns LANES PLUS A SHARED BAND, never a flat list** —
+  `{ shared, lanes: [MEN, WOMEN] }`, both lanes always present in that order even when
+  empty. **A both-cohorts event appears in `shared` and in NEITHER lane**, so nothing
+  renders twice. The accidental merge is still impossible: what sits in a lane is
+  single-cohort by construction, and what spans both was certified by the server from a
+  cohort choice a manager made deliberately. There is an assertion that a shared event is
+  absent from both lanes — an implementation that emits the band *and* leaves the rows in
+  the lanes otherwise passes everything while double-drawing the whole board.
+- **A shared session is TAKEN only by unanimity, and MISSED on a single gap.** Cancelled
+  when every underlying session is cancelled; taken only when every occurrence running that
+  date carries `attendanceTakenAt`; missed otherwise once it is past. `rosterCount` and
+  `markedCount` are sums, and cannot double-count because a stay has exactly one cohort and
+  the composite foreign keys enforce it. The failure directions decide this: unanimity can
+  leave a roll in the queue somebody already half-took, which one tap fixes; the alternative
+  leaves half the house with no attendance record while every screen says the roll is done,
+  which is the evidence loss this module exists to prevent.
+
+Consequences worth knowing before touching it:
+
+- **The roster references `stayId`, not `residentId`** — like sign-outs and the ledger. On
+  discharge the stay closes and the person drops off every future session **with no write at
+  all**. Materializing ahead loses exactly this: you would have to delete future rows on
+  discharge, and forgetting once puts a discharged resident on next week's list.
+- **A future session has no row, so its address is `(eventId, date)`** and no session id ever
+  crosses the wire. It was `(occurrenceId, date)` until both-cohort events needed one roll
+  across two occurrences. Because an event's occurrences share one rule they share one set of
+  dates, so the event-level pair is unambiguous: it is a **fan-out address** resolving to
+  every live occurrence that runs on that date — one for a single-cohort event, two for a
+  both-cohorts one, and one again past one side's `endsOn`. `takeAttendance` routes each mark
+  to the session of the occurrence matching that stay's own cohort, materializes **every**
+  session involved and stamps `attendanceTakenAt` on all of them, in one `runInTransaction`.
+  `materializeSession()` still refuses a date the recurrence does not cover, using the same
+  `occursOn()` the expander uses — otherwise a caller could conjure a phantom Sunday session
+  for a Tuesday group.
+- A both-cohorts event with an **empty roster on one side** still gets that side's session
+  created and stamped. That is not a violation of "a row exists only because something was
+  recorded" — the stamp **is** the record: it says the roll was taken and nobody was on that
+  side, which is true, and it is what stops that side sitting in the queue forever.
+- **Setting the schedule is manager-only; TAKING THE ROLL IS ALL-STAFF.** Identical reasoning
+  to sign-outs: the person running the group is the one holding the phone, and making them
+  find a manager is how attendance ends up on paper. Cancelling a session stays with managers
+  — a cancelled session is what an auditor reads as "the meeting did not happen."
+- **A mark is corrected by changing its status, not by an amendment.** Attendance is not a
+  lab result, and making a tech file paperwork to fix a mis-tap in a hallway is the friction
+  this module exists to remove. The audit extension already records who changed what.
+- **An event with any attendance recorded cannot be deleted**, only ended (`endsOn`).
+  Soft-deleting it would make the soft-delete extension filter it out of every resident
+  record and silently erase attendance history. Same shape as the sign-outs rule: fixable in
+  error, but only while nothing has been recorded.
+- `ScheduleSession` and `ScheduleAttendance` are deliberately **absent from
+  `SOFT_DELETE_MODELS`**, and that is not an oversight to tidy up.
+
+**The board is a roll queue over a FullCalendar grid, in three views — Day, Week, Month**
+(restructured 2026-08-05). The **un-taken roll queue** sits above, looking *backwards* two
+weeks independently of the window shown, because a roll nobody took is what quietly costs the
+facility its evidence. It is derived on every read, so it clears itself the moment a roll is
+taken — the same reasoning as the bell having no Notification table.
+
+**The hand-built day agenda and two-lane week table were retired** (2026-08-05). Both were
+chosen from rendered variants on 2026-08-03; both are gone, and their ~250 lines of markup
+with them, including four near-identical copies of the session tile. Day and Week are now
+FullCalendar views in **one merged column**, and what used to be the FullCalendar "Calendar"
+entry is Month.
+
+What that trades away, stated because it is a real loss and not a refactor: **the cohort
+split is no longer visible as geometry**. There is no lane and no shared band on screen. It
+now reads as the **word on the tile** — "Men", "Women", "Both" — plus an All/Men/Women
+filter. Choosing "Men" shows men-only events *and* shared ones, because a shared event *is*
+on the men's schedule; a "Both only" option would be a report, not a filter.
+
+**The server contract did not move, and that is what makes this safe.** `GET /schedule` still
+returns `{ shared, lanes }`, `band.js` still merges a both-cohorts event exactly once, and
+all **61 assertions in `verify-schedule.js` pass unchanged** — that unchanged suite is the
+evidence the restructure stayed client-side. The client concatenates two arrays the server has
+already certified disjoint; there is still no flat list on the wire and there must never be a
+server endpoint returning one.
+
+Cohorts are distinguished on screen by **label and rule, never by hue** — that rule survives
+intact, and matters more now that it is the only cohort signal. **No resident names on the
+board**: counts on the tiles, names only inside a roll somebody deliberately opened, the same
+rule as the census tile.
+
+**The board's clock tick REFETCHES, at 60s — not the census's 30s re-derive.** A session
+crossing into MISSED is no write, so no socket event tells the page; that is the same class of
+problem as a sign-out going overdue (module 8). The difference is that presence is derived
+client-side and free, whereas session state is computed on the server, so this one has to ask.
+Hence 60 seconds rather than 30: noticing a missed roll a minute late costs nothing, and an
+HTTP request every 30 seconds on a shared house phone is not free. Note the tick that was here
+before **did nothing** — it set a `now` ref no template read — so a session going missed never
+surfaced until something else happened to refetch.
+
+**Different times per cohort was built and then dropped (2026-08-04).** The occurrence was
+allowed its own start time, so "Morning Reflection at 7:00 for the men and 7:30 for the
+women" was one event. It bought one real case and cost a create form with two of every
+field, a board that drew a house meeting twice, and two rolls for one meeting. Under the new
+rule a genuinely staggered pair is **two events**, which is what it always was operationally
+— two meetings in the same room half an hour apart. The seed says so, deliberately, because
+the seed is where anyone looks to learn how the model wants to be used.
+
+The one thing this loses: identical timing across an event's occurrences is an invariant
+**nothing in the database enforces**. The read layer refuses to merge a pair whose times
+disagree — it leaves them in their two lanes on the wire, and since the lanes were retired
+from the board that now surfaces as **two separate tiles** — rather than render one card that
+lies about when the meeting is. The cohort segment in the calendar event id is what keeps
+those two tiles independent; without it FullCalendar would treat them as one event and drag
+them together, which is the very lie this fallback exists to prevent.
+
+### FullCalendar 7, on the `pulse` theme
+
+Upgraded from 6.1.21 on **2026-08-05**, to get the `pulse` flavour the facility asked for.
+Pulse exists only in v7, so this was a migration rather than a re-skin.
+
+- **v7 RE-HOMED the view plugins into the adapter package.** They are subpath exports now:
+  `@fullcalendar/vue3/daygrid`, `/timegrid`, `/interaction`, `/list`, `/multimonth`. This
+  **corrects an earlier note here** that said "no view plugin has a stable v7" — the
+  observation was right (`@fullcalendar/daygrid` still stops at 6.1.21) and the conclusion was
+  wrong. They moved. Dependency count went *down*: four packages became **one**,
+  `@fullcalendar/vue3`, pinned exact at **7.0.2** because the palette below depends on
+  `--fc-pulse-*` names that ship with it. Plus `temporal-polyfill`, a declared peer that is
+  **not** marked optional.
+- **Premium is still out.** Every resource and timeline plugin is Premium and its evaluation
+  licence is Creative Commons **NonCommercial**, which does not cover a facility charging rent.
+  That is why cohorts are a **word plus a filter** rather than resource columns.
+- **The shadcn `pulse` block at fullcalendar.io/docs/shadcn is REACT-ONLY** — all ten registry
+  items ship `.tsx` against `@fullcalendar/react`, and there is no Vue variant (the registry
+  404s for one). Do not try to consume it. `@fullcalendar/vue3/themes/pulse` **is** that same
+  design, precompiled, and it is what we import.
+- **Pulse is driven by 31 `--fc-pulse-*` custom properties, and a "palette" is just a CSS file
+  setting them.** `assets/css/fullcalendar.css` is now ours, mapping all of them to **bare
+  tokens** (`var(--primary)`, never `var(--color-primary)` — the `@theme inline` names resolve
+  at build time and are not theme-reactive). The shipped palettes are hardcoded hexes and would
+  discard the preset's teal. **There is no `.dark` block and there must not be one**: every
+  value inverts already, including the neutral overlays, because they are
+  `color-mix(… var(--foreground) …)` rather than fixed black/white alphas.
+- **v7 MINIFIES its internal class names** (`.fc-dl`, `.fc-ei`, `.fc-oh`). Every v6 selector
+  the old CSS used — `.fc-timegrid-slot`, `.fc-col-header-cell-cushion`, `.fc-event-main`,
+  `.fc-daygrid-day-number` — is gone, and nothing written against a hashed class would survive
+  a patch bump. **Style through the `*Class` OPTIONS instead** (there are 72 of them), which
+  apply classes we choose. The 44px tap floor went the same way: it is **`slotMinHeight`**, an
+  option gated on `useMediaQuery('(max-width: 767px), (pointer: coarse)')`, not a height
+  override. Measured: a 30-minute tile is 44px on a phone.
+- **CSS is now real stylesheets, not injected from JS** — the reverse of v6, and it changes
+  where they are registered. `nuxt.config.js` `css:` order is load-bearing: `main.css`,
+  `skeleton.css`, `themes/pulse/theme.css`, then **our palette last**. Both FullCalendar sheets
+  are still unlayered, so they still beat Tailwind's layered rules.
+- **`eventContent` emits BARE CHILDREN, never a wrapper of our own.** Pulse's
+  `columnEventInnerClass` already sets the flex direction — row when the tile is short, column
+  when there is room — so a wrapper imposing `flex-col` fights it and clips a 30-minute tile.
+  Use `arg.timeClass` / `arg.titleClass`, which are pulse's own computed classes.
+- **A one-row tile drops the state marker and keeps the cohort word.** `isShort` catches a
+  short block tile; a **month cell** is one row however long the session is, so `isCompact()`
+  checks `view.type === 'dayGridMonth'` too. Checking only `isShort` left month cells rendering
+  `"M…"` where the title should be. The full line lives in the tile's `title` attribute, set
+  from `eventDidMount`.
+- **`headerToolbar: false`** (v7's default anyway). `AppScheduleToolbar.vue` is pulse's own
+  toolbar ported to Vue: vendored `Tabs` for the view switch, ghost icon `Button`s for
+  prev/next, driven by **`useCalendarController()`**. Two traps in that controller — it is a
+  Proxy over a revision ref, so *reading* a property subscribes to it and no watcher is needed;
+  but `getButtonState()` proxies an **empty object**, so it must be indexed
+  (`buttons.prev.isDisabled`) and **never key-iterated** — `Object.keys()` returns `[]`.
+  The title comes from `controller.view.title`, so the label cannot disagree with the grid.
+- **Renamed in v7:** `eventClassNames` → `eventClass`, `slotLabelFormat` → `slotHeaderFormat`,
+  `slotLabelInterval` → `slotHeaderInterval`. `--fc-*` variables were refactored away entirely.
+- **FullCalendar is fed NAIVE WALL-CLOCK STRINGS** (`2026-08-11T19:00`, no `Z`), never a
+  session's `startsAt`. **v7 CAN take `timeZone: 'America/New_York'` natively** — that is new,
+  and we deliberately decline it. With naive strings a dropped Date's *local* fields already
+  are the facility wall clock, which is exactly what `localDateKeyOf()` reads; a named zone
+  turns the drag readback into an instant needing `formatDate()` or Temporal, on the one path
+  that writes to the database, and adds a **sixth** place in the repo naming the zone where
+  five are tracked on purpose. **Passing `startsAt` would render in the browser's zone** and is
+  the one change that would make this screen disagree with every other screen.
+- `utils/facilityTime.js` has **`localDateKeyOf()`**, which reads a Date's local fields with no
+  conversion. It is deliberately **not** `facilityDateOf()` — that re-interprets an instant in
+  New York, which is right for the wire and wrong for a Date FullCalendar built from our own
+  naive string.
+- Named **`FcCalendar`**, not `Calendar`: shadcn ships a `Calendar` date picker and `ui/` is
+  registered with `pathPrefix: false`.
+- **A calendar event id carries a cohort segment** (`eventId|date|MEN+WOMEN`). Without it, the
+  refuse-to-merge fallback's two lane rows share an id, and FullCalendar drags them as one —
+  reintroducing exactly the lie that fallback exists to prevent.
+- The flat event array is a **deliberate concatenation of two provably disjoint bands**, done
+  client-side. There is still no flat list on the wire, and there must never be a server
+  endpoint returning one — that is what a resident-facing read would reach for.
+
+**Colour on the board changed, and it is a deliberate reversal (2026-08-05).** Tiles are now
+**solid `--primary` for every session**, which is the pulse look the facility chose; state
+reads as a **marker inside the tile** — nothing for scheduled, `✓ 3/3` for taken, `! Roll due`
+for missed. The older rule on this screen was "a scheduled session is quiet, colour means
+state", and this overrides it.
+
+Two things moved with it and must not be undone independently:
+
+- **The roll queue is now load-bearing, not a convenience.** When every tile reads equally
+  loud, "needs attention" cannot be found by glancing at the grid — the band above is where
+  that signal lives. Do not remove it without putting the signal somewhere else first.
+- **The now-indicator is `var(--foreground)`, not `--primary`.** A teal line over teal tiles is
+  invisible; that is the direct cost of solid tiles. It is a locator, not a state, so it gets a
+  strong neutral. Red stays reserved for `--destructive`, and `--warning` already means "roll
+  due" on this very screen.
+- **CANCELLED is the one exception to solid tiles** — muted fill and a struck-through title via
+  `sl-cancelled`, because an auditor reads a cancelled session as "the meeting did not happen",
+  which is a different claim from "it happened, here is the roll".
+- Cohort is **still never a hue**. That rule did not change and now carries more weight.
+
+**One state→appearance mapping, `sessionStateDisplay()` in `utils/schedule.js`.** There were
+three — a dead `stateTone()`, `stateChip`/`chipClass` inlined in the page, and `stateClass()`
+in the calendar. Three copies is how the queue band and the tiles come to disagree about what
+"taken" looks like.
+
+**Month renders list-items, not solid blocks.** That is pulse's own treatment for a month grid
+and it is kept: 100+ solid teal rows would be unreadable. Worth knowing before someone
+"fixes" it.
+
+**Per-date reschedule is built** — dragging a tile moves **one date, never the series**. The
+user dragged one tile and a tile is one date; rewriting every future Tuesday because somebody
+nudged next week is the direct-manipulation betrayal, and there is no undo stack. Changing
+the series is `startsAtLocal` on the occurrence, which is editing the event: a form, not a
+gesture, still deferred.
+
+- `POST /schedule/reschedule`, **managers only**. A roll is an observation by whoever was in
+  the room; a reschedule is a **decision**, and its closest analogue — per-date cancel — sits
+  with managers for the same reason.
+- It **fans out to every running occurrence** in one transaction, including a side that
+  happens to be cancelled. Writing one side and not the other makes a shared card lie about
+  when the meeting starts — and `band.js` catches it by *refusing to merge*, splitting one
+  card into two. That split is the visible symptom and the assertion.
+- Refused for a date the recurrence does not cover, a past session, one whose roll has been
+  taken, and a cancelled one. **Only a SCHEDULED session that has not yet ended can move** —
+  in-progress counts, because "we are running twenty minutes late" is the case this is for.
+- **A cross-day drag never reaches the server**: `eventAllow` compares date keys and refuses
+  the drop, so the tile springs back with no request and no error. Nothing tells the user
+  off, because nothing went wrong.
+- `startsAtLocal: null` clears the override. `eventResize` is off — there is no per-date
+  duration column, so a resize would be a series change wearing a gesture.
+
+**Creating an event is a wide two-column dialog above `md`, the same form as a page below it**
+(chosen 2026-08-05 from three rendered variants). The roster sits in the right column, and
+**the cohort switch heads that column rather than living with the event fields** — it is the
+only control on the form whose effect is another control's *contents*, so putting it anywhere
+else means switching Men → Both refills a list on the far side of the dialog with nothing
+connecting cause to effect. Both rejected variants left it on the left.
+
+- The right column also gains a **search field**, which stops being decoration the first time
+  the house has thirty active residents. Searching narrows **what is shown, never what is
+  selected** — tick somebody while filtered, clear the box, and they stay on. The "N of M
+  selected" denominator counts the **full** candidate list, because the roster's size is a
+  fact about the event and must not appear to shrink because somebody typed. Select-all acts
+  on what is shown and says so ("Select these 3"), since over a filtered list "Select all"
+  is otherwise a promise about rows the user cannot see.
+- **The cost, accepted knowingly:** "who attends" stops reading as an event fact beside title
+  and location. The summary sentence pays for it — it names the cohort in words, under the
+  timing fields, in both layouts.
+- `formatWallClock()` in `utils/facilityTime.js` exists so a stored `'HH:MM'` reads "6:00 PM"
+  like every other time in the app rather than "18:00". It is a **pure string transform with
+  no Date and no timezone** — a wall clock is already facility time, and running it through
+  `new Date()` to format it would re-interpret it as an instant, the bug class `expand.js`
+  warns about. It is **not** interchangeable with `formatFacilityTime()`, which takes a UTC
+  instant. The roll sheet had the same raw-`07:00` display and now shares this.
+
+**Editing an event is three tiers, and which tier a field is in is decided by what changing it
+does to records that already exist** (built 2026-08-05). `PATCH /schedule/events/:id`,
+managers.
+
+The finding the whole design rests on: **`expand()` gates on `occursOn` BEFORE it looks at
+materialized session rows** (`expand.js:101-103`). So changing the weekdays of a group with a
+taken roll makes that session vanish from the board, the roll queue and the resident record
+while its attendance sits orphaned in the table, reachable by no read path. It is the same
+failure the soft-delete rule above warns about, arriving through an edit form.
+
+- **Identity — `title`, `description`, `location` — is always free.** Renaming a group neither
+  moves a session nor invalidates a mark.
+- **The roster is always free, even on an event with months of history**, and that is the
+  design working rather than a concession: the roster hangs off the occurrence and marks hang
+  off the dated session, so taking somebody off next week cannot touch last week. This is the
+  commonest real edit. A removal is soft, `one_live_attendee_per_occurrence` is partial so they
+  can be added back, and `sessionRoll` keeps surfacing their old mark as `offRoster`.
+- **Shape — `startsAtLocal`, `durationMinutes`, `recurrence`, `weekdays`, `startsOn`,
+  `cohorts` — freezes the moment anything is recorded.** Refused with a 409 pointing at the
+  move. Cohorts count as shape because adding one creates an occurrence and removing one takes
+  its sessions with it, so cohort changes need no special case.
+- **`endsOn` is always editable but never earlier than the last recorded date.** Shortening the
+  window orphans history through the identical `occursOn` gate, which makes this the easiest of
+  these rules to ship a bug in — ending a series is the *sanctioned* edit.
+
+**`recordedAgainst()` is the ONE predicate**, and editing, ending and deleting all share it.
+Three copies of "what counts as history" is how they come to disagree. It counts **attendance
+AND cancellations** — a cancelled session is read by an auditor as "the meeting did not
+happen", which is as much a claim about the past as a roll. A bare `startsAtLocalOverride` is
+not: that is a decision about one date, and losing it costs an override rather than evidence.
+
+**`deleteEvent`'s guard was attendance-only and now shares that predicate.** An event with
+cancelled sessions and no marks used to delete out from under its `schedule_sessions` rows,
+which can be neither soft-deleted (deliberately outside `SOFT_DELETE_MODELS`) nor hard-deleted
+(`REVOKE DELETE`) — so those rows became permanently unreachable orphans.
+
+**Moving a series is the answer to "the Tuesday group is Thursdays now"** —
+`POST /schedule/events/:id/move`, managers. It ends the current series the day before `from`
+and creates a successor there, carrying the roster, in one transaction. Every past date keeps
+the rule that produced it, so the rolls stay exactly where they are. Two series is also what
+the facility would say happened.
+
+- `ScheduleEvent.supersedesId` is the link, borrowed from the amendment pattern in the schema
+  footer. **`one_live_successor_per_event` is a PARTIAL unique index, not Prisma's `@unique`** —
+  events are soft-deletable, and a total index would let a successor created in error and then
+  removed block the original from ever being moved again. Prisma types the relation as
+  one-to-many only because it demands `@unique` on the defining side of a one-to-one; the index
+  is the real constraint. Same trade as `one_live_occurrence_per_event_cohort`.
+- **The carried roster is filtered to ACTIVE stays.** A resident discharged mid-series stays on
+  the *old* occurrence's roster — that is how their marks keep their context, and why a
+  discharge costs no write to the schedule — but they are not on next month's group. Without
+  the filter `cohortsOfStays` refuses the whole move the first time somebody has left, which is
+  the common case for a series old enough to be worth moving.
+- **The successor inherits `endsOn` only when it is still ahead of `from`.** After any move the
+  old `endsOn` is `from - 1` by construction, so carrying it verbatim gives the successor an
+  `endsOn` before its own `startsOn` and trips `occurrence_window_ordered` — which is exactly
+  what a second move did before this was read *before* the overwrite.
+- Refused when nothing is recorded (that is an ordinary edit, and splitting would leave a stub
+  series with no sessions), when `from` is at or before a recorded date, and when a live
+  successor already exists.
+
+**Three client gotchas worth keeping:**
+
+- **`.partial()` does not strip `.default()`.** A shape carrying `weekdays: …default([])` makes
+  a PATCH of only `{title}` parse to `{title, weekdays: []}`, and `updateEvent` — which decides
+  what changed from what is *present* — reads that as clearing the weekdays and refuses the
+  whole edit as a frozen shape change. Defaults live on `createBody` alone; `eventShape` is a
+  bare object so `patchBody` can be derived from it at all.
+- **The soft-delete extension rewrites the TOP-LEVEL query only.** `getEvent`, `updateEvent`
+  and `moveSeries` all spell out `deletedAt: null` on their nested `occurrences` and
+  `attendees` includes. Without it a removed attendee keeps appearing on the roster, and adding
+  them back is a silent no-op that returns 200.
+- **`AppRollSheet`'s ellipsis needs `pe-9`.** `SheetContent` renders its own close button
+  `absolute top-4 right-4`, which otherwise lands on top of the trigger and swallows every
+  click on it.
+
+**The UI is the edit dialog, the roll sheet's menu, and two small confirms.**
+`AppEventEditDialog` is `AppEventCreateDialog`'s twin — same wide two columns, same
+`AppEventForm`, `layout="columns"` above `md` and `/schedule/[id]` stacked below it. Shape
+fields **disable with the reason and a "Move the series…" button** rather than disappearing,
+the `AppApartmentEdit` `cohortLocked` pattern. The footer's left-hand action is **one action
+that changes meaning** — "Delete event" while nothing is recorded, "End series…" once something
+is — because only one of them can ever succeed and a permanently dead button teaches nothing.
+`AppEventEndDialog` and `AppEventMoveDialog` follow `AppResidentDischargeDialog`: subject named
+in the title, an optional reason, and the consequence in numbers ("3 recorded marks stay on the
+current series, which ends Tue, Aug 4"). The roll sheet **emits `edit-event`** rather than
+rendering the dialog, so the page can close the sheet first — it sets `pointer-events: none` on
+the body, and two stacked modals is never the answer.
+
+**Still to build:** per-date **cancel** — the columns and CHECKs exist, so
+until then a cancelled meeting is recorded as everyone absent; and `apartmentId` on the
+occurrence with an `(apartmentId, cohort)` composite FK, so a men's session structurally
+cannot be scheduled in the women's apartment.
 
 ### 4. Apartment checks
 Scheduled and random. Checklist-driven with per-item pass/fail plus notes and photos.
@@ -129,13 +690,160 @@ Per-resident med list, scheduled pass windows, and a log of given / refused / mi
 held with the observing staff member. Controlled-substance counts if the house stores any.
 
 ### 7. Community service
-Assign an hours target per resident. Log worked hours with date, location, supervisor,
-and verification. Show progress against target; flag residents falling behind.
+**Built.** Hours are logged against a **stay** with a date worked, a location and an outside
+supervisor; staff verify them; **only verified hours count** toward a target; and a resident
+falling behind lights the rail amber. This is what makes module 1's amber dot real.
+
+**The target is the phase default, overridable per stay.** `Program.serviceHoursRequired`
+finally does something — it is the figure for the phase — and `Stay.serviceHoursRequired`
+overrides it when a court or a case manager sets a different one. On the **stay** rather than
+the resident so a readmission starts fresh, and rather than the program so **an 80-hour order
+survives a phase change** instead of shrinking to 40 when somebody moves up. Both null means
+no target: no bar, no dot, the same "absence of a signal means fine" rule the census follows.
+
+**The pace is 20 hours a month** (facility policy, chosen 2026-08-05).
+`MONTHLY_SERVICE_QUOTA_HOURS` is THE knob — the dot, the bar's marker and the "behind by"
+figure all derive through `servicePace()`. Two details are the rule, not decoration:
+
+- **It accrues in whole monthly steps**, thirty days from intake. Continuous accrual would
+  make a resident 0.7 hours behind on day two and amber on day three, which is the noisy-dot
+  failure this file warns about twice. Whole steps make the first month grace by
+  construction rather than by a second knob. Thirty days from *their* intake rather than a
+  calendar month also avoids needing a policy for the partial first month — somebody who
+  arrives on the 28th does not owe twenty hours in three days.
+- **It is capped at the target.** Without the cap, a resident who finished all 80 hours in
+  month two goes amber in month five because 20 × 5 > 80 — a dot on somebody who is *done*,
+  which is how a dot stops being read.
+
+Cumulative, not a monthly reset: **the quota exists to catch somebody not working the hours
+off, not to enforce a rhythm.** Work ahead and it banks.
+
+`servicePace()` is pure and lives on the **server**, because the resident portal will need
+the identical number, because only verified hours count, and because a quota is facility
+policy — which belongs beside `OVERDUE_GRACE_MS`, not in a Vue file. `sectionDots()` only
+reads the boolean. **No ticking clock**: `behind` does change on the calendar alone like an
+overdue sign-out, but it crosses once a month rather than once an hour, so the next page load
+is soon enough. Do not add a timer by analogy with the census.
+
+**`service_entries` is the first table to implement the amendment pattern**, and modules 4, 5
+and 6 will copy it — so the shape matters beyond this module:
+
+- **A correction is a PURE INSERT.** The footer block in `schema.prisma` used to prescribe a
+  `supersededById` back-pointer on the original as well; it was **dropped 2026-08-05**.
+  `A.supersededById = B.id` holds iff `B.supersedesId = A.id`, so it was a second copy that
+  could disagree — and writing it was an UPDATE on a table whose whole point is that it has
+  none. `@unique` on `supersedesId` also makes a **forked chain structurally impossible**,
+  which the two-column version needs a separate guard for.
+- **Exactly one UPDATE survives: verification.** Module 11 refused to let `ledger_entries`
+  take a "billed" flag because *"only this one column, only null → value" is how an
+  append-only table stops being append-only* — and that reasoning is honoured here, not
+  overridden. There the flag was **extrinsic** (an invoice is a separate thing, so it got a
+  join table); verification is **intrinsic** — an attestation about *this* row — and a join
+  table would be a second row saying "row 4 is true", which is worse.
+- The trigger is a **whitelist written as a whole-row comparison**, not a list of column
+  names, so **a column added in six months is immutable by default** rather than silently
+  mutable because nobody extended the list. It is write-once in both directions: never
+  verified → unverified, and never a change of verifier, which would move somebody's name
+  onto a claim they did not make.
+- The privilege agrees with the trigger rather than relying on it: `REVOKE UPDATE, DELETE`,
+  then `GRANT UPDATE ("verifiedAt", "verifiedById")`. The app role fails on privilege before
+  a trigger is reached; a **superuser** — which bypasses RLS even with FORCE — fails on the
+  trigger. `verify-service.js` asserts both separately, because a test that conflates them
+  proves neither.
+- **Minutes are stored, hours are displayed.** The ledger's integer-cents reasoning, applied
+  to time: 3.5 h is 210 and sums exactly. The target stays whole hours — an order says "80
+  hours", never 79.75 — and the only hours figure anywhere is the one a human types.
+- A **void** is an amendment to zero minutes with a reason. A CHECK permits zero only there:
+  an original claiming no work done is a half-filled form that reached the table.
+- An amendment **starts unverified**. The original's sign-off was an attestation about
+  figures that have just changed.
+
+**Roles:** logging and **verifying are all-staff**, matching sign-outs — the tech handed the
+signed slip is the one at the door, and making them find a manager is how it ends up on
+paper. Setting the **target is managers-only**: an obligation is not a hallway act. When
+residents submit from the portal, the control that matters is that the verifier is *not the
+resident*, which all-staff satisfies by construction.
+
+**Planned: resident self-submission.** The RLS write policy currently refuses resident actors
+outright; relaxing it means a deliberate INSERT-only policy scoped to their own active stay —
+the same shape module 8 plans for self-sign-out — with verification staying staff-only. The
+read policy is already in place: a resident can read their own hours today, which is what
+CLAUDE.md's role table has always promised.
+
+**`/service` is two bands — the verification queue over the progress list** (chosen
+2026-08-05 from three rendered variants; a single filterable table and a card-per-resident
+board were the others). The shape is sign-outs with different nouns, and the reason is that
+**verification is the only thing on the page with a clock on it**: an unsigned slip is hours
+that do not count, and hours that do not count are hours the facility cannot show anyone. So
+it goes first, and it is one tap.
+
+Both rejected variants failed on the same axis and are worth remembering. The table reads
+better as a *reference* view but hides the time-sensitive action behind a filter chip, and
+its default tab is the least actionable one. The card board is the prettiest and puts a
+"Verify 3.5 h" button on a *person* — which is a lie the moment somebody has two slips
+pending, and fixing it means opening a sheet, at which point the flat queue was simpler.
+
+- **`GET /service` is one read** returning `{ pending, progress, figures }`, like `/census`
+  and `/schedule` — a page rendered from one read cannot show two halves that disagree
+  because one loaded a second later. Pending is **oldest work first**: a slip that has sat a
+  fortnight is the one at risk of never being signed. Progress puts whoever is **furthest
+  behind** at the top.
+- **The queue is deliberately uncapped.** The schedule board's roll queue caps at four
+  because it can hold weeks of stale history; every row here is a slip somebody is waiting
+  on, and a queue that hides work is worse than a long one.
+- **Names appear on this page**, unlike the census tiles or the schedule board. It is a work
+  queue: you cannot verify somebody's hours without knowing whose they are.
+- **Residents with no target sit in their own quiet group** at the bottom rather than reading
+  "0 of 0" among the rest. Nothing is owed, so nothing is wrong — the same rule as everywhere
+  else.
+- `AppServiceProgress` gained a `compact` prop rather than the page hand-rolling a second
+  bar, so the pace marker's logic exists once and the two densities cannot drift.
 
 ### 8. Sign-outs
-Resident requests or staff records: destination, purpose, out time, expected return.
-Staff acknowledges return. Overdue returns must surface loudly on the census screen —
-an unreturned resident is the highest-urgency state in the app.
+**Built.** Staff record the departure — destination, optional purpose, out time, expected
+return — and acknowledge the return; both are **all-staff** actions, because the tech at
+the door is the one doing them. The page is a two-band list: everyone out as a card with
+one big Back button (most overdue pinned on top), completed returns as quiet history
+lines. Recording in error is fixable by any staff, but only while open: **a completed
+return is history and can never be deleted.**
+
+The rules that hold it together:
+
+- **One open sign-out per stay**, enforced by a raw-SQL partial unique index (Prisma
+  cannot express it). Soft-deleting an erroneous record frees the slot.
+- **Presence (in / out / overdue) is derived, never stored** — from `returnedAt` and
+  `expectedReturnAt` against the clock. `PRESENCE` is a frozen constant, deliberately not
+  a schema enum.
+- **Overdue = expectedReturnAt + 15 minutes of grace** (facility policy, chosen
+  2026-08-02). `OVERDUE_GRACE_MS` in `services/signOuts.js` is the ONE knob — pill, bell,
+  census and page all derive through `overdueCutoff()`. The "Overdue 2h 41m" label still
+  measures from the expected return; grace delays the alarm, not the arithmetic.
+- **Times cross the wire as facility wall-clock strings** ("17:30" + optional date) and
+  the SERVER interprets them via `lib/facilityTime.js` — the first consumer of
+  `FACILITY_TIMEZONE`, and the pattern curfews, med windows and passes should reuse. A
+  manager recording from another timezone still writes facility time.
+- **Crossing into overdue mutates nothing** — no write, no socket event — so the census
+  and sign-outs pages keep a 30-second client tick that re-derives chip state and nudges
+  the pill and bell. Any state that crosses a threshold on the clock alone needs this
+  pattern; module 9's pass expiries will too.
+- The census tile carries presence **state and times only, never the destination** —
+  where somebody went is for the sign-outs page, not a board glanced at with residents
+  around. The bell's overdue item does carry it: whoever acts on an overdue return needs
+  to know where to start looking.
+- A return and its acknowledging staff member arrive together or not at all (CHECK
+  constraint); `sign_outs` carries full RLS (residents see only their own) and
+  `REVOKE DELETE`, so even direct SQL cannot hard-delete one.
+
+**Planned: resident self-sign-out, Phase 2 and above, daytime only.** Residents at
+Phase 2+ will sign themselves out through their portal; **returns are always acknowledged
+by staff at the office** — that half stays exactly as built. What self-sign-out needs
+when it comes, so it is a decision and not a drift: the RLS write policy currently
+refuses resident actors entirely (`sign_outs_write` requires `app_is_staff()`), and
+relaxing it means a deliberate INSERT-only policy scoped to the resident's own active
+stay; a phase gate read from the stay's program level; a daytime window, which is
+facility policy nobody has defined yet (hours, and whose clock — `FACILITY_TIMEZONE`
+answers the second); and `recordedById` already handles attribution, since a resident's
+User links to their Resident row.
 
 ### 9. Travel passes
 Multi-day, approval-gated. Request → review → approve/deny with a reason. Blackout rules
@@ -171,6 +879,34 @@ and money from the previous episode belongs to that episode.
 Any staff member may read a balance — a tech asked "what do I owe" at the door should not
 have to find a manager. Only admins and house managers may post to it.
 
+**Charges are unbilled until an invoice is sent (decided 2026-08-02).** Posting a charge
+does not bill it. It sits as an unbilled line until someone presses **Send invoice**, which
+sweeps every unbilled charge on the stay into one invoice and bills it through Stripe.
+
+This adds a state a ledger line did not have, and it **collides with the append-only rule
+above** — marking a line billed is an `UPDATE`, and `ledger_entries` refuses updates by
+trigger *and* by revoked privilege. Do not relax that trigger to allow it. The invariant is
+worth more than the convenience, and "only this one column, only null → value" is exactly
+how an append-only table stops being append-only.
+
+Instead, **the link is its own append-only join table** — `invoice_lines(invoiceId,
+ledgerEntryId)`, unique on `ledgerEntryId` so a charge cannot be billed twice. Unbilled then
+means *no row in `invoice_lines`*, which is a read, not a mutation, and `ledger_entries`
+keeps its no-update guarantee untouched.
+
+- **The balance stays derived.** An `Invoice` may hold a **total**, and that is not a cached
+  balance — it is a snapshot of what was billed on the day it was sent, which must *not*
+  move when a later correction lands. A sent invoice is evidence, like every other record
+  here. `verify-ledger.js` asserts no `balance` column exists; the invoice total is a
+  different fact and needs its own assertion saying so, or the next reader will delete it.
+- **A correction after invoicing does not edit the invoice.** It is a new ledger entry with
+  `correctsId`, and it lands unbilled — so it flows onto the next invoice. Same rule as
+  everywhere else: the original stays.
+- **Invoices give "overdue" its meaning.** The red dot on the resident record (below) is
+  *balance overdue*, and a charge has no due date — only an invoice does. Until invoicing
+  exists, "overdue" could only mean "owes anything", which would light red on nearly every
+  resident and become noise. Ship the dot with the invoice, not before.
+
 **Still to build: Stripe.** `LedgerEntry.externalRef` is unique and reserved for the
 processor's own id, which is the piece that is painful to retrofit — webhooks are delivered
 at-least-once and this table cannot be corrected by deleting a row, so without it one
@@ -193,18 +929,41 @@ real table *and* a real decision about whether one person dismissing hides it fr
 The badge counts only `action` items. A bed out of service is worth seeing and is not a
 number anyone should feel behind on.
 
-**Planned: the bell becomes event-driven over a socket** — a resident signs out, a
-maintenance request arrives, a Stripe payment lands. That is a different thing from what is
-built, and it **reverses the "no Notification table" decision above**, so it should be a
-deliberate change rather than a drift:
+**Built: realtime, as an invalidation socket that carries nothing.** Socket.IO on the
+API's HTTP server (`server/src/lib/realtime.js`), one event — `changed` — whose payload is
+`{ at: <timestamp> }` and **nothing else**: no ids, no names, no entity types. Clients
+respond by refetching what they already show over the authenticated HTTP API, so what a
+device may see is decided per request by RLS, RBAC and the audit log, exactly as without
+the socket. Every screen updates live — the census board, the roster, the status pill,
+the bell — and the "no Notification table" decision above still stands: nothing is stored,
+nothing is pushed, nothing can be unread.
 
-- Derived items answer *what is true now*; events answer *what just happened*. Both belong
-  in a bell, but they need different storage — an event has to persist to survive a
-  reconnect, and only an event can meaningfully be unread.
+How it hangs together:
+
+- **Emission is a response hook, not per-route calls**: any successful non-GET outside
+  `/auth` broadcasts (app-level middleware in `app.js`), so future modules are covered by
+  construction. Bursts coalesce server-side (75ms) and client-side (200ms debounce).
+- **The handshake is staff-only** — an explicit {ADMIN, HOUSE_MANAGER, STAFF} allowlist,
+  not `!== RESIDENT` (server `STAFF_ROLE` includes RESIDENT). Logout disconnects that
+  session's sockets; out-of-process revocation (create-user.js, reseed) leaves a socket
+  connected until its next handshake, which is acceptable *because* it carries nothing.
+- **Idle expiry slides on HTTP refetches only, never on socket traffic** — a connected but
+  untouched shared device still times out, which is the point of the timeout.
+- The admin client is `useRealtime()` + `plugins/realtime.client.js` (socket for the life
+  of the signed-in session); pages opt their `load()` in with one `onRealtimeChanged(load)`
+  line, and refreshes never re-blank what they update.
+
+**The empty payload is a hard rule, not a default.** The original warning stands for
+whoever adds the first data-carrying event — a resident signs out, a Stripe payment lands:
+
 - **A socket is a fan-out, and RLS does not apply to it.** Every subscriber gets what the
   server pushes, so the authorisation the policies do per-query has to be re-done per
   subscriber, per event. This is the single most likely place to leak resident data in the
-  next year of this project.
+  next year of this project. Adding a payload field beyond `at` is that project — a
+  storage, authorization and who-receives-what design, not an extra property on an emit.
+- Derived items answer *what is true now*; events answer *what just happened*. An event
+  has to persist to survive a reconnect, and only an event can meaningfully be unread —
+  that is the change that would reverse the no-Notification-table decision.
 - Who receives what is a role question with no default: a tech does not need to know a
   payment landed, and an admin probably does not need every sign-out.
 - Stripe webhooks arrive server-to-server and have to be verified before they become
@@ -353,10 +1112,22 @@ The preset owns colour and type. What it does not decide, and we do:
   inside a cell.
 - **Dialogs that more than one screen opens take `v-model:open` and take no trigger of
   their own** — `AppResidentBedDialog`, `AppResidentDischargeDialog`,
-  `AppResidentReleaseBedDialog`, `AppLedgerEntryDialog`. A component that owns its trigger
-  can only be opened where it is rendered, which is what forced these out of the record
-  page. They take scalars (`residentId`, `residentName`, …), not a resident object: the
-  roster row and the record page hold different shapes.
+  `AppResidentReleaseBedDialog`, `AppLedgerEntryDialog`, `AppEventCreateDialog`. A component
+  that owns its trigger can only be opened where it is rendered, which is what forced these
+  out of the record page. They take scalars (`residentId`, `residentName`, …), not a resident
+  object: the roster row and the record page hold different shapes.
+- **A WIDE dialog is a desktop affordance, and needs a below-`md` answer, not a media query
+  that hopes.** `AppEventCreateDialog` is two columns at `sm:max-w-5xl`; below `md` the
+  callers route to the equivalent page instead of opening it (`useMediaQuery('(min-width:
+  768px)')`). Width only, deliberately not `pointer: coarse` as well — the 44px tap floor
+  cares whether a finger is pointing, but two columns only care whether they fit, so a touch
+  laptop at 1440 should still get the dialog.
+- **One form, two shells.** When a form has both a dialog and a page, the fields and every
+  rule live in ONE component that takes a `layout` prop (`AppEventForm`, `'columns'` |
+  `'stacked'`); the shells supply only a heading and a footer, through a slot. Two copies is
+  how the dialog comes to confirm a destructive narrowing that the page performs silently.
+  The route stays a live deep link at every width regardless — the schedule calendar has
+  always navigated with `?date=&time=&minutes=`.
 - **A table column list must not be an array of strings filtered with `filter(Boolean)`** —
   an empty-string header for an actions column is falsy and gets silently dropped, leaving
   a `th` short and the empty-state `colspan` off by one. Use objects with a `key`.
@@ -595,16 +1366,65 @@ Two verification suites, both run against a live database:
 
 - `npm run verify:constraints` — 20 assertions on the database-level invariants
 - `node scripts/verify-auth.js` — 15 assertions on the login/session/audit flow
-- `node scripts/verify-apartments.js` — 24 assertions on apartments, beds and
-  maintenance, including the admin/manager field split and the rules the database
-  cannot enforce
-- `node scripts/verify-residents.js` — 45 assertions on the roster, intake,
-  bed moves, discharge, the SSN read restriction, the notification bell, and search
+- `node scripts/verify-apartments.js` — 32 assertions on apartments, beds and
+  maintenance, including the admin/manager field split, the rules the database
+  cannot enforce, and the remove/restore arc
+- `node scripts/verify-residents.js` — 46 assertions on the roster, intake,
+  bed moves, discharge, the SSN read restriction, the notification bell, and search.
+  Includes the cohort-mismatch 409 and a tech's 403 on bed assignment — the pair the
+  census board's free-tile placement rests on
 - `node scripts/verify-ledger.js` — 25 assertions on derived balances, the append-only
   guards, dollar-to-cent parsing, and processor-reference idempotency
-- `npm run verify:rls` — 18 assertions proving a resident actor cannot read, count or
-  write another resident's rows — including their ledger — and that the app role cannot
-  bypass the policies
+- `node scripts/verify-census.js` — 12 assertions on the census read: derived occupancy,
+  the figures row, the three tile states, and the staff-only gate
+- `node scripts/verify-realtime.js` — 14 assertions on the invalidation socket: the
+  handshake refuses anonymous, garbage and RESIDENT sessions; the payload is `{at}` and
+  nothing else; reads, failures and `/auth` stay silent; bursts coalesce; logout
+  disconnects. Leaves a probe account and maintenance requests behind — reseed after.
+- `node scripts/verify-signouts.js` — 34 assertions on the sign-out flow: wall-clock
+  interpretation in the facility timezone, one-open-per-stay, the grace window, census
+  presence (and that it never carries a destination), the pill's critical branch, the
+  bell item clearing itself on return, and returned records refusing deletion.
+- `node scripts/verify-schedule.js` — 94 assertions on the schedule. On the resident record:
+  `recent` coming back **newest-session-first** (nothing pinned that before, and the section now
+  reads it as a sequence), and `hasActiveStay` being **true for an active resident and false for
+  a discharged one** — the pair the section's three empty states rest on. **Thirty on editing,
+  moving and deleting:** identity and the roster editable *with* attendance recorded and the
+  taken roll untouched, all five shape fields refused once anything is recorded, `endsOn`
+  refused below the last recorded date, **the merged shared card surviving an in-place timing
+  edit**, a removed attendee's mark surviving as `offRoster` and the same resident addable
+  again, a roster edit unable to smuggle a cohort change past the freeze, an empty patch
+  refused, ONCE clearing its weekdays and closing its window; then the move arc — refused when
+  nothing is recorded, refused before a recorded date, the old series closing the day before
+  the new one opens, provenance recorded, the roster carried minus anyone discharged,
+  **every previously-taken session still reachable and still TAKEN afterwards**, no second
+  move; and a **cancelled-but-unmarked** event refused for both delete and shape, proving the
+  two guards share one predicate. Plus eleven on the
+  per-date reschedule: a tech refused, **both occurrences carrying the override**, **the
+  merged card surviving the move** (the one that catches a half-written fan-out, because
+  `band.js` splits a divergent pair into two lane cards), only that date moving, and refusals
+  for an uncovered date, a taken roll, a past session and a cancelled one. Plus: one flat payload
+  becoming two occurrences with **identical timing**, one combined roster splitting onto the
+  right occurrence by each resident's own cohort, a both-cohorts event rendering **once** in
+  the shared band and in neither lane, **a shared session staying MISSED when only one side
+  is stamped** (the unanimity rule, pinned via raw Prisma because the API cannot produce it),
+  one roll routing each mark to its own cohort's session and stamping both, cohort integrity
+  through the API *and* at the composite foreign key, one-off and weekly expansion, `endsOn`
+  and a future `startsOn`, the window clamp, **a weekly 6pm reading 6:00 PM on both sides of
+  a DST boundary**, lazy materialization and the refusal of a date the rule does not cover, a
+  tech taking a roll but not setting the schedule, a discharge dropping someone off future
+  sessions with no write, and a resident on nothing getting an empty schedule rather than
+  their cohort's
+- `node scripts/verify-service.js` — 39 assertions on community service: the pace rule
+  without a database (day-1 clean, first month grace, whole-month steps, capped at target,
+  no target means no dot), pending hours excluded from the total, the app role refused by
+  **privilege** and a superuser refused by the **trigger** — asserted separately — a column
+  in no whitelist immutable by default, an amendment as a pure INSERT that cannot fork or
+  cross a stay, a void as zero minutes, no stored total column anywhere, and a tech who may
+  log and verify but not set a target
+- `npm run verify:rls` — 28 assertions proving a resident actor cannot read, count or
+  write another resident's rows — including their ledger and sign-outs — and that the
+  app role cannot bypass the policies
 
 **`verify:constraints` TRUNCATEs as it runs**, so reseed before running the auth suite or
 its users will be gone and every login assertion fails:
@@ -615,11 +1435,27 @@ npm run verify:constraints && node scripts/seed.js \
   && node scripts/verify-apartments.js && node scripts/seed.js \
   && node scripts/verify-residents.js && node scripts/seed.js \
   && node scripts/verify-ledger.js && node scripts/seed.js \
+  && node scripts/verify-census.js \
+  && node scripts/verify-realtime.js && node scripts/seed.js \
+  && node scripts/verify-signouts.js && node scripts/seed.js \
+  && node scripts/verify-schedule.js && node scripts/seed.js \
+  && node scripts/verify-service.js && node scripts/seed.js \
   && npm run verify:rls
 ```
 
-`verify-apartments.js` creates a test apartment and leaves it behind, so finish with a
+`verify-apartments.js` creates test apartments and leaves them behind, so finish with a
 seed to get back to a clean facility.
+
+**If someone is actively using the dev database, do not reseed it under them.** The
+suites run fine against a scratch database in the same container — the RLS migration's
+role creation is idempotent, so this is safe to repeat:
+
+```
+docker exec soberlife-pg psql -U soberlife -c 'CREATE DATABASE soberlife_verify'
+export DATABASE_URL="postgresql://soberlife:soberlife@localhost:5432/soberlife_verify?schema=public"
+export APP_DATABASE_URL="postgresql://soberlife_app:soberlife-app-dev@localhost:5432/soberlife_verify?schema=public"
+npx prisma migrate deploy && node scripts/seed.js   # then run the suites as above
+```
 
 ### Auth decisions (built)
 
@@ -699,7 +1535,19 @@ no longer the default.
   time-critical and cross midnight, so every scheduled local time is read against the
   facility timezone — a **single value in `FACILITY_TIMEZONE`**, not a column. The
   facility is one site; if a second site in another zone ever opens, that is the
-  assumption to revisit.
+  assumption to revisit. `server/src/lib/facilityTime.js` (wall-clock → UTC and back,
+  no timezone library) is the one place that interprets it; the admin app mirrors the
+  display half in `utils/facilityTime.js` as a copied constant. The older `isoDate()`
+  UTC-slice helper is fine for dates, wrong for times — do not reuse it for anything
+  with a clock.
+
+  **The value is `America/New_York`** — the facility is in Georgia. It was
+  `America/Chicago` first and every time in the app read an hour early. Note the zone
+  lives in **five** places, only three of them env-driven: `server/.env`,
+  `server/.env.example`, the `?? ` fallbacks in `lib/facilityTime.js` and
+  `scripts/verify-signouts.js`, and the **hardcoded copy** in the admin app's
+  `utils/facilityTime.js`. Changing the environment alone leaves the client an hour
+  off, which is what makes this worth stating rather than deriving.
 - Mobile-first CSS for anything a tech touches in the hallway.
 - Seed data should look like a real facility: several apartments across both cohorts, a
   full census, a few residents out on pass, one overdue sign-out.

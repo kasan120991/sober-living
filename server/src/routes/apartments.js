@@ -9,6 +9,8 @@ import {
   deleteApartment,
   getApartment,
   listApartments,
+  listRemovedApartments,
+  restoreApartment,
   updateApartment,
 } from '../services/apartments.js'
 import { createBeds } from '../services/beds.js'
@@ -40,7 +42,20 @@ router.use(requireAuth, requireStaff)
 
 router.get('/', handler(async (_req, res) => res.json({ apartments: await listApartments() })))
 
+// Before '/:id', or "removed" is read as an apartment id.
+router.get(
+  '/removed',
+  adminOnly,
+  handler(async (_req, res) => res.json({ apartments: await listRemovedApartments() })),
+)
+
 router.get('/:id', handler(async (req, res) => res.json(await getApartment(req.params.id))))
+
+router.post(
+  '/:id/restore',
+  adminOnly,
+  handler(async (req, res) => res.json(await restoreApartment(req.params.id))),
+)
 
 router.post(
   '/',

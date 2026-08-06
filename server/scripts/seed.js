@@ -11,6 +11,8 @@ import { resetFacilityData } from './lib/reset.js'
 import { prisma } from '../src/db/client.js'
 import { runAsSystem } from '../src/lib/dbContext.js'
 import { hashPassword } from '../src/auth/passwords.js'
+import { facilityToday } from '../src/lib/facilityTime.js'
+import { addDays, dateKeyToUtc } from '../src/services/schedule/expand.js'
 
 const DEV_PASSWORD = 'soberlife-dev-1234'
 
@@ -46,10 +48,17 @@ async function main() {
   // Orientation is level 0: the restricted first stretch before Phase 1. It is a
   // Program row rather than a separate status field, so intake picks a standing
   // and a phase from one list instead of two concepts meaning nearly the same.
+  //
+  // serviceHoursRequired is the PHASE DEFAULT target, overridable per stay. It
+  // is the first of Program's four policy columns to be filled in; the other
+  // three still ship empty, per the model's own comment. Orientation stays null
+  // on purpose — nothing is owed in the restricted first stretch — though no
+  // seeded resident is on it, so the no-target rendering is exercised by
+  // verify-service.js rather than by the seed.
   const [orientation, phase1, phase2] = await Promise.all([
     prisma.program.create({ data: { name: 'Orientation', level: 0 } }),
-    prisma.program.create({ data: { name: 'Phase 1', level: 1 } }),
-    prisma.program.create({ data: { name: 'Phase 2', level: 2 } }),
+    prisma.program.create({ data: { name: 'Phase 1', level: 1, serviceHoursRequired: 20 } }),
+    prisma.program.create({ data: { name: 'Phase 2', level: 2, serviceHoursRequired: 40 } }),
   ])
   const apt12 = await prisma.apartment.create({
     data: { name: 'Apt 12', cohort: 'MEN' },
@@ -306,6 +315,136 @@ async function main() {
     },
   })
 
+  // ── Sign-outs ─────────────────────────────────────────────────────────────
+  // Relative times, because seed runs at arbitrary wall-clock moments: one
+  // resident out and expected back later, one OVERDUE (past expected return
+  // and the 15-minute grace), and one completed round trip so the returned
+  // list has data. The overdue one makes the census stripe, the red pill and
+  // the bell all light on first login.
+  const HOUR = 3_600_000
+  const nowMs = Date.now()
+
+  await prisma.signOut.create({
+    data: {
+      stayId: byLast('Ocampo'),
+      destination: "NA meeting — St. Mark's",
+      purpose: 'Evening meeting, sponsor driving',
+      outAt: new Date(nowMs - 1 * HOUR),
+      expectedReturnAt: new Date(nowMs + 3 * HOUR),
+      recordedById: tech.id,
+    },
+  })
+
+  await prisma.signOut.create({
+    data: {
+      stayId: byLast('Boone'),
+      destination: 'Work shift — Kroger',
+      outAt: new Date(nowMs - 5 * HOUR),
+      // 2h41m late: well past the grace window, so "Overdue 2h 41m" renders.
+      expectedReturnAt: new Date(nowMs - (2 * HOUR + 41 * 60_000)),
+      recordedById: manager.id,
+    },
+  })
+
+  await prisma.signOut.create({
+    data: {
+      stayId: byLast('Whitfield'),
+      destination: 'Probation check-in',
+      outAt: new Date(nowMs - 26 * HOUR),
+      expectedReturnAt: new Date(nowMs - 24 * HOUR),
+      returnedAt: new Date(nowMs - 24 * HOUR - 20 * 60_000),
+      returnAcknowledgedById: tech.id,
+      recordedById: tech.id,
+    },
+  })
+
+  // ── Community service ───────────────────────────────────────────────────
+  // Intake is 2026-05-01, so every seeded resident is months into a stay and
+  // the quota has bitten several times over. The point of this block is that a
+  // fresh seed shows the amber dot on somebody, a clean bar on somebody else,
+  // an entry awaiting a signature, and one amended entry — the four states the
+  // section has to render.
+  // Not HOUR — that is already milliseconds above, for the sign-out fixtures.
+  const MINUTES_PER_HOUR = 60
+
+  async function logHours(stayId, { hours, daysAgo, location, supervisor, phone, verified, note }) {
+    return prisma.serviceEntry.create({
+      data: {
+        stayId,
+        minutes: hours * MINUTES_PER_HOUR,
+        workedOn: new Date(new Date(nowMs - daysAgo * 86_400_000).toISOString().slice(0, 10) + 'T00:00:00.000Z'),
+        location,
+        supervisorName: supervisor,
+        supervisorPhone: phone ?? null,
+        note: note ?? null,
+        recordedById: tech.id,
+        ...(verified ? { verifiedAt: new Date(nowMs - (daysAgo - 1) * 86_400_000), verifiedById: manager.id } : {}),
+      },
+    })
+  }
+
+  // Ruben carries a COURT-ORDERED override: 120 hours, not Phase 1's 20. On the
+  // stay rather than the program, so moving him to Phase 2 will not quietly
+  // reduce what a judge ordered.
+  await prisma.stay.update({
+    where: { id: byLast('Castillo') },
+    data: { serviceHoursRequired: 120 },
+  })
+
+  // The seeded intake is 2026-05-01, so everyone housed is three whole months
+  // in and owes their full target under the 20 h/month pace. The hours below
+  // are sized so MOST residents are clear and only two carry a dot — a board
+  // where everybody is amber teaches people to ignore amber, which is the
+  // failure CLAUDE.md names about noisy indicators.
+  const HABITAT = { location: 'Habitat ReStore', supervisor: 'Dana Cole', phone: '404-555-0143' }
+  const FOODBANK = { location: 'Food bank', supervisor: 'Rita Mbeki' }
+  const CHURCH = { location: 'Church grounds', supervisor: 'Paul Nwosu' }
+
+  // Andre (Phase 2, target 40): 42 verified — done, and one slip still pending.
+  for (const [hours, daysAgo, place] of [
+    [8, 74, HABITAT], [8, 60, HABITAT], [8, 46, FOODBANK], [6, 32, CHURCH], [6, 18, HABITAT], [6, 11, FOODBANK],
+  ]) await logHours(byLast('Whitfield'), { hours, daysAgo, ...place, verified: true })
+  await logHours(byLast('Whitfield'), { hours: 4, daysAgo: 3, ...CHURCH, verified: false })
+
+  // Marisol (Phase 1, target 20): exactly met. No dot, no fuss.
+  for (const [hours, daysAgo, place] of [[6, 68, FOODBANK], [8, 40, HABITAT], [6, 15, CHURCH]])
+    await logHours(byLast('Ferrer'), { hours, daysAgo, ...place, verified: true })
+
+  // Ruben carries the 120-hour court order, so 60 is due by now and he has 45.
+  // BEHIND BY 15 — somebody slipping, not somebody who never started.
+  for (const [hours, daysAgo, place] of [
+    [8, 78, HABITAT], [8, 64, HABITAT], [7, 50, FOODBANK], [8, 36, HABITAT], [6, 22, CHURCH], [8, 12, HABITAT],
+  ]) await logHours(byLast('Castillo'), { hours, daysAgo, ...place, verified: true })
+  await logHours(byLast('Castillo'), { hours: 3.5, daysAgo: 2, ...HABITAT, verified: false, note: 'Slip handed in at the office.' })
+
+  // Tasha's entry was AMENDED: eight hours logged, the supervisor's sheet said
+  // five. The original stays, the amendment supersedes it, and only the
+  // amendment counts. Note the amendment starts unverified — the original's
+  // sign-off was about a number that has just changed.
+  for (const [hours, daysAgo, place] of [[8, 70, HABITAT], [8, 55, FOODBANK], [8, 44, HABITAT], [6, 20, CHURCH], [5, 8, FOODBANK]])
+    await logHours(byLast('Boone'), { hours, daysAgo, ...place, verified: true })
+  const overstated = await logHours(byLast('Boone'), { hours: 8, daysAgo: 31, ...CHURCH, verified: true })
+  await prisma.serviceEntry.create({
+    data: {
+      stayId: byLast('Boone'),
+      minutes: 5 * MINUTES_PER_HOUR,
+      workedOn: overstated.workedOn,
+      location: overstated.location,
+      supervisorName: overstated.supervisorName,
+      recordedById: manager.id,
+      supersedesId: overstated.id,
+      amendmentReason: "Supervisor's sheet says 5 hours, not 8.",
+    },
+  })
+
+  // Danny is Phase 1 with nothing logged at all, so he is behind on the phase
+  // default rather than on a court order — two residents amber for two
+  // different reasons, which is what a real house looks like.
+  //
+  // Joy intakes TODAY on Phase 1, so she has a 20-hour target and owes none of
+  // it yet: zero whole months elapsed, no dot. That is the first-month grace
+  // the whole-month step exists to give, visible on a fresh seed.
+
   // Maintenance is raised against the APARTMENT. Bed 12D carries its own
   // out-of-service note; the two read as related without being linked.
   await prisma.maintenanceRequest.create({
@@ -333,6 +472,203 @@ async function main() {
     },
   })
 
+  // ── The schedule ────────────────────────────────────────────────────────
+  // A week that looks like a real house: a daily reflection both cohorts
+  // attend at different times, a Monday house meeting likewise, one process
+  // group per cohort on its own night, and a one-off outing. Plus one roll
+  // already taken and one deliberately missed, so the board has something in
+  // both states the moment you open it.
+  const stayIdsFor = (cohort) =>
+    seededStays.filter((s) => s.person.cohort === cohort).map((s) => s.stayId)
+  const menStays = stayIdsFor('MEN')
+  const womenStays = stayIdsFor('WOMEN')
+
+  const EVERY_DAY = [0, 1, 2, 3, 4, 5, 6]
+  const SCHEDULE_FROM = '2026-05-01'
+
+  const cohortOfStay = new Map([
+    ...menStays.map((id) => [id, 'MEN']),
+    ...womenStays.map((id) => [id, 'WOMEN']),
+  ])
+
+  /**
+   * One event with ONE time, fanned out to one occurrence per attending cohort
+   * and one combined roster split by each stay's own cohort — mirroring
+   * services/schedule/write.js exactly, so the seed teaches the real shape.
+   */
+  async function seedEvent({ title, description, location, cohorts, at, minutes, weekdays, startsOn, stayIds }) {
+    const event = await prisma.scheduleEvent.create({
+      data: { title, description: description ?? null, location: location ?? null, createdById: manager.id },
+    })
+    const made = {}
+    for (const cohort of cohorts) {
+      const occurrence = await prisma.scheduleOccurrence.create({
+        data: {
+          eventId: event.id,
+          cohort,
+          startsAtLocal: at,
+          durationMinutes: minutes,
+          recurrence: weekdays ? 'WEEKLY' : 'ONCE',
+          weekdays: weekdays ?? [],
+          startsOn: dateKeyToUtc(startsOn ?? SCHEDULE_FROM),
+          endsOn: weekdays ? null : dateKeyToUtc(startsOn),
+        },
+      })
+      const mine = stayIds.filter((id) => cohortOfStay.get(id) === cohort)
+      if (mine.length) {
+        await prisma.scheduleAttendee.createMany({
+          data: mine.map((stayId) => ({
+            occurrenceId: occurrence.id,
+            cohort,
+            stayId,
+            addedById: manager.id,
+          })),
+        })
+      }
+      made[cohort] = occurrence
+    }
+    return made
+  }
+
+  // Morning Reflection runs at 7:00 for the men and 7:30 for the women. Under
+  // one-time-per-event that is TWO EVENTS, not one with a staggered pair — and
+  // that is the honest reading: they are two meetings in the same room half an
+  // hour apart. The seed is where anyone looks to learn how the model wants to
+  // be used, so it says so rather than collapsing them to a single time.
+  const { MEN: morningMen } = await seedEvent({
+    title: 'Morning Reflection — Men',
+    description: 'Ten minutes of reading, then the day ahead.',
+    location: 'Common room',
+    cohorts: ['MEN'],
+    at: '07:00',
+    minutes: 30,
+    weekdays: EVERY_DAY,
+    stayIds: menStays,
+  })
+
+  await seedEvent({
+    title: 'Morning Reflection — Women',
+    description: 'Ten minutes of reading, then the day ahead.',
+    location: 'Common room',
+    cohorts: ['WOMEN'],
+    at: '07:30',
+    minutes: 30,
+    weekdays: EVERY_DAY,
+    stayIds: womenStays,
+  })
+
+  // The flagship both-cohorts event: one card on the board, one roll, one queue
+  // entry. Everyone in the house, in one room, at one time.
+  const houseMeeting = await seedEvent({
+    title: 'House Meeting',
+    description: 'Chores, conflicts, and anything the house needs to hear.',
+    location: 'Common room',
+    cohorts: ['MEN', 'WOMEN'],
+    at: '18:00',
+    minutes: 60,
+    weekdays: [1],
+    stayIds: [...menStays, ...womenStays],
+  })
+
+  // Single-cohort, and deliberately so — these are what prove the lanes still
+  // carry lane-only events.
+  await seedEvent({
+    title: "Men's Process Group",
+    location: 'Common room',
+    cohorts: ['MEN'],
+    at: '19:00',
+    minutes: 90,
+    weekdays: [2],
+    stayIds: menStays,
+  })
+
+  await seedEvent({
+    title: "Women's Process Group",
+    location: 'Common room',
+    cohorts: ['WOMEN'],
+    at: '18:00',
+    minutes: 90,
+    weekdays: [4],
+    stayIds: womenStays,
+  })
+
+  // A one-off, four days out, and both cohorts — so the shared band has a card
+  // in the near-future DAY view and not only on Mondays. Also proof that ONCE
+  // and WEEKLY are the same shape with a different rule.
+  await seedEvent({
+    title: 'Braves game — outing',
+    description: 'Van leaves at ten. Sign the trip sheet.',
+    location: 'Truist Park',
+    cohorts: ['MEN', 'WOMEN'],
+    at: '10:00',
+    minutes: 300,
+    startsOn: addDays(facilityToday(), 4),
+    stayIds: [...menStays, ...womenStays],
+  })
+
+  /** A completed roll: every running occurrence stamped, marks split by cohort. */
+  async function seedTakenRoll(occurrences, dateKey, marks) {
+    for (const [cohort, occurrence] of Object.entries(occurrences)) {
+      const session = await prisma.scheduleSession.create({
+        data: {
+          occurrenceId: occurrence.id,
+          cohort,
+          sessionDate: dateKeyToUtc(dateKey),
+          attendanceTakenAt: new Date(),
+          attendanceTakenById: tech.id,
+        },
+      })
+      const mine = marks.filter((m) => cohortOfStay.get(m.stayId) === cohort)
+      if (mine.length) {
+        await prisma.scheduleAttendance.createMany({
+          data: mine.map((m) => ({
+            sessionId: session.id,
+            cohort,
+            stayId: m.stayId,
+            status: m.status,
+            note: m.note ?? null,
+            recordedById: tech.id,
+          })),
+        })
+      }
+    }
+  }
+
+  // Yesterday's men's reflection: roll taken, one absence. Today's board opens
+  // with a completed session and a resident with a mark on their record.
+  const yesterday = addDays(facilityToday(), -1)
+  await seedTakenRoll(
+    { MEN: morningMen },
+    yesterday,
+    menStays.map((stayId, i) => ({
+      stayId,
+      status: i === 1 ? 'ABSENT' : 'ATTENDED',
+      note: i === 1 ? 'Overslept. Spoken to.' : null,
+    })),
+  )
+
+  // The most recent past Monday's house meeting, taken across BOTH cohorts —
+  // so the shared band shows a completed card and not only pending ones. Both
+  // sessions are stamped: under the merge's unanimity rule, stamping one side
+  // would leave the card permanently MISSED and stuck in the queue.
+  const lastMonday = (() => {
+    let d = addDays(facilityToday(), -1)
+    while (new Date(`${d}T00:00:00Z`).getUTCDay() !== 1) d = addDays(d, -1)
+    return d
+  })()
+  await seedTakenRoll(houseMeeting, lastMonday, [
+    ...menStays.map((stayId) => ({ stayId, status: 'ATTENDED' })),
+    ...womenStays.map((stayId, i) => ({
+      stayId,
+      status: i === 0 ? 'EXCUSED' : 'ATTENDED',
+      note: i === 0 ? 'Work shift. Cleared in advance.' : null,
+    })),
+  ])
+
+  // Two days ago is deliberately left with NO session row at all — that is what
+  // an un-taken roll looks like, and it is what the board's queue is built
+  // from. Nothing was written to make it appear; it is derived from its absence.
+
   console.log(`
   Seeded:
     ${await prisma.apartment.count()} apartments (1 men's, 1 women's)
@@ -340,7 +676,10 @@ async function main() {
     ${await prisma.resident.count()} residents (5 housed, 1 awaiting a bed, 1 discharged)
     ${await prisma.user.count()} staff users
     ${await prisma.maintenanceRequest.count()} maintenance requests (1 open urgent, 1 resolved)
+    ${await prisma.signOut.count()} sign-outs (1 out, 1 OVERDUE, 1 returned)
     ${await prisma.ledgerEntry.count()} ledger entries (rent, laundry, a trip, a damage, one credit)
+    ${await prisma.scheduleEvent.count()} scheduled events (5 weekly, 1 one-off; 2 of them both cohorts), ${await prisma.scheduleOccurrence.count()} occurrences
+    ${await prisma.scheduleAttendance.count()} attendance marks on 2 taken rolls (one of them shared) — earlier days left un-taken on purpose
 
   Any account you created with scripts/create-user.js was kept.
 

@@ -14,11 +14,15 @@ const apartment = ref(null)
 const pending = ref(true)
 
 async function load() {
-  pending.value = true
+  // Blank the pane when arriving or switching apartments, never on a realtime
+  // refresh of the one already shown.
+  pending.value = apartment.value?.id !== route.params.id
   apartment.value = await getApartment(route.params.id)
   pending.value = false
 }
 watch(() => route.params.id, load, { immediate: true })
+// The parent list refreshes itself; this keeps the open detail pane live.
+onRealtimeChanged(load)
 
 /** Bed counts changed, so the list's occupancy figures are now stale too. */
 async function refreshAll() {

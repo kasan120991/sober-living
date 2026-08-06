@@ -201,6 +201,66 @@ async function main() {
     ? ok('the open filter excludes resolved requests')
     : bad('open filter', JSON.stringify(openOnly.body?.requests?.map((r) => r.status)))
 
+  console.log('\n\x1b[1mRemoved and restored\x1b[0m')
+
+  // The full arc: create → bed → remove bed → remove apartment → restore.
+  const rstName = `Apt Rst ${Date.now() % 100000}`
+  const rst = await admin('/apartments', {
+    method: 'POST',
+    body: JSON.stringify({ name: rstName, cohort: 'MEN' }),
+  })
+  await admin(`/apartments/${rst.body.id}/beds`, {
+    method: 'POST',
+    body: JSON.stringify({ label: 'A' }),
+  })
+  const rstBed = (await admin(`/apartments/${rst.body.id}`)).body.beds[0]
+  await admin(`/beds/${rstBed.id}`, { method: 'DELETE' })
+  const rstDel = await admin(`/apartments/${rst.body.id}`, { method: 'DELETE' })
+  rstDel.status === 204 || rstDel.status === 200
+    ? ok('an apartment with no live beds can be removed')
+    : bad('remove apartment', rstDel.status)
+
+  const techRemoved = await tech('/apartments/removed')
+  techRemoved.status === 403
+    ? ok('a tech cannot see removed apartments')
+    : bad('tech blocked from /removed', techRemoved.status)
+
+  const mgrRemoved = await manager('/apartments/removed')
+  mgrRemoved.status === 403
+    ? ok('a house manager cannot see removed apartments')
+    : bad('manager blocked from /removed', mgrRemoved.status)
+
+  const removedList = await admin('/apartments/removed')
+  const rstRow = removedList.body?.apartments?.find((a) => a.id === rst.body.id)
+  rstRow && rstRow.bedCount === 1
+    ? ok('the removed list carries the apartment and the bed it held')
+    : bad('removed list', JSON.stringify(removedList.body))
+
+  const nameHeld = await admin('/apartments', {
+    method: 'POST',
+    body: JSON.stringify({ name: rstName, cohort: 'MEN' }),
+  })
+  nameHeld.status === 409 && /restore/i.test(nameHeld.body?.error ?? '')
+    ? ok(`re-creating a removed name points at restore — "${nameHeld.body.error}"`)
+    : bad('removed name suggests restore', JSON.stringify(nameHeld.body))
+
+  const mgrRestore = await manager(`/apartments/${rst.body.id}/restore`, { method: 'POST' })
+  mgrRestore.status === 403
+    ? ok('a house manager cannot restore')
+    : bad('manager blocked from restore', mgrRestore.status)
+
+  const restored = await admin(`/apartments/${rst.body.id}/restore`, { method: 'POST' })
+  const backList = await admin('/apartments')
+  const back = backList.body?.apartments?.find((a) => a.id === rst.body.id)
+  restored.status === 200 && back && back.bedCount === 1
+    ? ok('an admin restores it, and its bed comes back with it')
+    : bad('restore', `${restored.status} ${JSON.stringify(back)}`)
+
+  const notRemoved = await admin(`/apartments/${rst.body.id}/restore`, { method: 'POST' })
+  notRemoved.status === 404
+    ? ok('restoring an apartment that is not removed is refused')
+    : bad('restore live apartment refused', notRemoved.status)
+
   console.log('\n\x1b[1mAudit\x1b[0m')
 
   const { prisma } = await import('../src/db/client.js')

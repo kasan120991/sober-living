@@ -1,6 +1,7 @@
 <script setup>
 import { Plus } from '@lucide/vue'
 import { STAFF_ROLE } from '~/utils/roles.js'
+import { toApartmentName } from '~/utils/apartments.js'
 
 const emit = defineEmits(['created'])
 const { user } = useAuth()
@@ -13,16 +14,17 @@ const canCreate = computed(() => user.value?.role === STAFF_ROLE.ADMIN)
 const open = ref(false)
 const pending = ref(false)
 const error = ref('')
-const form = reactive({ name: '', cohort: 'MEN' })
+const form = reactive({ number: '', cohort: 'MEN' })
 
 async function submit() {
   error.value = ''
   pending.value = true
   try {
-    await createApartment({ ...form })
-    notify.success(`${form.name} added`)
+    const name = toApartmentName(form.number)
+    await createApartment({ name, cohort: form.cohort })
+    notify.success(`${name} added`)
     open.value = false
-    Object.assign(form, { name: '', cohort: 'MEN' })
+    Object.assign(form, { number: '', cohort: 'MEN' })
     emit('created')
   } catch (err) {
     error.value = err?.data?.error ?? 'Could not add the apartment.'
@@ -47,8 +49,24 @@ async function submit() {
           <AlertDescription>{{ error }}</AlertDescription>
         </Alert>
 
-        <AppField v-slot="{ id }" label="Name" description="How staff say it out loud — “Apt 12”.">
-          <Input :id="id" v-model="form.name" placeholder="Apt 12" required />
+        <!-- Just the number — the "Apt" is supplied, so the roster never mixes
+             "Apt 12" with "apt 12" with "12". -->
+        <AppField v-slot="{ id }" label="Number" description="It shows as “Apt 12” everywhere.">
+          <div class="flex items-stretch">
+            <span
+              class="border-input bg-muted text-muted-foreground flex items-center rounded-l-md border border-r-0 px-3 text-sm"
+            >
+              Apt
+            </span>
+            <Input
+              :id="id"
+              v-model="form.number"
+              class="rounded-l-none"
+              placeholder="12"
+              inputmode="numeric"
+              required
+            />
+          </div>
         </AppField>
 
         <AppField

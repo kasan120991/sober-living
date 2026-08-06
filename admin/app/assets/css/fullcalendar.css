@@ -1,0 +1,119 @@
+/* The pulse palette, wired to this app's tokens.
+   ==========================================================================
+   FullCalendar 7 ships its themes as real stylesheets, and `pulse` is driven
+   ENTIRELY by the 31 custom properties below — `themes/pulse/theme.css`
+   consumes these and nothing else. A "palette" in FullCalendar's vocabulary is
+   exactly this file: one block setting those 31 values.
+
+   The shipped palettes (blue / green / purple / red) are hardcoded hexes and
+   would throw away the preset's teal. So this is ours, and it is what makes
+   pulse carry the app's theme rather than FullCalendar's.
+
+   ── Every value is a BARE token ──────────────────────────────────────────
+   var(--primary), never var(--color-primary). The `--color-*` names live in
+   `@theme inline`, which resolves them at build time — they are not
+   theme-reactive. The bare ones are what flip between :root and .dark.
+
+   That is why THERE IS NO DARK BLOCK HERE and there must not be one: every
+   value below already inverts, including the neutral overlays, because they
+   are color-mix() over var(--foreground) rather than fixed black or white
+   alphas the way the shipped palettes write them.
+
+   ── Why almost nothing else is in this file ──────────────────────────────
+   v7's internal class names are MINIFIED — `.fc-dl`, `.fc-ei`, `.fc-oh`. The
+   v6 selectors this file used to carry (`.fc-timegrid-slot`,
+   `.fc-col-header-cell-cushion`, `.fc-event-main`, `.fc-daygrid-day-number`)
+   do not exist any more, and nothing built on a hashed class would survive a
+   patch bump. Styling now goes through v7's `*Class` OPTIONS instead, which
+   apply classes we choose to elements FullCalendar owns — see
+   components/ui/fullcalendar/FcCalendar.vue. The 44px tap floor went the same
+   way: it is `slotMinHeight`, an option, not a height override.
+
+   Kept out of main.css because `shadcn-vue add` rewrites that file wholesale.
+   Registered in nuxt.config.js AFTER themes/pulse/theme.css, which is what
+   lets these win. */
+
+:root {
+  /* ── Primary ──────────────────────────────────────────────────────────── */
+  --fc-pulse-primary: var(--primary);
+  --fc-pulse-primary-over: color-mix(in oklab, var(--primary) 92%, var(--primary-foreground));
+  --fc-pulse-primary-down: color-mix(in oklab, var(--primary) 85%, var(--primary-foreground));
+  --fc-pulse-primary-foreground: var(--primary-foreground);
+
+  /* ── Secondary — the quiet button surface ─────────────────────────────── */
+  --fc-pulse-secondary: var(--card);
+  --fc-pulse-secondary-over: var(--accent);
+  --fc-pulse-secondary-down: var(--muted);
+  --fc-pulse-secondary-foreground: var(--card-foreground);
+  --fc-pulse-secondary-icon: var(--muted-foreground);
+  --fc-pulse-secondary-icon-over: var(--foreground);
+
+  /* ── Tertiary — focus rings and accents ──────────────────────────────── */
+  --fc-pulse-tertiary: var(--ring);
+  --fc-pulse-tertiary-over: color-mix(in oklab, var(--ring) 88%, var(--foreground));
+  --fc-pulse-tertiary-down: color-mix(in oklab, var(--ring) 78%, var(--foreground));
+  --fc-pulse-tertiary-foreground: var(--primary-foreground);
+
+  /* ── Calendar content ─────────────────────────────────────────────────── */
+  /* The event tile. Solid primary, per the decision recorded in CLAUDE.md
+     module 3: the pulse look was chosen over this app's older "a scheduled
+     session is quiet" rule, so every session reads as a filled teal tile and
+     STATE IS A MARKER INSIDE THE TILE instead of the tile's colour. The roll
+     queue above the board is what carries "needs attention" now. */
+  --fc-pulse-event: var(--primary);
+  --fc-pulse-event-contrast: var(--primary-foreground);
+  --fc-pulse-background-event: var(--muted);
+  --fc-pulse-highlight: color-mix(in oklab, var(--primary) 14%, transparent);
+
+  /* NOT --primary, and not red either.
+     A teal now-line over solid teal tiles is invisible, which is the direct
+     cost of the solid-tile decision above. Red is --destructive in this app
+     and --warning already means "roll due" on this very screen, so the line
+     gets a strong neutral: it is a locator, not a state. */
+  --fc-pulse-now: var(--foreground);
+
+  /* ── Controls — the view switch pulse draws for itself ────────────────── */
+  --fc-pulse-unselected: var(--muted);
+  --fc-pulse-unselected-foreground: var(--muted-foreground);
+  --fc-pulse-selected: var(--card);
+  --fc-pulse-selected-foreground: var(--card-foreground);
+
+  /* ── Neutral backgrounds ──────────────────────────────────────────────
+     color-mix over --foreground, not fixed black/white alphas: this is the
+     one reason no .dark block is needed. */
+  --fc-pulse-background: var(--card);
+  --fc-pulse-faint: color-mix(in oklab, var(--foreground) 3%, transparent);
+  --fc-pulse-muted: color-mix(in oklab, var(--foreground) 7%, transparent);
+  --fc-pulse-strong: color-mix(in oklab, var(--foreground) 12%, transparent);
+  --fc-pulse-stronger: color-mix(in oklab, var(--foreground) 16%, transparent);
+  --fc-pulse-strongest: color-mix(in oklab, var(--foreground) 20%, transparent);
+
+  /* ── Neutral foregrounds ──────────────────────────────────────────────── */
+  --fc-pulse-foreground: var(--card-foreground);
+  --fc-pulse-faint-foreground: color-mix(in oklab, var(--muted-foreground) 65%, transparent);
+  --fc-pulse-muted-foreground: var(--muted-foreground);
+
+  /* ── Borders ──────────────────────────────────────────────────────────── */
+  --fc-pulse-border: var(--border);
+  --fc-pulse-strong-border: color-mix(in oklab, var(--border) 55%, var(--foreground));
+  --fc-pulse-border-style: solid;
+  --fc-pulse-ring-color: var(--ring);
+}
+
+/* ── The one state that is not a marker ───────────────────────────────────
+   CANCELLED keeps a treatment rather than a word, deliberately: an auditor
+   reads a cancelled session as "the meeting did not happen", and that is a
+   different claim from "it happened and here is the roll". Every other state
+   — scheduled, taken, missed — reads from the marker in the tile.
+
+   These classes are applied by `eventClass` in AppScheduleCalendar.vue, so
+   they are ours and cannot be minified out from under us. */
+
+.sl-calendar .sl-cancelled {
+  --fc-event-color: var(--muted);
+  --fc-event-contrast-color: var(--muted-foreground);
+}
+
+.sl-calendar .sl-cancelled .sl-event-title {
+  text-decoration: line-through;
+}
