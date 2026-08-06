@@ -81,21 +81,34 @@ const options = computed(() => ({
 
 <template>
   <FcCalendar :options="options">
-    <!-- The panel heading already says "Today", so the day header carries the
-         actual date instead of repeating it. Level 1 is the trailing cell a
-         list day-header also renders — see AppResidentSchedule for the branch. -->
+    <!-- Pulse highlights TODAY's list day-header with its own cushion, so the
+         label leans into that rather than fighting it: "Today" in primary,
+         with the date as the quiet trailing cell (level 1 — see
+         AppResidentSchedule for why the branch is required). -->
     <template #listDayHeaderContent="arg">
-      <span v-if="!arg.level" class="text-muted-foreground">
+      <span v-if="!arg.level" :class="arg.isToday && 'text-primary font-semibold'">
+        {{ humanDate(localDateKeyOf(arg.date), { short: true }) }}
+      </span>
+      <span v-else class="text-muted-foreground text-[11px]">
         {{ humanDate(localDateKeyOf(arg.date), { short: true, relative: false }) }}
       </span>
-      <span v-else />
     </template>
 
+    <!-- The cohort word rides INSIDE the title span rather than as a third
+         child — a separate span wraps above the title when the column is
+         narrow, which read as a floating label. Inline, it truncates with
+         the title as one line. -->
+    <!-- INLINE style, not a utility class: pulse's stylesheets are unlayered
+         and beat Tailwind's layered rules (see nuxt.config), so its nowrap
+         wins over `whitespace-normal`. Wrapping matters here — this column is
+         narrow and a clipped title is worse than a second line. -->
     <template #eventContent="arg">
       <span :class="arg.timeClass" class="tabular-nums">{{ arg.timeText }}</span>
-      <span :class="arg.titleClass">{{ arg.event.title }}</span>
-      <span class="text-muted-foreground shrink-0 text-[11px]">
-        {{ arg.event.extendedProps.cohortLabel }}
+      <span :class="arg.titleClass" style="white-space: normal">
+        {{ arg.event.title }}
+        <span class="text-muted-foreground text-[11px]" style="white-space: nowrap">
+          · {{ arg.event.extendedProps.cohortLabel }}
+        </span>
       </span>
     </template>
   </FcCalendar>

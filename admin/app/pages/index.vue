@@ -225,9 +225,18 @@ const quietDay = computed(
     <p v-if="pending" class="text-muted-foreground text-sm">Loading…</p>
 
     <div v-else class="flex min-w-0 flex-col gap-4">
-      <!-- ── Status cards ─────────────────────────────────────────────────── -->
+      <!-- ── Status cards ─────────────────────────────────────────────────
+           Each card is a LINK to the page that explains its figure — a card
+           that names a number should take you to where you act on it. Hover
+           and focus states say so; the border warms to primary rather than
+           the card lifting, which is the preset's own idiom. -->
       <div class="grid gap-3 sm:grid-cols-3">
-        <div class="bg-card flex items-center gap-3.5 rounded-md border p-4">
+        <NuxtLink
+          to="/sign-outs"
+          class="bg-card hover:border-primary/40 hover:bg-muted/30 focus-visible:ring-ring/30
+            flex items-center gap-3.5 rounded-md border p-4 outline-none transition-colors
+            focus-visible:ring-3"
+        >
           <div
             class="flex size-10 shrink-0 items-center justify-center rounded-lg"
             :class="overdueCount ? 'bg-destructive/10 text-destructive' : 'bg-primary/10 text-primary'"
@@ -235,7 +244,9 @@ const quietDay = computed(
             <DoorOpen class="size-5" />
           </div>
           <div>
-            <p class="text-xl leading-tight font-semibold tabular-nums">{{ signedOut.length }}</p>
+            <p class="text-2xl leading-tight font-semibold tracking-tight tabular-nums">
+              {{ signedOut.length }}
+            </p>
             <p class="text-muted-foreground text-xs">
               signed out
               <template v-if="overdueCount">
@@ -243,27 +254,39 @@ const quietDay = computed(
               </template>
             </p>
           </div>
-        </div>
+        </NuxtLink>
 
-        <div class="bg-card flex items-center gap-3.5 rounded-md border p-4">
+        <NuxtLink
+          to="/census"
+          class="bg-card hover:border-primary/40 hover:bg-muted/30 focus-visible:ring-ring/30
+            flex items-center gap-3.5 rounded-md border p-4 outline-none transition-colors
+            focus-visible:ring-3"
+        >
           <div class="bg-primary/10 text-primary flex size-10 shrink-0 items-center justify-center rounded-lg">
             <BedDouble class="size-5" />
           </div>
           <div>
-            <p class="text-xl leading-tight font-semibold tabular-nums">{{ bedsFree.total }}</p>
+            <p class="text-2xl leading-tight font-semibold tracking-tight tabular-nums">
+              {{ bedsFree.total }}
+            </p>
             <p class="text-muted-foreground text-xs">
               {{ bedsFree.total === 1 ? 'bed free' : 'beds free' }}
               <template v-if="bedsFree.total"> · {{ bedsFree.sub }}</template>
             </p>
           </div>
-        </div>
+        </NuxtLink>
 
-        <div class="bg-card flex items-center gap-3.5 rounded-md border p-4">
+        <NuxtLink
+          to="/residents"
+          class="bg-card hover:border-primary/40 hover:bg-muted/30 focus-visible:ring-ring/30
+            flex items-center gap-3.5 rounded-md border p-4 outline-none transition-colors
+            focus-visible:ring-3"
+        >
           <div class="bg-primary/10 text-primary flex size-10 shrink-0 items-center justify-center rounded-lg">
             <CircleDollarSign class="size-5" />
           </div>
           <div>
-            <p class="text-xl leading-tight font-semibold tabular-nums">
+            <p class="text-2xl leading-tight font-semibold tracking-tight tabular-nums">
               {{ money(balances.totalCents) }}
             </p>
             <p class="text-muted-foreground text-xs">
@@ -275,7 +298,7 @@ const quietDay = computed(
               <template v-else>outstanding · nobody owes</template>
             </p>
           </div>
-        </div>
+        </NuxtLink>
       </div>
 
       <!-- ── Two columns, left wider ──────────────────────────────────────── -->
@@ -285,9 +308,15 @@ const quietDay = computed(
             Nothing needs attention. Everyone is on property and paid up.
           </p>
 
-          <!-- Needs attention: the bell's action items, priority-ordered. -->
+          <!-- Needs attention: the bell's action items, priority-ordered.
+               ONE amber signal, on the panel eyebrow — an inset rule on every
+               row made urgency read as wallpaper, and a panel whose title
+               already says "needs attention" does not need each row shouting
+               it again. The destructive inset below keeps its meaning by
+               being the only inset left on the page. -->
           <section v-if="attention.length" class="bg-card rounded-md border">
-            <div class="flex items-baseline gap-2 px-4 pt-3 pb-2">
+            <div class="flex items-center gap-2 px-4 pt-3 pb-2">
+              <span class="bg-warning size-1.5 shrink-0 rounded-full" aria-hidden="true" />
               <h2 class="text-muted-foreground text-[10.5px] font-semibold tracking-[0.1em] uppercase">
                 Needs attention
               </h2>
@@ -299,7 +328,7 @@ const quietDay = computed(
               v-for="row in attention"
               :key="row.key"
               :to="row.to"
-              class="hover:bg-muted/50 flex min-h-12 flex-wrap items-center gap-x-3 gap-y-0.5 border-t px-4 py-2 shadow-[inset_3px_0_0_var(--warning)]"
+              class="hover:bg-muted/50 flex min-h-12 flex-wrap items-center gap-x-3 gap-y-0.5 border-t px-4 py-2.5 transition-colors"
             >
               <span
                 class="text-muted-foreground w-14 shrink-0 text-[10.5px] font-semibold tracking-[0.06em] uppercase"

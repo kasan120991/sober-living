@@ -1058,6 +1058,15 @@ Decisions with teeth, each chosen explicitly:
   and Record payment are hidden (not disabled) for techs; the server refuses either
   regardless.
 
+**Polish pass (2026-08-06), two rules worth keeping:** the attention panel carries ONE
+amber signal — a dot on its eyebrow — and its rows are quiet; an inset rule on every row
+made urgency read as wallpaper, so the destructive inset on an overdue sign-out card is
+now the only inset on the page, which is what gives it meaning. And the three status
+cards are LINKS to the page that explains their figure (sign-outs, census, residents) —
+a card that names a number should take you where you act on it. One trap hit in
+`AppTodaySchedule`: pulse's stylesheets are unlayered and beat Tailwind utilities, so
+overriding its nowrap on event titles takes an inline style, not a class.
+
 **Deliberately excluded, so they are not "added later" casually:** an occupancy-over-time
 trend (needs replaying `bed_assignments` history per day — a report, not a page read) and
 a true attendance rate (whether EXCUSED counts is facility policy nobody has set; the
