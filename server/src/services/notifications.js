@@ -1,11 +1,7 @@
 import { prisma } from '../db/client.js'
-import {
-  BED_STATUS,
-  MAINTENANCE_PRIORITY,
-  MAINTENANCE_STATUS,
-  STAY_STATUS,
-} from '../domain/constants.js'
+import { BED_STATUS, STAY_STATUS } from '../domain/constants.js'
 import { formatFacilityTime } from '../lib/facilityTime.js'
+import { urgentOpenWhere } from './maintenance.js'
 import { overdueWhere } from './signOuts.js'
 
 /**
@@ -56,10 +52,7 @@ export async function listNotifications() {
     }),
 
     prisma.maintenanceRequest.findMany({
-      where: {
-        priority: MAINTENANCE_PRIORITY.URGENT,
-        status: { in: [MAINTENANCE_STATUS.OPEN, MAINTENANCE_STATUS.IN_PROGRESS] },
-      },
+      where: urgentOpenWhere(),
       include: { apartment: { select: { id: true, name: true } } },
       orderBy: { reportedAt: 'asc' },
     }),

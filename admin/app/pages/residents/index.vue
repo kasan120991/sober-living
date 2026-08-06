@@ -1,5 +1,5 @@
 <script setup>
-import { Ellipsis } from '@lucide/vue'
+import { Ellipsis, UserPlus } from '@lucide/vue'
 import { isoDate } from '~/composables/useResidents.js'
 import { money, inCredit } from '~/utils/money.js'
 import { STAFF_ROLE } from '~/utils/roles.js'
@@ -30,6 +30,10 @@ const cohort = ref('ALL')
 const canManage = computed(() =>
   [STAFF_ROLE.ADMIN, STAFF_ROLE.HOUSE_MANAGER].includes(user.value?.role),
 )
+
+// The intake dialog is shared with the dashboard's quick actions now, so it
+// takes v-model:open and this page provides its own trigger.
+const intakeOpen = ref(false)
 
 const { refresh: refreshNotifications } = useNotifications()
 
@@ -126,8 +130,12 @@ const shownCapacity = computed(() => {
       <template v-else>Everyone has a bed.</template>
     </template>
     <template #actions>
-      <AppResidentIntake v-if="canManage" @intaken="load" />
+      <Button v-if="canManage" size="sm" @click="intakeOpen = true">
+        <UserPlus class="size-4" /> Intake
+      </Button>
     </template>
+
+    <AppResidentIntake v-if="canManage" v-model:open="intakeOpen" @intaken="load" />
 
     <!-- min-w-0: a flex child defaults to min-width:auto, which lets the table
          push this column wider than the viewport. -->

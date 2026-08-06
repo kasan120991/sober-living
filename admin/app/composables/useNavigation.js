@@ -7,6 +7,7 @@ import {
   HandHeart,
   Home,
   IdCard,
+  LayoutDashboard,
   Pill,
   Plane,
   ScrollText,
@@ -38,8 +39,10 @@ const GROUPS = [
   {
     id: 'main',
     items: [
-      // The landing page is the census board, and the nav names it as such.
-      { label: 'Census', icon: Home, to: '/', roles: ALL_STAFF },
+      // The dashboard is the landing page (2026-08-05); the census board —
+      // home before that — lives at /census, still named by its domain term.
+      { label: 'Dashboard', icon: LayoutDashboard, to: '/', roles: ALL_STAFF },
+      { label: 'Census', icon: Home, to: '/census', roles: ALL_STAFF },
       { label: 'Residents', icon: Users, to: '/residents', roles: ALL_STAFF },
     ],
   },

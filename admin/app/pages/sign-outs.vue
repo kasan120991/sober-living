@@ -1,5 +1,5 @@
 <script setup>
-import { Ellipsis, Undo2 } from '@lucide/vue'
+import { DoorOpen, Ellipsis, Undo2 } from '@lucide/vue'
 import {
   facilityDateOf,
   formatFacilityTime,
@@ -64,6 +64,10 @@ const returnedToday = computed(() =>
 
 const outIds = computed(() => (data.value?.open ?? []).map((s) => s.resident.id))
 
+// The dialog is shared with the dashboard's quick actions now, so it takes
+// v-model:open and this page provides its own trigger.
+const signOutOpen = ref(false)
+
 const busy = ref(null)
 
 async function markBack(s) {
@@ -105,8 +109,17 @@ async function remove(s) {
       <template v-else>Everyone is on property.</template>
     </template>
     <template #actions>
-      <AppSignOutDialog :residents="residents" :out-ids="outIds" @recorded="load" />
+      <Button size="sm" @click="signOutOpen = true">
+        <DoorOpen class="size-4" /> Sign someone out
+      </Button>
     </template>
+
+    <AppSignOutDialog
+      v-model:open="signOutOpen"
+      :residents="residents"
+      :out-ids="outIds"
+      @recorded="load"
+    />
 
     <p v-if="pending" class="text-muted-foreground text-sm">Loading…</p>
 

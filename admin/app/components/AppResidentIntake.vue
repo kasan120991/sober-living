@@ -10,9 +10,14 @@
 // four screens to fix a typo in the first one is how forms get abandoned.
 // Nothing is submitted until Complete intake, and the whole thing lands in one
 // transaction on the server.
-import { Check, ChevronLeft, ChevronRight, MapPin, Phone, Shield, User, UserPlus } from '@lucide/vue'
+import { Check, ChevronLeft, ChevronRight, MapPin, Phone, Shield, User } from '@lucide/vue'
 
-const emit = defineEmits(['intaken'])
+// Takes v-model:open and no trigger of its own — the roster and the
+// dashboard's quick actions both open it (module 1's shared-dialog rule).
+const props = defineProps({
+  open: { type: Boolean, default: false },
+})
+const emit = defineEmits(['update:open', 'intaken'])
 const { intakeResident, availableBeds, listPrograms } = useResidents()
 const notify = useNotify()
 
@@ -23,7 +28,10 @@ const SECTIONS = [
   { key: 'insurance', label: 'Insurance', icon: Shield },
 ]
 
-const open = ref(false)
+const open = computed({
+  get: () => props.open,
+  set: (v) => emit('update:open', v),
+})
 const pending = ref(false)
 const error = ref('')
 const section = ref('personal')
@@ -128,10 +136,6 @@ async function submit() {
 
 <template>
   <Dialog v-model:open="open">
-    <DialogTrigger as-child>
-      <Button size="sm"><UserPlus class="size-4" /> Intake</Button>
-    </DialogTrigger>
-
     <DialogContent class="gap-0 p-0 sm:max-w-[720px]">
       <DialogHeader class="border-b px-5 py-4">
         <DialogTitle>Intake a resident</DialogTitle>

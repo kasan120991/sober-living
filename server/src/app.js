@@ -18,6 +18,7 @@ import notificationsRouter from './routes/notifications.js'
 import searchRouter from './routes/search.js'
 import residentsRouter from './routes/residents.js'
 import censusRouter from './routes/census.js'
+import dashboardRouter from './routes/dashboard.js'
 import signOutsRouter from './routes/signOuts.js'
 import scheduleRouter from './routes/schedule.js'
 import serviceRouter from './routes/service.js'
@@ -75,6 +76,7 @@ export function createApp() {
   app.use('/search', searchRouter)
   app.use('/residents', residentsRouter)
   app.use('/census', censusRouter)
+  app.use('/dashboard', dashboardRouter)
   app.use('/sign-outs', signOutsRouter)
   app.use('/schedule', scheduleRouter)
   app.use('/service', serviceRouter)

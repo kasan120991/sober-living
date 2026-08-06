@@ -1,9 +1,10 @@
 <script setup>
-import { DoorOpen } from '@lucide/vue'
 import { FACILITY_TIMEZONE, facilityTimeNow } from '~/utils/facilityTime.js'
 
 /**
- * Record a sign-out. Owns its trigger — only the Sign-Outs page opens it.
+ * Record a sign-out. Takes `v-model:open` and no trigger of its own — the
+ * Sign-Outs page and the dashboard's quick actions both open it, which is
+ * module 1's dialog rule and the case it exists for.
  *
  * Times are wall-clock strings the SERVER interprets in the facility
  * timezone. Dates stay implicit (today) for hallway speed, with one
@@ -11,17 +12,21 @@ import { FACILITY_TIMEZONE, facilityTimeNow } from '~/utils/facilityTime.js'
  * midnight, so it is sent as tomorrow.
  */
 const props = defineProps({
+  open: { type: Boolean, default: false },
   /** Active roster rows: { id, fullName } minimum. */
   residents: { type: Array, default: () => [] },
   /** Residents who already have an open sign-out. */
   outIds: { type: Array, default: () => [] },
 })
-const emit = defineEmits(['recorded'])
+const emit = defineEmits(['update:open', 'recorded'])
 
 const { recordSignOut } = useSignOuts()
 const notify = useNotify()
 
-const open = ref(false)
+const open = computed({
+  get: () => props.open,
+  set: (v) => emit('update:open', v),
+})
 const pending = ref(false)
 const error = ref('')
 const form = reactive({
@@ -80,9 +85,6 @@ async function submit() {
 
 <template>
   <Dialog v-model:open="open">
-    <DialogTrigger as-child>
-      <Button size="sm"><DoorOpen class="size-4" /> Sign someone out</Button>
-    </DialogTrigger>
     <DialogContent class="sm:max-w-[460px]">
       <DialogHeader>
         <DialogTitle>Sign someone out</DialogTitle>

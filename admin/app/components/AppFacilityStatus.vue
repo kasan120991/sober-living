@@ -34,7 +34,7 @@ const tone = computed(() => {
     v-if="status"
     to="/"
     class="text-muted-foreground hover:bg-muted hidden shrink-0 items-center gap-2 rounded-full px-2.5 py-1 text-[12.5px] whitespace-nowrap transition-colors sm:flex"
-    :aria-label="`${status.count} ${status.label} — open the census`"
+    :aria-label="`${status.count} ${status.label} — open the dashboard`"
   >
     <span class="size-1.5 rounded-full" :class="tone.pip" aria-hidden="true" />
     <span><span class="font-semibold tabular-nums" :class="tone.text">{{ status.count }}</span>

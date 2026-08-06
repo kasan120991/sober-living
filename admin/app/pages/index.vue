@@ -1,36 +1,72 @@
 <script setup>
-import { UserPlus } from '@lucide/vue'
+// The landing page (decided 2026-08-05, from a rendered mock Kasan specified):
+// a greeting header with quick actions, three status cards, then two columns —
+// needs-attention, sign-outs and outstanding balances on the left, the next
+// seven days of the schedule on the right. The census board this replaced as
+// home lives at /census, one tap away in the nav.
+//
+// Everything renders from ONE read (GET /dashboard), which composes the same
+// derivations the bell, the pill and the module pages use — so a row here and
+// its source page cannot disagree. The roster is fetched alongside it only to
+// feed the quick-action dialogs' resident pickers.
+//
+// Names appear on this page (it is a work queue, like /service), and the
+// overdue row carries its destination (the bell's rule: whoever acts on it
+// needs to know where to start looking). Nothing clinical belongs here, ever —
+// this screen greets every unlock.
+import {
+  BedDouble,
+  ChevronDown,
+  CircleDollarSign,
+  CreditCard,
+  DoorOpen,
+  HandHeart,
+  Plus,
+  UserPlus,
+} from '@lucide/vue'
 import { isoDate } from '~/composables/useResidents.js'
-import { formatFacilityTime, overdueLabel, presenceState } from '~/utils/facilityTime.js'
+import {
+  facilityDateNow,
+  facilityTimeNow,
+  formatFacilityTime,
+  humanDate,
+  overdueLabel,
+  presenceState,
+} from '~/utils/facilityTime.js'
+import { money } from '~/utils/money.js'
+import { cohortsLabel } from '~/utils/schedule.js'
 import { STAFF_ROLE } from '~/utils/roles.js'
 
-// The bed board — variant A of the census mocks. Chosen over a table because
-// this screen replaces a whiteboard, and a whiteboard's virtue is that absence
-// is visible: an empty tile and an out-of-service hole read at a glance, which
-// a thin table row does not.
-//
-// Occupied tiles will grow a presence chip (in house / out until / OVERDUE /
-// on pass) when sign-outs and passes exist. Until then a chip on every tile
-// would say "In house" seven times, so there is none.
-const { getCensus } = useCensus()
+const { getDashboard } = useDashboard()
+const { listResidents } = useResidents()
 const { refresh: refreshNotifications } = useNotifications()
 const { refresh: refreshStatus } = useFacilityStatus()
 const { user } = useAuth()
 
-// Presentation only. Every staff role reads this board, but only these two may
-// place anyone — `managers` on POST /residents/:id/bed is the real boundary,
-// asserted in verify-residents.js.
+// Presentation only — intake and ledger posting are manager acts server-side.
 const canManage = computed(() =>
   [STAFF_ROLE.ADMIN, STAFF_ROLE.HOUSE_MANAGER].includes(user.value?.role),
 )
 
 const data = ref(null)
+const residents = ref([])
 const pending = ref(true)
 
+async function load() {
+  // First load only — a realtime refresh must not blank the page it updates.
+  pending.value = !data.value
+  ;[data.value, residents.value] = await Promise.all([
+    getDashboard(),
+    listResidents().then((r) => r.residents),
+  ])
+  pending.value = false
+  refreshNotifications()
+}
+await load()
+onRealtimeChanged(load)
+
 // A sign-out becoming overdue mutates nothing — no write, no socket event —
-// so the board keeps its own clock. Each tick re-derives every chip from
-// expectedReturnAt, and nudges the pill and bell so all three cross the
-// threshold together.
+// so the page keeps its own clock, like the census and sign-outs pages.
 const now = ref(Date.now())
 let tick = null
 onMounted(() => {
@@ -42,243 +78,370 @@ onMounted(() => {
 })
 onUnmounted(() => clearInterval(tick))
 
-/** Chip for an occupied tile, or null — in-house tiles stay quiet. */
-function chipFor(bed) {
-  if (!bed.presence || !bed.presence.expectedReturnAt) return null
-  return presenceState(bed.presence, now.value) === 'OVERDUE'
-    ? { state: 'OVERDUE', text: `Overdue ${overdueLabel(bed.presence.expectedReturnAt, now.value)}` }
-    : { state: 'OUT', text: `Out · back ${formatFacilityTime(bed.presence.expectedReturnAt)}` }
-}
+// ── The greeting ────────────────────────────────────────────────────────────
+// On the FACILITY clock, not the browser's — a manager checking in from
+// another timezone reads the house's time of day, consistent with every other
+// clock in the app.
+const greeting = computed(() => {
+  const hour = Number(facilityTimeNow().slice(0, 2))
+  const part = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening'
+  const first = user.value?.fullName?.split(' ')[0]
+  return first ? `Good ${part}, ${first}` : `Good ${part}`
+})
+const dateLine = computed(() => humanDate(facilityDateNow(), { relative: false }))
 
-async function load() {
-  // First load only — a realtime refresh must not blank the board it updates.
-  pending.value = !data.value
-  data.value = await getCensus()
-  pending.value = false
+// ── Sign-outs, against the ticking clock ────────────────────────────────────
+const signedOut = computed(() => data.value?.signedOut ?? [])
+const isOverdue = (s) =>
+  presenceState({ expectedReturnAt: s.expectedReturnAt }, now.value) === 'OVERDUE'
+const overdueCount = computed(() => signedOut.value.filter(isOverdue).length)
 
-  // Same reasoning as the roster: assigning a bed from this screen must not
-  // leave a stale "no bed" notification. Not awaited — the board never waits
-  // on the bell.
-  refreshNotifications()
-}
-await load()
+const outIds = computed(() => signedOut.value.map((s) => s.resident.id))
 
-// The census is the screen most worth keeping live: another device assigning
-// a bed, an intake, a discharge — all land here without a navigation.
-onRealtimeChanged(load)
-
-// Out and overdue are re-counted client-side against the ticking clock, so
-// the figures always agree with the chips below them.
-const liveCounts = computed(() => {
-  const counts = { out: 0, overdue: 0 }
-  for (const a of data.value?.apartments ?? []) {
-    for (const b of a.beds) {
-      const chip = chipFor(b)
-      if (chip?.state === 'OUT') counts.out += 1
-      if (chip?.state === 'OVERDUE') counts.overdue += 1
-    }
+// ── Status cards ────────────────────────────────────────────────────────────
+const capacity = computed(() => data.value?.capacity ?? null)
+// One figure with the split beside it — never a bare total, because a free
+// women's bed cannot take a man. The sub-label is what keeps the cohort rule.
+const bedsFree = computed(() => {
+  const c = capacity.value
+  if (!c) return { total: 0, sub: '' }
+  return {
+    total: c.MEN.free + c.WOMEN.free,
+    sub: `${c.MEN.free} men · ${c.WOMEN.free} women`,
   }
-  return counts
 })
 
-// ── Assigning from a free tile ──────────────────────────────────────────────
-// `unhoused` has been in the census response all along and rendered nowhere.
-// The tile is what uses it: a free bed becomes a button exactly when someone of
-// its cohort is waiting, so clickability itself says where they can go. There is
-// still no unhoused list on this page — see the note above the apartments.
-const unhousedByCohort = computed(() => {
-  const by = {}
-  for (const r of data.value?.unhoused ?? []) (by[r.cohort] ??= []).push(r)
-  return by
-})
+const balances = computed(() => data.value?.balances ?? { totalCents: 0, owing: [] })
 
-/** Scalars only — the dialog is a sibling and takes no objects. */
-const assignFor = ref(null)
-
-// A computed, not a snapshot taken when the dialog opened. That is what makes
-// the list shrink under an open dialog when another device places someone, and
-// it is half of the guard against assign-or-move quietly becoming a move.
-const candidates = computed(() => unhousedByCohort.value[assignFor.value?.cohort] ?? [])
-
-const assignable = (apartment) =>
-  canManage.value && (unhousedByCohort.value[apartment.cohort]?.length ?? 0) > 0
-
-// Quiet figures only get colour (or pixels) when they are the thing to act
-// on. A quiet house costs no pixels.
-const figures = computed(() => {
-  const f = data.value?.figures
-  if (!f) return []
-  const live = liveCounts.value
+// ── Needs attention ─────────────────────────────────────────────────────────
+// The bell's action items as a panel, in the pill's priority order — minus
+// overdue sign-outs (the panel below carries them; one situation should not be
+// two rows) and minus community service (left out by request; /service and the
+// rail's amber dot carry it).
+// Rolls are the one unbounded kind — a house that has never taken a roll owes
+// a fortnight × two cohorts of them, and thirty roll rows would bury the one
+// urgent repair beneath them. So rolls are capped IN PLACE (oldest first, the
+// server's order) with an overflow row pointing at the schedule board, while
+// unhoused residents and urgent repairs always all render — both are
+// structurally small, and hiding either is hiding a person or a hazard.
+const ROLLS_SHOWN = 5
+const attention = computed(() => {
+  const a = data.value?.attention
+  if (!a) return []
+  const rollRows = a.needsRoll.map((s) => ({
+    key: `roll:${s.eventId}|${s.date}`,
+    kind: 'Roll',
+    title: s.title,
+    chip: cohortsLabel(s.cohorts),
+    meta: `${humanDate(s.date, { short: true })} · ${formatFacilityTime(s.startsAt)} · ${s.rosterCount} on roster`,
+    to: '/schedule',
+  }))
+  const rollOverflow =
+    rollRows.length > ROLLS_SHOWN
+      ? [{
+          key: 'roll:overflow',
+          kind: 'Roll',
+          title: `${rollRows.length - ROLLS_SHOWN} more rolls due`,
+          chip: null,
+          meta: 'Schedule →',
+          to: '/schedule',
+        }]
+      : []
   return [
-    { key: 'occupied', value: f.occupied, of: f.beds, label: 'beds occupied' },
-    { key: 'free', value: f.free, label: f.free === 1 ? 'bed free' : 'beds free', tone: f.free === 0 ? 'text-warning' : 'text-success' },
-    live.overdue
-      ? { key: 'overdue', value: live.overdue, label: 'overdue', tone: 'text-destructive' }
-      : null,
-    live.out ? { key: 'out', value: live.out, label: live.out === 1 ? 'signed out' : 'signed out' } : null,
-    f.outOfService
-      ? { key: 'oos', value: f.outOfService, label: 'out of service' }
-      : null,
-    f.awaitingBed
-      ? { key: 'awaiting', value: f.awaitingBed, label: 'awaiting a bed', tone: 'text-warning' }
-      : null,
-  ].filter(Boolean)
+    ...a.unhoused.map((r) => ({
+      key: `unhoused:${r.id}`,
+      kind: 'Bed',
+      title: r.fullName,
+      chip: r.cohort === 'MEN' ? 'Men' : 'Women',
+      // freeBed.label already names the apartment ("Apt 14 · C").
+      meta: r.freeBed ? `${r.freeBed.label} free` : 'No free bed',
+      to: `/residents/${r.id}`,
+    })),
+    ...rollRows.slice(0, ROLLS_SHOWN),
+    ...rollOverflow,
+    ...a.urgentMaintenance.map((r) => ({
+      key: `urgent:${r.id}`,
+      kind: 'Repair',
+      title: r.title,
+      chip: null,
+      meta: `${r.apartment.name} · reported ${humanDate(isoDate(r.reportedAt), { short: true })}`,
+      to: `/apartments/${r.apartment.id}`,
+    })),
+  ]
 })
+
+// The header badge counts situations, not rendered rows — the overflow row is
+// navigation, and the capped rolls are still situations.
+const attentionCount = computed(() => {
+  const a = data.value?.attention
+  if (!a) return 0
+  return a.unhoused.length + a.needsRoll.length + a.urgentMaintenance.length
+})
+
+// ── Quick actions ───────────────────────────────────────────────────────────
+// One dialog per action, all siblings of the page — the dropdown only opens
+// them. Intake and payment are hidden (not disabled) for techs: the server
+// refuses either regardless, and a menu item that can never succeed teaches
+// nothing.
+const signOutOpen = ref(false)
+const serviceOpen = ref(false)
+const intakeOpen = ref(false)
+const paymentOpen = ref(false)
+
+const quietDay = computed(
+  () => !attention.value.length && !signedOut.value.length && !balances.value.owing.length,
+)
 </script>
 
 <template>
-  <AppPage title="Census" description="Who is in which bed right now.">
-    <div class="flex min-w-0 flex-col gap-4">
-      <p v-if="pending" class="text-muted-foreground text-sm">Loading…</p>
+  <AppPage :title="greeting" :description="dateLine">
+    <template #actions>
+      <DropdownMenu>
+        <DropdownMenuTrigger as-child>
+          <Button size="sm">
+            <Plus class="size-4" /> Quick actions <ChevronDown class="size-3.5 opacity-70" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" class="w-52">
+          <DropdownMenuItem @click="signOutOpen = true">
+            <DoorOpen class="size-4" /> New sign-out
+          </DropdownMenuItem>
+          <DropdownMenuItem @click="serviceOpen = true">
+            <HandHeart class="size-4" /> Log service hours
+          </DropdownMenuItem>
+          <template v-if="canManage">
+            <DropdownMenuSeparator />
+            <DropdownMenuItem @click="intakeOpen = true">
+              <UserPlus class="size-4" /> Intake resident
+            </DropdownMenuItem>
+            <DropdownMenuItem @click="paymentOpen = true">
+              <CreditCard class="size-4" /> Record payment
+            </DropdownMenuItem>
+          </template>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </template>
 
-      <template v-else>
-        <div class="flex flex-wrap items-end gap-x-7 gap-y-2">
-          <div v-for="f in figures" :key="f.key">
-            <p class="text-xl leading-tight font-semibold tabular-nums" :class="f.tone">
-              {{ f.value }}<span v-if="f.of" class="text-muted-foreground text-sm font-normal">/{{ f.of }}</span>
+    <p v-if="pending" class="text-muted-foreground text-sm">Loading…</p>
+
+    <div v-else class="flex min-w-0 flex-col gap-4">
+      <!-- ── Status cards ─────────────────────────────────────────────────── -->
+      <div class="grid gap-3 sm:grid-cols-3">
+        <div class="bg-card flex items-center gap-3.5 rounded-md border p-4">
+          <div
+            class="flex size-10 shrink-0 items-center justify-center rounded-lg"
+            :class="overdueCount ? 'bg-destructive/10 text-destructive' : 'bg-primary/10 text-primary'"
+          >
+            <DoorOpen class="size-5" />
+          </div>
+          <div>
+            <p class="text-xl leading-tight font-semibold tabular-nums">{{ signedOut.length }}</p>
+            <p class="text-muted-foreground text-xs">
+              signed out
+              <template v-if="overdueCount">
+                · <span class="text-destructive font-semibold">{{ overdueCount }} overdue</span>
+              </template>
             </p>
-            <p class="text-muted-foreground text-xs">{{ f.label }}</p>
           </div>
         </div>
 
-        <!-- No unhoused banner, by request: the figures row counts whoever is
-             awaiting a bed, and the bell carries the names and the action. -->
-
-        <div v-for="a in data.apartments" :key="a.id" class="bg-card rounded-md border p-4">
-          <div class="mb-3 flex flex-wrap items-baseline gap-2">
-            <span class="text-sm font-semibold">{{ a.name }}</span>
-            <Badge variant="outline" class="tracking-wider text-[10px] uppercase">
-              {{ a.cohort === 'MEN' ? 'Men' : 'Women' }}
-            </Badge>
-            <span class="text-muted-foreground ml-auto text-xs tabular-nums">
-              {{ a.occupiedCount }} of {{ a.bedCount }} occupied
-            </span>
+        <div class="bg-card flex items-center gap-3.5 rounded-md border p-4">
+          <div class="bg-primary/10 text-primary flex size-10 shrink-0 items-center justify-center rounded-lg">
+            <BedDouble class="size-5" />
           </div>
+          <div>
+            <p class="text-xl leading-tight font-semibold tabular-nums">{{ bedsFree.total }}</p>
+            <p class="text-muted-foreground text-xs">
+              {{ bedsFree.total === 1 ? 'bed free' : 'beds free' }}
+              <template v-if="bedsFree.total"> · {{ bedsFree.sub }}</template>
+            </p>
+          </div>
+        </div>
 
-          <p v-if="!a.beds.length" class="text-muted-foreground text-sm">
-            No beds in this apartment yet.
+        <div class="bg-card flex items-center gap-3.5 rounded-md border p-4">
+          <div class="bg-primary/10 text-primary flex size-10 shrink-0 items-center justify-center rounded-lg">
+            <CircleDollarSign class="size-5" />
+          </div>
+          <div>
+            <p class="text-xl leading-tight font-semibold tabular-nums">
+              {{ money(balances.totalCents) }}
+            </p>
+            <p class="text-muted-foreground text-xs">
+              <template v-if="balances.owing.length">
+                outstanding ·
+                <span class="tabular-nums">{{ balances.owing.length }}</span>
+                {{ balances.owing.length === 1 ? 'resident owes' : 'residents owe' }}
+              </template>
+              <template v-else>outstanding · nobody owes</template>
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Two columns, left wider ──────────────────────────────────────── -->
+      <div class="grid items-start gap-4 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
+        <div class="flex min-w-0 flex-col gap-4">
+          <p v-if="quietDay" class="text-muted-foreground text-sm">
+            Nothing needs attention. Everyone is on property and paid up.
           </p>
 
-          <div v-else class="grid grid-cols-[repeat(auto-fill,minmax(205px,1fr))] gap-2.5">
-            <template v-for="b in a.beds" :key="b.id">
-              <!-- Occupied: the name is the tile. The chip is presence — and
-                   only when it says something: no chip means in the house. -->
-              <div
-                v-if="b.resident"
-                class="bg-background flex min-h-16 flex-col gap-0.5 rounded-md border px-3 py-2.5"
-                :class="
-                  chipFor(b)?.state === 'OVERDUE' &&
-                  'border-destructive shadow-[inset_3px_0_0_var(--destructive)]'
-                "
+          <!-- Needs attention: the bell's action items, priority-ordered. -->
+          <section v-if="attention.length" class="bg-card rounded-md border">
+            <div class="flex items-baseline gap-2 px-4 pt-3 pb-2">
+              <h2 class="text-muted-foreground text-[10.5px] font-semibold tracking-[0.1em] uppercase">
+                Needs attention
+              </h2>
+              <span class="text-xs font-semibold tabular-nums">{{ attentionCount }}</span>
+            </div>
+            <!-- flex-wrap + a basis on the title: on a phone the meta drops to
+                 its own line instead of crushing the title to one letter. -->
+            <NuxtLink
+              v-for="row in attention"
+              :key="row.key"
+              :to="row.to"
+              class="hover:bg-muted/50 flex min-h-12 flex-wrap items-center gap-x-3 gap-y-0.5 border-t px-4 py-2 shadow-[inset_3px_0_0_var(--warning)]"
+            >
+              <span
+                class="text-muted-foreground w-14 shrink-0 text-[10.5px] font-semibold tracking-[0.06em] uppercase"
               >
-                <span class="flex items-center justify-between gap-2">
-                  <span class="text-muted-foreground text-[10.5px] font-semibold tracking-[0.1em] uppercase">
-                    Bed {{ b.label }}
-                  </span>
-                  <Badge
-                    v-if="chipFor(b)"
-                    variant="outline"
-                    class="text-[10px]"
-                    :class="
-                      chipFor(b).state === 'OVERDUE'
-                        ? 'border-destructive/40 bg-destructive/15 text-destructive'
-                        : 'border-warning/40 bg-warning/15 text-warning'
-                    "
-                  >
-                    {{ chipFor(b).text }}
-                  </Badge>
-                </span>
+                {{ row.kind }}
+              </span>
+              <span class="min-w-0 flex-1 basis-40 truncate text-sm font-medium">{{ row.title }}</span>
+              <Badge v-if="row.chip" variant="outline" class="text-[10px] tracking-wider uppercase">
+                {{ row.chip }}
+              </Badge>
+              <span class="text-muted-foreground ms-auto shrink-0 text-xs tabular-nums">
+                {{ row.meta }}
+              </span>
+            </NuxtLink>
+          </section>
+
+          <!-- Signed out. Overdue re-derived each tick, so a card crosses the
+               grace window without a refetch — the census tile's pattern. -->
+          <section v-if="signedOut.length" class="bg-card rounded-md border">
+            <div class="flex items-baseline gap-2 px-4 pt-3 pb-2">
+              <h2 class="text-muted-foreground text-[10.5px] font-semibold tracking-[0.1em] uppercase">
+                Signed out
+              </h2>
+              <span class="text-xs font-semibold tabular-nums">{{ signedOut.length }}</span>
+              <NuxtLink
+                to="/sign-outs"
+                class="text-primary ms-auto text-xs font-medium underline-offset-2 hover:underline"
+              >
+                Sign-outs →
+              </NuxtLink>
+            </div>
+            <div
+              v-for="s in signedOut"
+              :key="s.id"
+              class="flex min-h-14 flex-wrap items-center gap-x-3 gap-y-1 border-t px-4 py-2.5"
+              :class="isOverdue(s) && 'border-s-destructive shadow-[inset_3px_0_0_var(--destructive)]'"
+            >
+              <div class="min-w-0 flex-1">
                 <NuxtLink
-                  :to="`/residents/${b.resident.id}`"
-                  class="text-sm font-medium underline-offset-2 hover:underline"
+                  :to="`/residents/${s.resident.id}`"
+                  class="text-sm font-semibold underline-offset-2 hover:underline"
                 >
-                  {{ b.resident.fullName }}
+                  {{ s.resident.fullName }}
                 </NuxtLink>
-                <p class="text-muted-foreground text-xs">
-                  {{ b.resident.programName ?? 'No program' }} · since {{ isoDate(b.since) }}
+                <p class="text-muted-foreground truncate text-xs">
+                  {{ s.destination }} · out {{ formatFacilityTime(s.outAt) }}
                 </p>
               </div>
-
-              <!-- Out of service: a hole, not an error — muted, with its note. -->
-              <div
-                v-else-if="b.status === 'OUT_OF_SERVICE'"
-                class="bg-muted/50 flex min-h-16 flex-col gap-0.5 rounded-md border border-dashed px-3 py-2.5"
+              <Badge
+                v-if="isOverdue(s)"
+                variant="outline"
+                class="border-destructive/40 bg-destructive/15 text-destructive text-[10px]"
               >
-                <span class="flex items-center justify-between gap-2">
-                  <span class="text-muted-foreground text-[10.5px] font-semibold tracking-[0.1em] uppercase">
-                    Bed {{ b.label }}
-                  </span>
-                  <Badge variant="outline" class="text-muted-foreground text-[10px]">Out of service</Badge>
-                </span>
-                <p class="text-muted-foreground text-xs">
-                  {{ b.outOfServiceNote || 'No note recorded' }}
-                </p>
-              </div>
-
-              <!-- Free: visible as room, the way the whiteboard showed it.
-                   And a button when somebody of this cohort is waiting, so the
-                   board shows where they can go. One element rather than a
-                   v-if/v-else pair — the inert branch is the same tile, just
-                   without the affordance. No name goes on it: the census is
-                   glanced at over a shoulder, so candidates appear only after a
-                   deliberate click, inside the dialog. -->
-              <component
-                :is="assignable(a) ? 'button' : 'div'"
+                Overdue {{ overdueLabel(s.expectedReturnAt, now) }}
+              </Badge>
+              <Badge
                 v-else
-                :type="assignable(a) ? 'button' : undefined"
-                class="flex min-h-16 flex-col gap-0.5 rounded-md border border-dashed px-3 py-2.5 text-left"
-                :class="
-                  assignable(a) &&
-                  'hover:border-success/50 hover:bg-success/5 focus-visible:border-ring focus-visible:ring-ring/30 cursor-pointer outline-none transition-colors focus-visible:ring-3'
-                "
-                :aria-label="
-                  assignable(a) ? `Assign a resident to bed ${b.label}, ${a.name}` : undefined
-                "
-                @click="
-                  assignable(a) &&
-                  (assignFor = {
-                    bedId: b.id,
-                    bedLabel: `${a.name} · Bed ${b.label}`,
-                    cohort: a.cohort,
-                  })
-                "
+                variant="outline"
+                class="border-warning/40 bg-warning/15 text-warning text-[10px]"
               >
-                <span class="flex items-center justify-between gap-2">
-                  <span class="text-muted-foreground text-[10.5px] font-semibold tracking-[0.1em] uppercase">
-                    Bed {{ b.label }}
-                  </span>
-                  <Badge variant="outline" class="border-success/40 bg-success/15 text-success text-[10px]">
-                    Free
-                  </Badge>
-                </span>
-                <p class="text-success flex items-center gap-1.5 text-sm font-medium">
-                  Available
-                  <!-- Hover does not exist on a manager's phone, so the cue has
-                       to be visible at rest. -->
-                  <UserPlus v-if="assignable(a)" class="size-3.5 opacity-70" aria-hidden="true" />
+                Out
+              </Badge>
+              <span class="text-muted-foreground shrink-0 text-xs tabular-nums">
+                {{ isOverdue(s) ? 'due' : 'back' }} {{ formatFacilityTime(s.expectedReturnAt) }}
+              </span>
+            </div>
+          </section>
+
+          <!-- Outstanding balances. "Outstanding", not "overdue" — a charge has
+               no due date until invoicing exists; this panel inherits the true
+               overdue meaning (and the red dot) when it does. -->
+          <section v-if="balances.owing.length" class="bg-card rounded-md border">
+            <div class="flex items-baseline gap-2 px-4 pt-3 pb-2">
+              <h2 class="text-muted-foreground text-[10.5px] font-semibold tracking-[0.1em] uppercase">
+                Outstanding balances
+              </h2>
+              <span class="text-xs font-semibold tabular-nums">{{ money(balances.totalCents) }}</span>
+              <NuxtLink
+                to="/residents"
+                class="text-primary ms-auto text-xs font-medium underline-offset-2 hover:underline"
+              >
+                Residents →
+              </NuxtLink>
+            </div>
+            <NuxtLink
+              v-for="r in balances.owing"
+              :key="r.residentId"
+              :to="`/residents/${r.residentId}`"
+              class="hover:bg-muted/50 flex min-h-14 items-center gap-3 border-t px-4 py-2.5"
+            >
+              <div class="min-w-0 flex-1">
+                <p class="text-sm font-semibold">{{ r.residentName }}</p>
+                <p class="text-muted-foreground truncate text-xs">
+                  {{ r.programName ?? 'No program' }} ·
+                  <template v-if="r.lastPaymentAt">
+                    last payment {{ humanDate(isoDate(r.lastPaymentAt), { short: true }) }}
+                  </template>
+                  <template v-else>no payments yet</template>
                 </p>
-              </component>
-            </template>
-          </div>
+              </div>
+              <span class="text-sm font-semibold tabular-nums">{{ money(r.balanceCents) }}</span>
+            </NuxtLink>
+          </section>
         </div>
 
-        <p v-if="!data.apartments.length" class="text-muted-foreground text-sm">
-          No apartments yet. Set up the facility under
-          <NuxtLink to="/apartments" class="underline underline-offset-2">Apartments &amp; Beds</NuxtLink>.
-        </p>
-      </template>
+        <!-- ── The week ahead ─────────────────────────────────────────────── -->
+        <section class="bg-card min-w-0 rounded-md border">
+          <div class="flex items-baseline gap-2 px-4 pt-3 pb-2">
+            <h2 class="text-muted-foreground text-[10.5px] font-semibold tracking-[0.1em] uppercase">
+              Next 7 days
+            </h2>
+            <NuxtLink
+              to="/schedule"
+              class="text-primary ms-auto text-xs font-medium underline-offset-2 hover:underline"
+            >
+              Schedule →
+            </NuxtLink>
+          </div>
+          <div class="border-t">
+            <AppUpcomingEvents :shared="data.upcoming.shared" :lanes="data.upcoming.lanes" />
+          </div>
+        </section>
+      </div>
     </div>
 
-    <!-- Sibling of the board, never inside a tile: one dialog driven by a ref,
-         the same rule the roster's row actions follow. -->
-    <AppBedAssignDialog
-      :open="Boolean(assignFor)"
-      :bed-id="assignFor?.bedId"
-      :bed-label="assignFor?.bedLabel"
-      :cohort="assignFor?.cohort"
-      :candidates="candidates"
-      @update:open="(v) => !v && (assignFor = null)"
-      @assigned="load"
+    <!-- Quick-action dialogs: siblings of the page, one each, driven by refs.
+         The service and ledger dialogs get the roster so their in-form resident
+         picker works; the sign-out dialog always had one. -->
+    <AppSignOutDialog
+      v-model:open="signOutOpen"
+      :residents="residents"
+      :out-ids="outIds"
+      @recorded="load"
+    />
+    <AppServiceEntryDialog v-model:open="serviceOpen" :residents="residents" @saved="load" />
+    <AppResidentIntake v-if="canManage" v-model:open="intakeOpen" @intaken="load" />
+    <AppLedgerEntryDialog
+      v-if="canManage"
+      v-model:open="paymentOpen"
+      :residents="residents"
+      default-type="PAYMENT"
+      @posted="load"
     />
   </AppPage>
 </template>

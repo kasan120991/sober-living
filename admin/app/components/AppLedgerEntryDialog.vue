@@ -20,6 +20,11 @@ const props = defineProps({
   defaultType: { type: String, default: 'CHARGE' },
   /** Optional context. The roster already has it; the record page passes it too. */
   balanceCents: { type: Number, default: null },
+  /**
+   * With no residentId, the form grows a resident picker — the dashboard's
+   * quick action opens this with nobody chosen yet. Rows: { id, fullName }.
+   */
+  residents: { type: Array, default: () => [] },
 })
 const emit = defineEmits(['update:open', 'posted'])
 
@@ -37,6 +42,10 @@ const blank = () => ({
   occurredAt: new Date().toISOString().slice(0, 10),
 })
 const form = reactive(blank())
+const pickedResidentId = ref('')
+
+/** The resident this entry lands on — bound by the caller, or picked in-form. */
+const effectiveResidentId = computed(() => props.residentId ?? (pickedResidentId.value || null))
 
 // Only a charge carries a category — the database enforces it, so the form
 // should not offer one where it would be rejected.
@@ -52,6 +61,7 @@ watch(
   (isOpen) => {
     if (!isOpen) return
     error.value = ''
+    pickedResidentId.value = ''
     Object.assign(form, blank())
   },
 )
@@ -60,7 +70,7 @@ async function submit() {
   error.value = ''
   busy.value = true
   try {
-    await postLedgerEntry(props.residentId, {
+    await postLedgerEntry(effectiveResidentId.value, {
       type: form.type,
       category: form.type === 'CHARGE' ? form.category : null,
       // Sent as typed. The server parses dollars to cents so one rounding rule
@@ -99,6 +109,19 @@ async function submit() {
         <Alert v-if="error" variant="destructive">
           <AlertDescription>{{ error }}</AlertDescription>
         </Alert>
+
+        <AppField v-if="!residentId" label="Resident" required>
+          <Select v-model="pickedResidentId" required>
+            <SelectTrigger class="w-full">
+              <SelectValue placeholder="Whose ledger?" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="r in residents" :key="r.id" :value="r.id">
+                {{ r.fullName }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </AppField>
 
         <div class="flex gap-3">
           <AppField label="Type" class="flex-1">
@@ -155,7 +178,7 @@ async function submit() {
 
         <DialogFooter class="border-t pt-4">
           <Button type="button" variant="ghost" @click="emit('update:open', false)">Cancel</Button>
-          <Button type="submit" :disabled="busy">Post entry</Button>
+          <Button type="submit" :disabled="busy || !effectiveResidentId">Post entry</Button>
         </DialogFooter>
       </form>
     </DialogContent>

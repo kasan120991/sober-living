@@ -1,7 +1,23 @@
 import { prisma } from '../db/client.js'
 import { HttpError } from '../middleware/authorize.js'
-import { MAINTENANCE_CLOSED_STATUSES, MAINTENANCE_STATUS } from '../domain/constants.js'
+import {
+  MAINTENANCE_CLOSED_STATUSES,
+  MAINTENANCE_PRIORITY,
+  MAINTENANCE_STATUS,
+} from '../domain/constants.js'
 import { shapeRequest } from './apartments.js'
+
+/**
+ * Urgent and still open. The bell and the dashboard both surface these, and a
+ * shared `where` is what keeps the two from ever disagreeing about which
+ * requests count — the same one-knob rule as `overdueWhere()`.
+ */
+export function urgentOpenWhere() {
+  return {
+    priority: MAINTENANCE_PRIORITY.URGENT,
+    status: { in: [MAINTENANCE_STATUS.OPEN, MAINTENANCE_STATUS.IN_PROGRESS] },
+  }
+}
 
 const WITH_PEOPLE = {
   apartment: { select: { id: true, name: true, cohort: true } },

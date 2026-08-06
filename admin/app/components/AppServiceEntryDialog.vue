@@ -17,6 +17,11 @@ const props = defineProps({
   residentName: { type: String, default: '' },
   /** When set, this is an AMENDMENT of that entry rather than a new one. */
   amending: { type: Object, default: null },
+  /**
+   * With no residentId, the form grows a resident picker — the dashboard's
+   * quick action opens this with nobody chosen yet. Rows: { id, fullName }.
+   */
+  residents: { type: Array, default: () => [] },
 })
 const emit = defineEmits(['update:open', 'saved'])
 
@@ -32,6 +37,10 @@ const form = reactive({
   note: '',
   amendmentReason: '',
 })
+const pickedResidentId = ref('')
+
+/** The resident this entry is for — bound by the caller, or picked in-form. */
+const effectiveResidentId = computed(() => props.residentId ?? (pickedResidentId.value || null))
 const pending = ref(false)
 const error = ref('')
 
@@ -40,6 +49,7 @@ watch(
   (isOpen) => {
     if (!isOpen) return
     error.value = ''
+    pickedResidentId.value = ''
     const a = props.amending
     Object.assign(form, {
       // An amendment opens pre-filled with what is being corrected, so the
@@ -58,6 +68,7 @@ watch(
 const isAmendment = computed(() => Boolean(props.amending))
 const valid = computed(
   () =>
+    Boolean(effectiveResidentId.value || isAmendment.value) &&
     form.hours !== '' &&
     Number(form.hours) >= 0 &&
     form.workedOn &&
@@ -81,7 +92,7 @@ async function submit() {
       await amendEntry(props.amending.id, { ...body, amendmentReason: form.amendmentReason.trim() })
       notify.success('Entry amended')
     } else {
-      await logHours(props.residentId, body)
+      await logHours(effectiveResidentId.value, body)
       notify.success('Hours logged')
     }
     emit('update:open', false)
@@ -112,6 +123,19 @@ async function submit() {
           record and stops counting. It starts unverified, because the sign-off was about
           figures that are changing.
         </p>
+
+        <AppField v-if="!residentId && !isAmendment" label="Resident" required>
+          <Select v-model="pickedResidentId" required>
+            <SelectTrigger class="w-full">
+              <SelectValue placeholder="Whose hours are these?" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="r in residents" :key="r.id" :value="r.id">
+                {{ r.fullName }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </AppField>
 
         <div class="flex gap-3">
           <AppField

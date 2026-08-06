@@ -39,7 +39,7 @@ Use these terms in code, schema, and UI. Do not invent synonyms.
 | **Bed** | The unit of capacity. Lives directly in an Apartment — there is no room level. Beds are assigned, not apartments. |
 | **Resident** | A person living in the facility. Prefer this over "client" or "patient" in UI. `Resident` in code. |
 | **Program** | The track a resident is on (e.g. Phase 1 / 2 / 3). Drives privileges: curfew time, pass eligibility, required service hours. |
-| **Census** | Who is in which bed right now. The single most-viewed screen, and the app's landing page. The sidebar links to it as **Census** — it was "Home" briefly, but naming the destination by the domain term is what keeps the glossary honest in the UI. |
+| **Census** | Who is in which bed right now. The single most-viewed board. It lives at `/census` — it was the landing page until **2026-08-05**, when the dashboard (module 14) took `/`; the sidebar still names it **Census**, because naming the destination by the domain term is what keeps the glossary honest in the UI. |
 | **Sign-out** | A resident leaving the property and returning the same day. Has an expected return time. |
 | **Travel pass** | An overnight or multi-day approved absence. Requires approval; bed is held. |
 | **Apartment check** | A scheduled or random inspection of an apartment. Produces a pass/fail with findings. |
@@ -131,7 +131,8 @@ a stay switcher in the rail is cheap now and awkward to retrofit.
 
 ### 2. Beds & census
 **Built.** Apartment → Bed. Assign, transfer and out-of-service live under Apartments and
-the resident record; the census board is the app's home screen — one `GET /census` read
+the resident record; the census board lives at `/census` (the landing page is the
+dashboard since 2026-08-05 — see module 14) — one `GET /census` read
 returning figures, apartments with bed tiles, and whoever is awaiting a bed. Bed history
 is permanent — we must always be able to answer "who slept in bed 12B on March 12."
 
@@ -987,6 +988,80 @@ that actually happened.
 "has no bed" is operational. A name against a screen result is a disclosure to whoever is
 standing behind the person holding the phone.
 
+### 14. Dashboard
+**Built (2026-08-05).** The landing page at `/`, replacing the census board as home —
+a deliberate reversal of the earlier decision, made knowingly: the census keeps its
+domain name, its own nav entry and its whole board at `/census`, one tap away, and the
+status pill and logo still link to `/` because the pill's figure (overdue / unplaced) is
+exactly what the dashboard's panels answer.
+
+The layout is Kasan's own, chosen from a rendered mock: a **greeting header** ("Good
+afternoon, Dana" on the **facility clock**, never the browser's) with a **Quick actions**
+menu on the right; **three icon status cards** — signed out (with overdue), beds free,
+outstanding balances; then two columns, left wider — **Needs attention**, **Signed out**
+and **Outstanding balances** panels on the left, the **next 7 days** of the schedule on
+the right as FullCalendar's list view.
+
+**One read, `GET /dashboard`, composed entirely from the modules' own derivations** —
+`listSignOuts`, `unhousedWithOptions`, `cohortCapacity`, `scheduleWindow`,
+`urgentOpenWhere()` (extracted to `services/maintenance.js` so the bell and this page
+share one knob), `balancesByStay`. A dashboard row and its source page cannot disagree,
+and `verify-dashboard.js` asserts the agreement endpoint by endpoint. It is also the
+most-refetched read in the app — every realtime invalidation lands here — so every piece
+stays one bounded query. **Do not add per-resident query loops to it.**
+
+Decisions with teeth, each chosen explicitly:
+
+- **All-staff, never RESIDENT** — the bell's posture. Names appear (it is a work queue,
+  like `/service`); nothing clinical ever does. This page greets every unlock, which
+  makes it the app's densest ambient-disclosure surface — module 13's warning applies
+  here with the most force.
+- **An overdue row carries its destination** (the bell rule: whoever acts needs to know
+  where to start looking) — decided against the census tile's never-a-destination rule,
+  knowingly, because this is a work queue and not a wall board.
+- **"Outstanding", not "overdue" balances: a positive derived balance on an active
+  stay.** A charge has no due date until invoicing (module 11) exists; this card and
+  panel are what inherit the true overdue meaning — and the record rail's red dot —
+  when it does. The card total is computed as the sum of the rows beneath it, in the
+  same read, so the two cannot drift. Largest balance first; `lastPaymentAt` rides
+  along because owing $500 having paid last week is a different situation from owing
+  $500 in silence.
+- **Needs attention is the bell's action items as a panel** — unhoused, rolls due,
+  urgent maintenance — in the pill's priority order, each row tagged with its kind.
+  **Minus overdue sign-outs** (the Signed out panel is directly beneath; one situation
+  should not be two rows) and **minus community service** (left out by request — the
+  verification queue stays on `/service` and the rail's amber dot).
+- **The beds-free card shows one figure with the cohort split beside it** ("2 · 1 men,
+  1 women") — the bare total alone would hide one side full while the other has room,
+  which is the exact failure `cohortCapacity()`'s per-cohort shape exists to prevent.
+- **`upcoming` crosses the wire in band form**, `{ shared, lanes }` like `GET /schedule`
+  and produced by the same merge — there is still no server endpoint returning a flat
+  schedule list. `AppUpcomingEvents` concatenates the provably-disjoint bands
+  client-side (the board's own sanctioned pattern), filters to sessions not yet ended,
+  and renders FullCalendar's list view over a rolling 7 days (a custom
+  `duration: { days: 7 }` view — `listWeek` is a calendar week and shows nothing on a
+  Sunday). Read-only; a row navigates to `/schedule`.
+- **Overdue is re-derived client-side on a 30-second tick** against `signedOut` rows
+  the server sends un-filtered — the census pattern, so a resident crosses the grace
+  window without a refetch. The needsRoll queue does NOT get the schedule board's 60s
+  refetch tick here; the 30s tick's `refreshStatus()` nudge and the realtime socket
+  cover this page, and a roll going missed surfaces on the next load — the dashboard
+  is glanced at far more often than the board, so staleness is bounded by usage.
+- **The one `scheduleWindow({ days: 7 })` call feeds both** the roll queue (its
+  fortnight lookback is independent of the span) and the 7-day list — one expander, by
+  construction.
+- **Quick actions open the existing shared dialogs**, never copies: `AppSignOutDialog`
+  and `AppResidentIntake` were refactored to `v-model:open` (module 1's rule — two
+  screens open them now), and `AppServiceEntryDialog` / `AppLedgerEntryDialog` grew an
+  **optional in-form resident picker** used only when no `residentId` is bound. Intake
+  and Record payment are hidden (not disabled) for techs; the server refuses either
+  regardless.
+
+**Deliberately excluded, so they are not "added later" casually:** an occupancy-over-time
+trend (needs replaying `bed_assignments` history per day — a report, not a page read) and
+a true attendance rate (whether EXCUSED counts is facility policy nobody has set; the
+board's counts stay counts).
+
 ### Likely later
 Incident reports, rent/fee ledger, staff shifts and handoff notes, curfew tracking,
 resident chores, visitor log, waitlist, reporting/exports for licensing and referral
@@ -1422,6 +1497,13 @@ Two verification suites, both run against a live database:
   in no whitelist immutable by default, an amendment as a pure INSERT that cannot fork or
   cross a stay, a void as zero minutes, no stored total column anywhere, and a tech who may
   log and verify but not set a target
+- `node scripts/verify-dashboard.js` — 21 assertions on the landing page's one read:
+  staff-gated, capacity per cohort with no combined total, `upcoming` in band form with
+  a shared event in neither lane, every queue equal to its source endpoint (sign-outs
+  with matching overdue flags and destinations, the census's unhoused, the board's roll
+  queue, open URGENT maintenance), balances summing to their own card and agreeing with
+  the roster, a probe payment moving the total on the next read, and a probe sign-out
+  surfacing and being cleaned up again. Posts a $1 payment — reseed after.
 - `npm run verify:rls` — 28 assertions proving a resident actor cannot read, count or
   write another resident's rows — including their ledger and sign-outs — and that the
   app role cannot bypass the policies
@@ -1440,6 +1522,7 @@ npm run verify:constraints && node scripts/seed.js \
   && node scripts/verify-signouts.js && node scripts/seed.js \
   && node scripts/verify-schedule.js && node scripts/seed.js \
   && node scripts/verify-service.js && node scripts/seed.js \
+  && node scripts/verify-dashboard.js && node scripts/seed.js \
   && npm run verify:rls
 ```
 
