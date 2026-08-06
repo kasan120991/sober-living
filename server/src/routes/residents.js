@@ -22,6 +22,7 @@ import {
 } from '../services/residents.js'
 import { activeStayIdFor, listEntries, postEntry } from '../services/ledger.js'
 import { residentChecks } from '../services/checks.js'
+import { residentScreens } from '../services/screens.js'
 import { residentSchedule } from '../services/schedule/read.js'
 // Aliased: the ledger exports a listEntries too, and this file imports both.
 import {
@@ -296,6 +297,21 @@ router.get(
       }),
     )
   }),
+)
+
+// ── Drug screens ──────────────────────────────────────────────────────────
+// READ-ONLY here, the Apartment checks precedent: the record answers what this
+// person's screens have found; recording, the decision, the lab result and
+// amendments all live on /screens. Deliberately unlike the Community service
+// section, which does post from the record — a screen needs a specimen, a
+// witness and a cup read in a hallway, and a form on a record page is an
+// invitation to reconstruct one from memory.
+//
+// Outcomes are omitted here as they are on the queue; revealing one fetches
+// GET /screens/:id, so the audit log names what was actually looked at.
+router.get(
+  '/:id/screens',
+  handler(async (req, res) => res.json(await residentScreens(req.params.id))),
 )
 
 // ── Fee ledger ────────────────────────────────────────────────────────────

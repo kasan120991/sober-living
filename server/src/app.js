@@ -23,6 +23,7 @@ import signOutsRouter from './routes/signOuts.js'
 import scheduleRouter from './routes/schedule.js'
 import serviceRouter from './routes/service.js'
 import checksRouter from './routes/checks.js'
+import screensRouter from './routes/screens.js'
 
 export function createApp() {
   const app = express()
@@ -82,6 +83,7 @@ export function createApp() {
   app.use('/schedule', scheduleRouter)
   app.use('/service', serviceRouter)
   app.use('/checks', checksRouter)
+  app.use('/screens', screensRouter)
 
   app.use(notFound)
   app.use(errorHandler)

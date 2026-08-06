@@ -44,6 +44,11 @@ export const LEDGER_CATEGORY = Object.freeze({
   TRIP: 'TRIP',
   PROGRAM_FEE: 'PROGRAM_FEE',
   DAMAGE: 'DAMAGE',
+  /// What a resident pays to send a non-negative screen for lab confirmation.
+  /// Its own category rather than PROGRAM_FEE because categories exist so
+  /// "what did we bill in X last quarter" is answerable without grepping
+  /// descriptions — see module 11.
+  LAB_FEE: 'LAB_FEE',
   OTHER: 'OTHER',
 })
 
@@ -121,6 +126,7 @@ export const AUDITED_MODELS = Object.freeze([
   'ServiceEntry',
   'ApartmentCheck',
   'ApartmentCheckResident',
+  'DrugScreen',
   // Facility configuration
   'Apartment',
   'Bed',
@@ -163,6 +169,11 @@ export const SOFT_DELETE_MODELS = Object.freeze([
   // ApartmentCheck and ApartmentCheckResident are absent for the same reason,
   // and go further: there is no verification transition, so the database
   // refuses every UPDATE, not just most of them.
+  //
+  // DrugScreen is absent too, and sits between the two: it is corrected by
+  // amendment like both, but keeps a scoped UPDATE grant for the confirmation
+  // arc, because the resident's decision and the lab's result are later facts
+  // about the same screen rather than edits to it.
 ])
 
 /// Presence on the census board. DERIVED from a sign-out's returnedAt and
@@ -197,6 +208,83 @@ export const CHECK_STATE = Object.freeze({
   /// History only: an elapsed hour bucket with no check.
   MISSED: 'MISSED',
 })
+
+/// The outcome of a drug screen — the cup's, and later the lab's. Matches the
+/// `ScreenResult` enum in schema.prisma.
+///
+/// REFUSAL and DILUTE are their own outcomes and are never collapsed into a
+/// failure: "he would not give a sample" and "the sample was watered down" are
+/// different facts with different consequences. This is why the theme carries
+/// --warning beside --destructive.
+export const SCREEN_RESULT = Object.freeze({
+  NEGATIVE: 'NEGATIVE',
+  POSITIVE: 'POSITIVE',
+  REFUSAL: 'REFUSAL',
+  DILUTE: 'DILUTE',
+  /// Collected and NOT READ on site. Deliberately not the same as "at the
+  /// lab", which is CONFIRMATION_STATUS.REQUESTED — two different waits, and
+  /// conflating them is the bug this comment exists to prevent. Reads as
+  /// "Not read" in the UI.
+  PENDING: 'PENDING',
+})
+
+/// Why a screen happened. Matches `ScreenReason`. Recorded, never generated:
+/// there is no randomizer and no cron.
+export const SCREEN_REASON = Object.freeze({
+  RANDOM: 'RANDOM',
+  FOR_CAUSE: 'FOR_CAUSE',
+})
+
+/// What kind of test it was. Matches `ScreenMethod`.
+export const SCREEN_METHOD = Object.freeze({
+  URINE: 'URINE',
+  ORAL_FLUID: 'ORAL_FLUID',
+  BREATH: 'BREATH',
+})
+
+/// Where a screen sits in the lab-confirmation arc. Matches
+/// `ConfirmationStatus`. DECLINED is a value of its own because "he was
+/// offered confirmation and declined" is a record, never an absence.
+export const CONFIRMATION_STATUS = Object.freeze({
+  NOT_OFFERED: 'NOT_OFFERED',
+  PENDING_DECISION: 'PENDING_DECISION',
+  DECLINED: 'DECLINED',
+  REQUESTED: 'REQUESTED',
+  RETURNED: 'RETURNED',
+})
+
+/// The panel. Matches the `Substance` enum in schema.prisma, which is what
+/// makes the database reject an off-list value.
+export const SUBSTANCE = Object.freeze({
+  ALCOHOL: 'ALCOHOL',
+  AMPHETAMINES: 'AMPHETAMINES',
+  BARBITURATES: 'BARBITURATES',
+  BENZODIAZEPINES: 'BENZODIAZEPINES',
+  BUPRENORPHINE: 'BUPRENORPHINE',
+  COCAINE: 'COCAINE',
+  FENTANYL: 'FENTANYL',
+  MDMA: 'MDMA',
+  METHADONE: 'METHADONE',
+  METHAMPHETAMINE: 'METHAMPHETAMINE',
+  OPIATES: 'OPIATES',
+  OXYCODONE: 'OXYCODONE',
+  PCP: 'PCP',
+  THC: 'THC',
+  OTHER: 'OTHER',
+})
+
+/**
+ * What the facility charges a resident who ELECTS lab confirmation of a
+ * non-negative screen (facility policy, chosen 2026-08-06). Integer CENTS,
+ * like every figure of money in this app.
+ *
+ * THE one knob, the OVERDUE_GRACE_MS / MONTHLY_SERVICE_QUOTA_HOURS idiom:
+ * services/screens.js posts through it and `GET /screens` echoes it back as
+ * `feeCents` so the confirmation dialog quotes the same number the ledger
+ * will receive. Never hardcode 5000 in a Vue file — that is how a dialog comes
+ * to quote a figure the ledger disagrees with.
+ */
+export const LAB_CONFIRMATION_FEE_CENTS = 5000
 
 /// How a scheduled occurrence repeats. Matches the `Recurrence` enum in
 /// schema.prisma. Two values on purpose — see the schema comment.

@@ -121,6 +121,7 @@ const RLS_MODELS = new Set([
   'ServiceEntry',
   'ApartmentCheck',
   'ApartmentCheckResident',
+  'DrugScreen',
 ])
 
 /**

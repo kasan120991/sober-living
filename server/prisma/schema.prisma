@@ -89,6 +89,16 @@ enum LedgerCategory {
   TRIP
   PROGRAM_FEE
   DAMAGE
+  /// The $50 a resident pays to send a non-negative screen for lab
+  /// confirmation (module 5). Its own category rather than PROGRAM_FEE because
+  /// categories exist so "what did we bill in X last quarter" is answerable,
+  /// and this is a figure a facility gets asked about.
+  ///
+  /// Disclosure worth knowing: confirmation is only ever offered on a
+  /// non-negative, so a LAB_FEE line on a balance — which any staff member may
+  /// read — implies a non-negative screen. Descriptions carry no result and no
+  /// substance for that reason.
+  LAB_FEE
   OTHER
 }
 
@@ -121,6 +131,85 @@ enum MaintenancePriority {
   LOW
   NORMAL
   URGENT
+}
+
+/// The outcome of a screen — the cup's, and later the lab's.
+///
+/// REFUSAL and DILUTE are their own outcomes and are NEVER collapsed into a
+/// failure: "he would not give a sample" and "the sample was watered down" are
+/// different facts about a person, with different consequences, and a system
+/// that reports both as "positive" is one an auditor cannot trust. This is why
+/// the theme carries --warning beside --destructive.
+enum ScreenResult {
+  NEGATIVE
+  POSITIVE
+  REFUSAL
+  DILUTE
+  /// Collected but not yet read. A LAB result is never PENDING — it is simply
+  /// absent until it returns, and `confirmation` carries that state.
+  PENDING
+}
+
+/// Why this screen happened. Selection is recorded, never generated: the app
+/// has no randomizer and no cron, so however the house draws names, it draws
+/// them and this records the result.
+enum ScreenReason {
+  RANDOM
+  FOR_CAUSE
+}
+
+/// What kind of test it was. Module 5 says "records test type" and the
+/// glossary says "a urinalysis OR OTHER TEST" — a breathalyzer recorded as a
+/// UA is a lie in the record. Three values because that is what a sober living
+/// house actually uses; adding one is a single ALTER TYPE.
+enum ScreenMethod {
+  URINE
+  ORAL_FLUID
+  BREATH
+}
+
+/// The panel. A Postgres enum ARRAY column rather than free text, so the
+/// database rejects an off-list value exactly as it rejects an off-list
+/// result — CLAUDE.md's "with no compiler, the schema is the type system".
+/// Free strings are how "THC", "Thc" and "Marijuana" come to coexist in one
+/// column and no report can ever be trusted again.
+enum Substance {
+  ALCOHOL
+  AMPHETAMINES
+  BARBITURATES
+  BENZODIAZEPINES
+  BUPRENORPHINE
+  COCAINE
+  FENTANYL
+  MDMA
+  METHADONE
+  METHAMPHETAMINE
+  OPIATES
+  OXYCODONE
+  PCP
+  THC
+  OTHER
+}
+
+/// Where a screen sits in the lab-confirmation arc.
+///
+/// The facility's rule (2026-08-06): a non-negative cup is not the last word.
+/// The RESIDENT decides whether the sample goes to a lab, and pays for it if
+/// they do. Their decision either way is evidence — "he was offered
+/// confirmation and declined" is precisely the kind of claim this app exists
+/// to be able to prove.
+enum ConfirmationStatus {
+  /// Nothing to confirm: the cup was negative, or there is no sample because
+  /// the resident refused.
+  NOT_OFFERED
+  /// Non-negative, waiting on the resident's answer.
+  PENDING_DECISION
+  /// They were offered it and said no. A terminal state, and a record.
+  DECLINED
+  /// They said yes, the fee is posted, the sample is with the lab.
+  REQUESTED
+  /// The lab has reported.
+  RETURNED
 }
 
 enum CheckResidentStatus {
@@ -363,6 +452,7 @@ model Stay {
   scheduleAttendance  ScheduleAttendance[]
   serviceEntries      ServiceEntry[]
   checkLines          ApartmentCheckResident[]
+  drugScreens         DrugScreen[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -498,6 +588,11 @@ model LedgerEntry {
   correctsId  String?
   corrects    LedgerEntry?  @relation("LedgerCorrection", fields: [correctsId], references: [id])
   correctedBy LedgerEntry[] @relation("LedgerCorrection")
+
+  /// Set when this entry is the lab-confirmation fee for a screen (module 5).
+  /// The screen owns the link; this is only its other end. A LIST rather than
+  /// one, because an amended screen's versions all point at the one charge.
+  screenCharges DrugScreen[] @relation("screenCharges")
 
   createdAt DateTime @default(now())
   // Deliberately no updatedAt and no deletedAt. Nothing here is ever updated or
@@ -923,6 +1018,121 @@ model ApartmentCheck {
   @@map("apartment_checks")
 }
 
+/// One drug screen: the cup read on site, and the lab arc that may follow it.
+///
+/// Module 5. Two halves with different rules:
+///
+///   - THE COLLECTION IS IMMUTABLE. Who, when, why, who witnessed it, what the
+///     cup said. None of it changes; a mistake is corrected by an AMENDMENT,
+///     the pattern at the foot of this file.
+///   - THE CONFIRMATION ARC TRANSITIONS, WRITE-ONCE. The resident's decision
+///     arrives after collection; the lab's result after that. Same shape as
+///     ServiceEntry's verification and for the reason module 7 gives: an
+///     attestation about THIS row is intrinsic to it, and a join table would
+///     be a second row saying "row 4 is true", which is worse.
+///
+/// A trigger enforces both — a whole-row comparison minus the confirmation
+/// columns, so a column added in six months is immutable by default — and the
+/// privilege grant agrees with it, so the rule holds against a psql session.
+///
+/// The lab's result never overwrites the cup's. Both stand: that a cup said
+/// positive and a lab said negative is two facts, and the second does not
+/// unmake the first.
+model DrugScreen {
+  id     String @id @default(uuid(7))
+  stayId String
+  stay   Stay   @relation(fields: [stayId], references: [id])
+
+  reason ScreenReason
+  method ScreenMethod
+
+  /// When the specimen was given — CLIENT-SUPPLIED, deliberately unlike
+  /// ApartmentCheck's server-clock `checkedAt`. A screen is recorded after the
+  /// fact and this is chain-of-custody data, not a bucket label: nothing is
+  /// derived from it. `createdAt` stays the honest record of when it was
+  /// typed, so a late entry reads as a late entry, and a CHECK bounds this to
+  /// a shift rather than a week.
+  collectedAt DateTime
+
+  /// The GLOSSARY's term is "collection witness" — the person who observed the
+  /// sample being given. Module 5's prose said "observing staff"; the glossary
+  /// wins, because it forbids synonyms.
+  witnessedById String
+  witnessedBy   User   @relation("witnessedScreens", fields: [witnessedById], references: [id])
+
+  result ScreenResult
+  /// What the cup detected. Required to be non-empty on a POSITIVE, and empty
+  /// otherwise (CHECK) — "positive for something unspecified" is not a
+  /// defensible record. DUPLICATES are refused in the service and in zod, NOT
+  /// by the database: a CHECK cannot contain a subquery, so the DISTINCT
+  /// comparison is not expressible. Written down rather than assumed.
+  substances Substance[]
+
+  /// The seal or label number — what ties this row to a lab report, and the
+  /// thing CLAUDE.md means by "chain of custody matters". Required whenever a
+  /// specimen exists, which is every result except NEGATIVE and REFUSAL.
+  specimenId String?
+
+  /// ONE free-text column, deliberately. The structured columns around it ARE
+  /// the chain of custody; a second "custodyNotes" would only be somewhere for
+  /// the same sentence to be written twice.
+  note String?
+
+  recordedById String
+  recordedBy   User   @relation("recordedScreens", fields: [recordedById], references: [id])
+
+  // ── The confirmation arc: the only columns that may ever transition ───────
+  confirmation ConfirmationStatus @default(NOT_OFFERED)
+
+  residentDecisionAt   DateTime?
+  decisionRecordedById String?
+  decisionRecordedBy   User?     @relation("screenDecisions", fields: [decisionRecordedById], references: [id])
+
+  /// The $50 charge this election produced, linked rather than recomputed.
+  ///
+  /// DELIBERATELY NOT @unique, unlike LedgerEntry.externalRef — and this is
+  /// the subtle one. An amendment carries the arc forward verbatim, so every
+  /// version of one screen legitimately points at the SAME charge, and a
+  /// unique index would refuse to let a charged screen be amended at all:
+  /// exactly the screen you would most want to correct.
+  ///
+  /// Exactly-once is held instead by the arc trigger — a row leaves
+  /// PENDING_DECISION once, and an amendment arrives already past it so it can
+  /// never transition — plus the service guard, plus an assertion that an
+  /// amended charged screen still has exactly one charge on the stay. That is
+  /// weaker than a unique index and this comment says so rather than implying
+  /// otherwise.
+  feeLedgerEntryId String?
+  feeLedgerEntry   LedgerEntry? @relation("screenCharges", fields: [feeLedgerEntryId], references: [id])
+
+  /// Free text, the ServiceEntry.supervisorName precedent: an outside lab is
+  /// not worth a directory, a picker and a consent question.
+  labName      String?
+  labReference String?
+  labSentAt    DateTime?
+
+  labResult       ScreenResult?
+  labSubstances   Substance[]
+  labReturnedAt   DateTime?
+  labRecordedById String?
+  labRecordedBy   User?         @relation("screenLabResults", fields: [labRecordedById], references: [id])
+
+  /// Amendment, per the footer of this file.
+  supersedesId    String?     @unique
+  supersedes      DrugScreen? @relation("ScreenAmendment", fields: [supersedesId], references: [id])
+  supersededBy    DrugScreen? @relation("ScreenAmendment")
+  amendmentReason String?
+
+  createdAt DateTime @default(now())
+  // No updatedAt, no deletedAt — absent from SOFT_DELETE_MODELS with
+  // ServiceEntry and the apartment-check tables.
+
+  @@index([stayId, collectedAt(sort: Desc)])
+  /// Serves the work queue, which reads by arc state.
+  @@index([confirmation])
+  @@map("drug_screens")
+}
+
 /// One resident's line on one check — the roster as found, snapshotted.
 ///
 /// References the STAY, like sign-outs and the schedule roster: on discharge
@@ -1071,6 +1281,11 @@ model User {
   verifiedServiceEntries ServiceEntry[] @relation("verifiedServiceEntries")
 
   recordedApartmentChecks ApartmentCheck[] @relation("recordedApartmentChecks")
+
+  witnessedScreens  DrugScreen[] @relation("witnessedScreens")
+  recordedScreens   DrugScreen[] @relation("recordedScreens")
+  screenDecisions   DrugScreen[] @relation("screenDecisions")
+  screenLabResults  DrugScreen[] @relation("screenLabResults")
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

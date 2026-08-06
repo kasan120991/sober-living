@@ -30,8 +30,11 @@ export async function resetFacilityData(prisma, { quiet = false } = {}) {
   // apartment_check_residents and apartment_checks join for the same reason
   // again — their append-only triggers refuse DELETE even to the owner — and
   // clear BEFORE stays and apartments, which they reference.
+  // drug_screens leads the list: its never-DELETE trigger refuses row deletion
+  // even to the owner, and it references BOTH stays and ledger_entries, so it
+  // must be cleared before either.
   await sql(
-    'TRUNCATE "apartment_check_residents", "apartment_checks", "service_entries", "ledger_entries", "bed_assignments", "sessions", "audit_log" RESTART IDENTITY',
+    'TRUNCATE "drug_screens", "apartment_check_residents", "apartment_checks", "service_entries", "ledger_entries", "bed_assignments", "sessions", "audit_log" RESTART IDENTITY',
   )
 
   // The schedule, in foreign-key order and all of it BEFORE stays, which the

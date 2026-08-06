@@ -443,6 +443,123 @@ async function main() {
     },
   )
 
+  // ── Drug screens ──────────────────────────────────────────────────────────
+  // One row for every band of /screens, so the page has something to show on
+  // first login: a plain negative, a positive awaiting the resident's answer,
+  // a positive they declined to confirm, one at the lab, and one where the lab
+  // CLEARED a resident who paid — the case-by-case refund surface, with no
+  // credit posted, because the app never moves that money by itself.
+  const DAY = 24 * HOUR
+  // createdAt is set explicitly to just after the collection, because
+  // screen_collected_at_sane bounds back-fill to a shift — and a historical
+  // row whose createdAt is "now" is a row claiming it was typed today, which
+  // is exactly the dishonesty that constraint exists to catch. A real database
+  // has these rows created when they happened.
+  const screen = (data) =>
+    prisma.drugScreen.create({
+      data: { createdAt: new Date(data.collectedAt.getTime() + 4 * 60_000), ...data },
+    })
+
+  await screen({
+    stayId: byLast('Whitfield'),
+    reason: 'RANDOM',
+    method: 'URINE',
+    collectedAt: new Date(nowMs - 3 * HOUR),
+    witnessedById: tech.id,
+    result: 'NEGATIVE',
+    substances: [],
+    recordedById: tech.id,
+    confirmation: 'NOT_OFFERED',
+  })
+
+  // Awaiting the resident's decision — the loudest band, because an offer with
+  // no recorded answer is the evidence gap this module exists to close.
+  await screen({
+    stayId: byLast('Ocampo'),
+    reason: 'FOR_CAUSE',
+    method: 'URINE',
+    collectedAt: new Date(nowMs - 5 * HOUR),
+    witnessedById: manager.id,
+    result: 'POSITIVE',
+    substances: ['THC'],
+    specimenId: 'SL-40881',
+    note: 'Returned from a pass looking unsteady.',
+    recordedById: manager.id,
+    confirmation: 'PENDING_DECISION',
+  })
+
+  // Offered and declined — a record, never an absence.
+  await screen({
+    stayId: byLast('Ferrer'),
+    reason: 'RANDOM',
+    method: 'URINE',
+    collectedAt: new Date(nowMs - 20 * HOUR),
+    witnessedById: tech.id,
+    result: 'DILUTE',
+    substances: [],
+    specimenId: 'SL-40877',
+    recordedById: tech.id,
+    confirmation: 'DECLINED',
+    residentDecisionAt: new Date(nowMs - 19 * HOUR),
+    decisionRecordedById: tech.id,
+  })
+
+  // At the lab.
+  await screen({
+    stayId: byLast('Castillo'),
+    reason: 'RANDOM',
+    method: 'URINE',
+    collectedAt: new Date(nowMs - 22 * HOUR),
+    witnessedById: tech.id,
+    result: 'POSITIVE',
+    substances: ['BENZODIAZEPINES'],
+    specimenId: 'SL-40874',
+    recordedById: tech.id,
+    confirmation: 'REQUESTED',
+    residentDecisionAt: new Date(nowMs - 21 * HOUR),
+    decisionRecordedById: tech.id,
+    labName: 'Quest Diagnostics',
+    labReference: 'Q-55120',
+    labSentAt: new Date(nowMs - 21 * HOUR),
+  })
+
+  // The contradiction: a positive cup, a negative lab, and a resident who paid
+  // $50. The charge is real; the credit deliberately is not — a manager
+  // decides case by case, and this is what they review.
+  const labFee = await prisma.ledgerEntry.create({
+    data: {
+      stayId: byLast('Boone'),
+      type: 'CHARGE',
+      category: 'LAB_FEE',
+      amountCents: 5000,
+      description: 'Lab confirmation fee',
+      occurredAt: new Date(nowMs - 4 * DAY),
+      recordedById: manager.id,
+    },
+  })
+  await screen({
+    stayId: byLast('Boone'),
+    reason: 'FOR_CAUSE',
+    method: 'URINE',
+    collectedAt: new Date(nowMs - 4 * DAY),
+    witnessedById: manager.id,
+    result: 'POSITIVE',
+    substances: ['OPIATES'],
+    specimenId: 'SL-40790',
+    recordedById: manager.id,
+    confirmation: 'RETURNED',
+    residentDecisionAt: new Date(nowMs - 4 * DAY),
+    decisionRecordedById: manager.id,
+    feeLedgerEntryId: labFee.id,
+    labName: 'Quest Diagnostics',
+    labReference: 'Q-54980',
+    labSentAt: new Date(nowMs - 4 * DAY),
+    labResult: 'NEGATIVE',
+    labSubstances: [],
+    labReturnedAt: new Date(nowMs - 1 * DAY),
+    labRecordedById: manager.id,
+  })
+
   // ── Community service ───────────────────────────────────────────────────
   // Intake is 2026-05-01, so every seeded resident is months into a stay and
   // the quota has bitten several times over. The point of this block is that a
@@ -763,6 +880,7 @@ async function main() {
     ${await prisma.maintenanceRequest.count()} maintenance requests (1 open urgent, 1 resolved)
     ${await prisma.signOut.count()} sign-outs (1 out, 1 OVERDUE, 1 returned)
     ${await prisma.apartmentCheck.count()} apartment checks (men's CHECKED with 1 not found, women's OVERDUE, 1 missed hour, 1 amended)
+    ${await prisma.drugScreen.count()} drug screens (1 negative, 1 awaiting the resident's decision, 1 declined, 1 at the lab, 1 lab-cleared after paying)
     ${await prisma.ledgerEntry.count()} ledger entries (rent, laundry, a trip, a damage, one credit)
     ${await prisma.scheduleEvent.count()} scheduled events (5 weekly, 1 one-off; 2 of them both cohorts), ${await prisma.scheduleOccurrence.count()} occurrences
     ${await prisma.scheduleAttendance.count()} attendance marks on 2 taken rolls (one of them shared) — earlier days left un-taken on purpose
