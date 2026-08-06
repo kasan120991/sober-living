@@ -254,14 +254,33 @@ const maskedSsn = computed(() =>
             </div>
           </section>
 
-          <!-- Needs attention. Amber is live; red waits on invoicing. An empty
-               state that explains what would appear beats a panel that quietly
-               never does. -->
+          <!-- Needs attention. Amber (service) and red (unaccounted at the last
+               check — the loudest thing a record can say) are live; red gains
+               balance-overdue when invoicing lands. An empty state that explains
+               what would appear beats a panel that quietly never does. -->
           <section class="flex flex-col gap-2">
             <h2 class="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
               Needs attention
             </h2>
-            <div class="bg-card rounded-md border p-4">
+            <div class="bg-card flex flex-col gap-1 rounded-md border p-4">
+              <button
+                v-if="resident.current?.checks?.notAccounted"
+                type="button"
+                class="hover:bg-accent/40 focus-visible:ring-ring/30 -m-2 flex w-[calc(100%+1rem)] cursor-pointer items-center gap-3 rounded-md p-2 text-left outline-none transition-colors focus-visible:ring-3"
+                @click="section = 'checks'"
+              >
+                <span class="bg-destructive size-1.5 shrink-0 rounded-full" aria-hidden="true" />
+                <span class="min-w-0">
+                  <span class="block text-sm">Not found at the last apartment check</span>
+                  <span class="text-muted-foreground block text-xs">
+                    {{ resident.current.checks.notAccounted.apartmentName }} ·
+                    {{ formatFacilityTime(resident.current.checks.notAccounted.checkedAt) }} ·
+                    flagged until a later check or a sign-out accounts for them
+                  </span>
+                </span>
+                <span class="text-muted-foreground ms-auto shrink-0 text-xs">Open →</span>
+              </button>
+
               <button
                 v-if="resident.current?.service?.behind"
                 type="button"
@@ -280,12 +299,15 @@ const maskedSsn = computed(() =>
                 <span class="text-muted-foreground ms-auto shrink-0 text-xs">Open →</span>
               </button>
 
-              <template v-else>
+              <template
+                v-if="!resident.current?.service?.behind && !resident.current?.checks?.notAccounted"
+              >
                 <p class="text-sm">Nothing flagged.</p>
                 <p class="text-muted-foreground mt-1 max-w-[70ch] text-xs">
                   Amber marks a resident behind on service hours — 20 hours a month, accruing
-                  in whole months. Red will mark an overdue balance, which needs an invoice
-                  with a due date, since a charge does not have one.
+                  in whole months. Red marks the loudest fact: today, a resident the last
+                  apartment check could not find; an overdue balance joins it once invoices
+                  give a charge a due date.
                 </p>
               </template>
             </div>
@@ -405,6 +427,17 @@ const maskedSsn = computed(() =>
             <AppResidentSchedule :resident-id="resident.id" />
             <template #fallback>
               <p class="text-muted-foreground text-sm">Loading the schedule…</p>
+            </template>
+          </Suspense>
+        </template>
+
+        <!-- ── Apartment checks ──────────────────────────────────────────── -->
+        <template v-else-if="section === 'checks'">
+          <!-- Same Suspense reasoning as the schedule arm above. -->
+          <Suspense>
+            <AppResidentChecks :resident-id="resident.id" />
+            <template #fallback>
+              <p class="text-muted-foreground text-sm">Loading apartment checks…</p>
             </template>
           </Suspense>
         </template>

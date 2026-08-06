@@ -48,16 +48,7 @@ export const RESIDENT_SECTIONS = Object.freeze([
       'Multi-day approved absences, request → review → approve or deny with a reason. The ' +
       'bed is held rather than freed, and the census will show "on pass" instead of empty.',
   },
-  {
-    key: 'checks',
-    label: 'Apartment checks',
-    group: 'Record',
-    built: false,
-    module: 'Module 4 — Apartment checks',
-    summary:
-      'Scheduled and random inspections of the apartment this resident lives in, with ' +
-      'per-item pass/fail, notes and photos, and which residents were present.',
-  },
+  { key: 'checks', label: 'Apartment checks', group: 'Record', built: true },
 
   // ── Clinical ──────────────────────────────────────────────────────────────
   // Techs see this group (decided 2026-08-02). That is not an exception to the
@@ -131,8 +122,9 @@ export const sectionsInGroup = (group) => RESIDENT_SECTIONS.filter((s) => s.grou
 export const sectionByKey = (key) => RESIDENT_SECTIONS.find((s) => s.key === key) ?? null
 
 /**
- * The two dot rules, and deliberately only two (CLAUDE.md module 1):
- * amber is behind on service hours, red is an overdue balance.
+ * The dot rules (CLAUDE.md module 1): amber is behind on service hours;
+ * **red is the record's loudest fact** — redefined 2026-08-06, when it had
+ * been reserved for balance-overdue since 2026-08-02.
  *
  * - **Amber is live** since module 7 (2026-08-05). The threshold is a monthly
  *   quota of 20 hours, accruing in whole months and capped at the target, and
@@ -140,19 +132,24 @@ export const sectionByKey = (key) => RESIDENT_SECTIONS.find((s) => s.key === key
  *   services/communityService.js — so this file only reads a boolean. The
  *   resident portal will need the identical number, and two implementations is
  *   how two screens come to disagree about who is behind.
- * - **Red still needs invoicing** (module 11). A charge has no due date — only
- *   an invoice does — so before invoices exist "overdue" could only mean "owes
- *   anything", which would light red on nearly every resident and teach people
- *   to ignore the colour. Ship the dot with the invoice, not before it.
+ * - **Red is live, meaning unaccounted-for**: the last apartment check could
+ *   not find them and nothing has accounted for them since. Computed ON THE
+ *   SERVER by the same helper the bell's RESIDENT_NOT_ACCOUNTED item uses —
+ *   `residentCheckStatus()` in services/checks.js — so the record and the
+ *   bell cannot disagree; this file only reads for a non-null flag.
+ *   Balance-overdue joins red when invoicing (module 11) gives a charge a due
+ *   date; until then a red dot for money would light on nearly everyone and
+ *   teach people to ignore the colour.
  *
- * No ticking clock. `behind` does change on the calendar alone, like an overdue
- * sign-out — but it crosses once a month rather than once an hour, so the next
- * page load is soon enough. Do not add a timer here by analogy with the census.
+ * No ticking clock. `behind` crosses once a month; `notAccounted` changes only
+ * on data events (a check, a sign-out, a discharge), each of which emits a
+ * realtime invalidation. Do not add a timer here by analogy with the census.
  */
 export const SECTION_DOT = Object.freeze({ WARNING: 'warning', CRITICAL: 'critical' })
 
 export function sectionDots(resident) {
   const dots = {}
   if (resident?.current?.service?.behind) dots.service = SECTION_DOT.WARNING
+  if (resident?.current?.checks?.notAccounted) dots.checks = SECTION_DOT.CRITICAL
   return dots
 }

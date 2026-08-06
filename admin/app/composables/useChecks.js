@@ -22,5 +22,17 @@ export function useChecks() {
   /** A correction is an amendment; the original stays. */
   const amendCheck = (id, body) => api(`/checks/${id}/amend`, { method: 'POST', body })
 
-  return { getChecks, getRoster, getCheck, recordCheck, amendCheck }
+  /**
+   * One resident's trail: { hasActiveStay, status, lines, nextCursor }.
+   * `date` shows one facility day; `cursor` pages the open-ended trail.
+   */
+  const getResidentChecks = (residentId, { date, cursor } = {}) => {
+    const q = new URLSearchParams()
+    if (date) q.set('date', date)
+    if (cursor) q.set('cursor', cursor)
+    const qs = q.toString()
+    return api(`/residents/${residentId}/checks${qs ? `?${qs}` : ''}`)
+  }
+
+  return { getChecks, getRoster, getCheck, recordCheck, amendCheck, getResidentChecks }
 }

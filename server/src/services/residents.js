@@ -2,6 +2,7 @@ import { prisma, runInTransaction } from '../db/client.js'
 import { HttpError } from '../middleware/authorize.js'
 import { STAY_STATUS } from '../domain/constants.js'
 import { balancesByStay, balanceOfStay } from './ledger.js'
+import { residentCheckStatus } from './checks.js'
 import { serviceSummary } from './communityService.js'
 import { STAFF_ROLE } from '../domain/constants.js'
 
@@ -152,6 +153,11 @@ export async function getResident(id, { viewerRole } = {}) {
           // a minute. This is what lights the rail's amber dot — see
           // sectionDots() in the admin app, and servicePace() for the rule.
           service: await serviceSummary(current, dayOfStay(current.intakeAt)),
+          // The round's answer to "where are they": the hero on the checks
+          // section, the RED dot on the rail, and the Overview row. Derived
+          // by the same helper the bell's RESIDENT_NOT_ACCOUNTED item uses —
+          // one knob, so the record and the bell cannot disagree.
+          checks: await residentCheckStatus(current.id),
           stayId: current.id,
           intakeAt: current.intakeAt,
           expectedDischargeAt: current.expectedDischargeAt,

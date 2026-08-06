@@ -1,7 +1,7 @@
 import { prisma, runInTransaction } from '../db/client.js'
 import { HttpError } from '../middleware/authorize.js'
 import { CHECK_RESIDENT_STATUS, CHECK_STATE, PRESENCE, STAY_STATUS } from '../domain/constants.js'
-import { facilityHourKey, facilityStartOfToday } from '../lib/facilityTime.js'
+import { facilityHourKey, facilityStartOfToday, facilityWallClockToUtc } from '../lib/facilityTime.js'
 import { presenceOf } from './signOuts.js'
 
 /**
@@ -505,12 +505,20 @@ export async function overdueApartmentChecks(now = new Date()) {
  * Residents whose latest check says NOT_FOUND and whom nothing has accounted
  * for since — no newer check, no open sign-out, stay still active. Derived on
  * read; clears itself, like every bell item.
+ *
+ * THE one predicate, and it is per-APARTMENT-latest-check on purpose: during
+ * a bed move a resident's own newest line can say PRESENT on the new
+ * apartment while the old apartment's latest check still carries their
+ * NOT_FOUND — and that check stands until the old apartment is walked again.
+ * The bell, the dashboard and the resident record all derive through here,
+ * so they cannot disagree about who is unaccounted for.
  */
-export async function unaccountedResidents() {
+async function unaccountedLines({ stayId } = {}) {
   const latest = await latestChecks({
     apartment: { select: { name: true } },
+    recordedBy: { select: { fullName: true } },
     residents: {
-      where: { status: CHECK_RESIDENT_STATUS.NOT_FOUND },
+      where: { status: CHECK_RESIDENT_STATUS.NOT_FOUND, ...(stayId && { stayId }) },
       include: {
         stay: {
           select: {
@@ -531,7 +539,151 @@ export async function unaccountedResidents() {
         residentId: l.stay.resident.id,
         fullName: fullName(l.stay.resident),
         apartmentName: c.apartment.name,
+        byName: c.recordedBy.fullName,
         at: c.checkedAt,
       })),
   )
+}
+
+export const unaccountedResidents = () => unaccountedLines()
+
+/**
+ * One resident's standing in the round, for the record's hero and its red
+ * dot: are they unaccounted for right now (the bell's own derivation, scoped
+ * to their stay), and when were they last seen on site.
+ */
+export async function residentCheckStatus(stayId) {
+  const [unaccounted, lastPresent] = await Promise.all([
+    unaccountedLines({ stayId }),
+    prisma.apartmentCheckResident.findFirst({
+      where: {
+        stayId,
+        status: CHECK_RESIDENT_STATUS.PRESENT,
+        check: { supersededBy: { is: null } },
+      },
+      orderBy: [{ check: { checkedAt: 'desc' } }, { id: 'desc' }],
+      include: {
+        check: {
+          include: {
+            apartment: { select: { name: true } },
+            recordedBy: { select: { fullName: true } },
+          },
+        },
+      },
+    }),
+  ])
+  const flag = unaccounted[0] ?? null
+  return {
+    notAccounted: flag
+      ? { checkedAt: flag.at, apartmentName: flag.apartmentName, byName: flag.byName }
+      : null,
+    lastSeen: lastPresent
+      ? {
+          checkedAt: lastPresent.check.checkedAt,
+          apartmentName: lastPresent.check.apartment.name,
+          note: lastPresent.note,
+          byName: lastPresent.check.recordedBy.fullName,
+        }
+      : null,
+  }
+}
+
+/** The instants bounding one facility calendar day. */
+function facilityDayBounds(dateStr) {
+  const next = new Date(Date.parse(`${dateStr}T00:00:00Z`) + 86_400_000)
+    .toISOString()
+    .slice(0, 10)
+  return {
+    gte: facilityWallClockToUtc(dateStr, '00:00'),
+    lt: facilityWallClockToUtc(next, '00:00'),
+  }
+}
+
+const encodeCursor = (l) =>
+  Buffer.from(`${l.check.checkedAt.toISOString()}|${l.id}`).toString('base64url')
+
+function decodeCursor(s) {
+  const raw = Buffer.from(s, 'base64url').toString()
+  const split = raw.indexOf('|')
+  const t = split > 0 ? new Date(raw.slice(0, split)) : null
+  const id = split > 0 ? raw.slice(split + 1) : ''
+  if (!t || Number.isNaN(t.getTime()) || !id) throw new HttpError(400, 'Invalid cursor')
+  return { t, id }
+}
+
+/**
+ * One resident's trail through the rounds — the record's Apartment checks
+ * section. Read-only, active stay only (the Service/Ledger/Schedule
+ * precedent), newest first, keyset-paginated because a 24/7 hourly round
+ * writes this person ~24 lines a day.
+ *
+ * Superseded checks are filtered out, so an amended check appears ONCE, in
+ * its original hour (amendments carry checkedAt verbatim), marked `amended`.
+ */
+export async function residentChecks(residentId, { date, cursor, limit = 50 } = {}) {
+  const stay = await prisma.stay.findFirst({
+    where: { residentId, status: STAY_STATUS.ACTIVE },
+    select: { id: true },
+  })
+  if (!stay) return { hasActiveStay: false, stayId: null, status: null, lines: [], nextCursor: null }
+
+  // A date filter shows one whole facility day — small by construction, so
+  // the cursor is ignored rather than combined.
+  const c = !date && cursor ? decodeCursor(cursor) : null
+  const where = {
+    stayId: stay.id,
+    check: {
+      supersededBy: { is: null },
+      ...(date && { checkedAt: facilityDayBounds(date) }),
+    },
+    // Prisma's native `cursor` cannot cross a relation, so keyset is a
+    // hand-built (checkedAt, id) comparison. Line ids are uuid(7), so the id
+    // tiebreak is deterministic even when two checks share an instant.
+    ...(c && {
+      AND: [
+        {
+          OR: [
+            { check: { checkedAt: { lt: c.t } } },
+            { check: { checkedAt: c.t }, id: { lt: c.id } },
+          ],
+        },
+      ],
+    }),
+  }
+
+  const rows = await prisma.apartmentCheckResident.findMany({
+    where,
+    orderBy: [{ check: { checkedAt: 'desc' } }, { id: 'desc' }],
+    // One extra row detects whether a next page exists at all.
+    take: limit + 1,
+    include: {
+      check: {
+        include: {
+          apartment: { select: { name: true } },
+          recordedBy: { select: { fullName: true } },
+        },
+      },
+    },
+  })
+
+  const page = rows.slice(0, limit)
+  return {
+    hasActiveStay: true,
+    stayId: stay.id,
+    // The hero rides on page one only — Load-more pages skip the two extra
+    // queries and the client keeps the hero it already has.
+    status: c ? null : await residentCheckStatus(stay.id),
+    lines: page.map((l) => ({
+      id: l.id,
+      checkId: l.checkId,
+      checkedAt: l.check.checkedAt,
+      status: l.status,
+      note: l.note,
+      apartmentName: l.check.apartment.name,
+      byName: l.check.recordedBy.fullName,
+      amended: Boolean(l.check.supersedesId),
+      amendmentReason: l.check.amendmentReason,
+    })),
+    nextCursor: !date && rows.length > limit ? encodeCursor(page[page.length - 1]) : null,
+  }
 }

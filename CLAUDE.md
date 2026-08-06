@@ -104,12 +104,17 @@ instead of being re-decided per tab.
 
 - **The rail is a status board, not navigation.** Each section can carry a dot, so where
   attention is needed reads before anything is opened. **Amber is behind on service hours;
-  red is balance overdue** (facility policy, chosen 2026-08-02). **Amber is live since
-  module 7**, and its threshold is now written down: 20 hours a month, accruing in whole
-  months from intake and capped at the target — see module 7 for why each half of that
-  matters. **Red still waits on invoicing**, because a charge has no due date and only an
-  invoice does; see module 11. A section with nothing wrong shows no dot, the same rule the
-  census tiles follow: absence of a chip means fine, which keeps a quiet record quiet.
+  red is the record's loudest fact** — red was reserved for balance-overdue when the
+  palette was chosen (2026-08-02) and was **redefined 2026-08-06** when apartment checks
+  gave the record something louder than money to say. **Amber is live since module 7**
+  (20 hours a month, accruing in whole months from intake and capped at the target — see
+  module 7). **Red is live since module 4's record section**, meaning *unaccounted for*:
+  the last apartment check could not find them and nothing has accounted for them since —
+  derived on `GET /residents/:id` by the same `services/checks.js` helper the bell's
+  RESIDENT_NOT_ACCOUNTED item uses, one knob, so the record and the bell cannot disagree.
+  **Balance-overdue joins red with invoicing** (module 11), because a charge has no due
+  date and only an invoice does. A section with nothing wrong shows no dot, the same rule
+  the census tiles follow: absence of a chip means fine, which keeps a quiet record quiet.
 - **Techs see the Clinical group** (decided 2026-08-02). This does not contradict the bell
   rule under module 13 — that one is about *ambient* disclosure, a name against a screen
   result surfacing unbidden on a phone with residents nearby. Opening a named resident's
@@ -769,6 +774,24 @@ is the same sheet fed by `GET /checks/:id`, entered from a log row's ellipsis �
 per page, driven by refs. The page re-derives DUE/OVERDUE on the census's 30-second tick
 (`checkState()` in `utils/facilityTime.js` mirrors the server), because crossing into
 either mutates nothing and no socket event will come.
+
+**On the resident record (built 2026-08-06, chosen from rendered variants):** the rail's
+Apartment checks section is READ-ONLY — a **"last seen" hero over a day-grouped trail** of
+this resident's own lines, newest first. The hero goes destructive when they are
+**unaccounted for**, derived by `residentCheckStatus()` — which is scoped through the same
+per-apartment-latest-check predicate the bell uses (`unaccountedLines()`), deliberately
+NOT "their newest line": during a bed move the old apartment's latest check still carries
+their NOT_FOUND until that apartment is walked again, and the record must agree with the
+bell about it. The same flag rides on `GET /residents/:id` as `current.checks`, lights the
+rail's **red dot** and an Overview Needs-attention row. The trail is served by
+`GET /residents/:id/checks`: current versions only (an amended check appears once, in its
+original hour, marked), a **facility-day date filter** bounded by
+`facilityWallClockToUtc`, and **keyset pagination** (cursor = base64url
+`checkedAt|lineId`; Prisma's native cursor cannot cross a relation, so the keyset is a
+hand-built (checkedAt, id) comparison over the `@@index([stayId])` that was put on the
+lines table for exactly this read). The hero is computed on page one only — cursor pages
+skip its queries. Active stay only, the Service/Ledger/Schedule precedent, with the same
+three empty states.
 
 ### 5. Drug screening
 Randomized and for-cause selection. Records test type, collection time, observing staff,
@@ -1615,7 +1638,7 @@ Two verification suites, both run against a live database:
   queue, open URGENT maintenance), balances summing to their own card and agreeing with
   the roster, a probe payment moving the total on the next read, and a probe sign-out
   surfacing and being cleaned up again. Posts a $1 payment — reseed after.
-- `node scripts/verify-checks.js` — 51 assertions on the hourly round: the staff gate, the
+- `node scripts/verify-checks.js` — 65 assertions on the hourly round: the staff gate, the
   board derived from the latest check (95 minutes OVERDUE, most-overdue-first, the missed
   bucket derived from absence, the amended marker), a roster that pre-accounts open
   sign-outs and never carries a destination, roster-completeness 409s (missing, extra,
@@ -1627,8 +1650,15 @@ Two verification suites, both run against a live database:
   re-validated as of the original instant, checkedAt carried verbatim, original preserved,
   no fork, cross-apartment refused by trigger), append-only on both tables asserted at
   both layers (app role by privilege, superuser by trigger), RLS (headers invisible to
-  residents, lines scoped to their own stay), and audit rows carrying ids only. Posts
-  checks — reseed after.
+  residents, lines scoped to their own stay), and audit rows carrying ids only. **Fourteen
+  on the resident record**: the record flagging a resident unaccounted while (and only
+  while) the bell does — set AND cleared, proving the shared derivation; the section hero
+  matching the record payload; the trail newest-first pinned; an amended check appearing
+  once, marked; the date filter returning one whole facility day and an empty day being
+  empty rather than an error; keyset pages that neither overlap nor break the ordering;
+  the hero riding on page one only; malformed date and cursor each a 400; and a
+  discharged resident getting the no-active-stay payload while their record still opens.
+  Posts checks — reseed after.
 - `npm run verify:rls` — 28 assertions proving a resident actor cannot read, count or
   write another resident's rows — including their ledger and sign-outs — and that the
   app role cannot bypass the policies

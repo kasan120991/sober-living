@@ -21,6 +21,7 @@ import {
   updateResident,
 } from '../services/residents.js'
 import { activeStayIdFor, listEntries, postEntry } from '../services/ledger.js'
+import { residentChecks } from '../services/checks.js'
 import { residentSchedule } from '../services/schedule/read.js'
 // Aliased: the ledger exports a listEntries too, and this file imports both.
 import {
@@ -273,6 +274,28 @@ router.patch(
 router.get(
   '/:id/schedule',
   handler(async (req, res) => res.json(await residentSchedule(req.params.id))),
+)
+
+// ── Apartment checks ──────────────────────────────────────────────────────
+// Read-only: the record answers where this person was last seen and how the
+// rounds have found them; recording and amending live on /checks. The read is
+// their LINES via their stay — never the apartment's whole history.
+router.get(
+  '/:id/checks',
+  handler(async (req, res) => {
+    const { date, cursor, limit } = req.query
+    if (date !== undefined && !dateOnly.safeParse(date).success) {
+      throw new HttpError(400, 'date must be YYYY-MM-DD')
+    }
+    res.json(
+      await residentChecks(req.params.id, {
+        date,
+        cursor,
+        // Clamped; exposed chiefly so the verify suite can pin pagination.
+        limit: limit ? Math.min(Math.max(parseInt(limit, 10) || 0, 1), 100) : undefined,
+      }),
+    )
+  }),
 )
 
 // ── Fee ledger ────────────────────────────────────────────────────────────

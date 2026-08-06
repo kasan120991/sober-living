@@ -119,6 +119,21 @@ async function main() {
     ? ok('the dashboard composes both situations from the same helpers')
     : bad('dashboard attention', Object.keys(dash.attention).join(','))
 
+  // The resident record shares the bell's derivation — asserted while the
+  // seeded NOT_FOUND still stands, and again after a check clears it below.
+  const allResidents = (await tech('/residents?includeDischarged=true')).body.residents
+  const castilloId = allResidents.find((r) => r.lastName === 'Castillo').id
+  const rec0 = (await tech(`/residents/${castilloId}`)).body
+  rec0.current?.checks?.notAccounted &&
+  bell0.some((i) => i.kind === 'RESIDENT_NOT_ACCOUNTED')
+    ? ok('the record flags him unaccounted while the bell does — one derivation')
+    : bad('record notAccounted', JSON.stringify(rec0.current?.checks))
+  const sec0 = (await tech(`/residents/${castilloId}/checks`)).body
+  sec0.status?.notAccounted?.checkedAt === rec0.current.checks.notAccounted.checkedAt &&
+  sec0.status?.notAccounted?.apartmentName === rec0.current.checks.notAccounted.apartmentName
+    ? ok("the section's hero matches the record payload exactly")
+    : bad('section status matches', JSON.stringify(sec0.status))
+
   // ── The roster ───────────────────────────────────────────────────────────
   console.log('\n\x1b[1mThe roster\x1b[0m')
 
@@ -198,6 +213,13 @@ async function main() {
   !bell1.some((i) => i.kind === 'RESIDENT_NOT_ACCOUNTED')
     ? ok('the not-accounted item cleared itself — the new check accounts for him')
     : bad('notfound cleared', JSON.stringify(bell1.map((i) => i.kind)))
+
+  const rec1 = (await tech(`/residents/${castilloId}`)).body
+  rec1.current.checks.notAccounted === null &&
+  rec1.current.checks.lastSeen?.note === 'In his room' &&
+  rec1.current.checks.lastSeen?.apartmentName === 'Apt 12'
+    ? ok('the record clears the same instant, and lastSeen carries the new note')
+    : bad('record cleared', JSON.stringify(rec1.current.checks))
 
   const foundAnyway = await post([
     L.whitP,
@@ -376,6 +398,70 @@ async function main() {
     owner.query(`DELETE FROM "apartment_check_residents" WHERE id = $1`, [lineRow.id]),
   )
   await owner.end()
+
+  // ── The resident record ──────────────────────────────────────────────────
+  console.log('\n\x1b[1mThe resident record\x1b[0m')
+
+  const trail = (await tech(`/residents/${castilloId}/checks`)).body
+  trail.hasActiveStay === true && trail.lines.length > 0
+    ? ok(`an active resident has a trail (${trail.lines.length} lines)`)
+    : bad('trail present', JSON.stringify({ has: trail.hasActiveStay, n: trail.lines.length }))
+
+  const keys = trail.lines.map((l) => `${l.checkedAt}|${l.id}`)
+  const sorted = [...keys].sort().reverse()
+  keys.every((k, i) => k === sorted[i])
+    ? ok('the trail is newest-first, pinned')
+    : bad('trail order', JSON.stringify(keys))
+
+  const fromOriginal = trail.lines.filter((l) => l.checkId === originalId)
+  const fromAmendment = trail.lines.filter((l) => l.checkId === amended.body.id)
+  fromOriginal.length === 0 && fromAmendment.length === 1 && fromAmendment[0].amended
+    ? ok('an amended check appears once — the amendment, marked, never the original')
+    : bad('amended once', JSON.stringify({ orig: fromOriginal.length, amend: fromAmendment.length }))
+
+  const { facilityToday } = await import('../src/lib/facilityTime.js')
+  const todayKey = facilityToday()
+  const dated = (await tech(`/residents/${castilloId}/checks?date=${todayKey}`)).body
+  dated.lines.length > 0 && dated.nextCursor === null
+    ? ok(`the date filter returns one whole facility day (${dated.lines.length} lines, no cursor)`)
+    : bad('date filter', JSON.stringify({ n: dated.lines.length, cursor: dated.nextCursor }))
+  const nowhere = (await tech(`/residents/${castilloId}/checks?date=2020-01-01`)).body
+  nowhere.lines.length === 0 && nowhere.hasActiveStay === true
+    ? ok('a day with nothing is empty, not an error')
+    : bad('empty day', JSON.stringify(nowhere))
+  ;(await tech(`/residents/${castilloId}/checks?date=nope`)).status === 400
+    ? ok('a malformed date is a 400')
+    : bad('bad date 400', 'not 400')
+
+  const p1 = (await tech(`/residents/${castilloId}/checks?limit=2`)).body
+  const p2 = (
+    await tech(`/residents/${castilloId}/checks?limit=2&cursor=${encodeURIComponent(p1.nextCursor)}`)
+  ).body
+  const p1Ids = new Set(p1.lines.map((l) => l.id))
+  const joined = [...p1.lines, ...p2.lines].map((l) => `${l.checkedAt}|${l.id}`)
+  p1.lines.length === 2 &&
+  p1.nextCursor &&
+  p2.lines.length > 0 &&
+  !p2.lines.some((l) => p1Ids.has(l.id)) &&
+  joined.every((k, i) => k === [...joined].sort().reverse()[i])
+    ? ok('keyset pages do not overlap and concatenate in order')
+    : bad('pagination', JSON.stringify({ p1: p1.lines.length, p2: p2.lines.length }))
+  p2.status === null && p1.status !== null
+    ? ok('the hero rides on page one only — cursor pages skip its queries')
+    : bad('status on page 1 only', JSON.stringify({ p1: Boolean(p1.status), p2: p2.status }))
+  ;(await tech(`/residents/${castilloId}/checks?cursor=garbage`)).status === 400
+    ? ok('a malformed cursor is a 400')
+    : bad('bad cursor 400', 'not 400')
+
+  const ramseyId = allResidents.find((r) => r.lastName === 'Ramsey').id
+  const gone = (await tech(`/residents/${ramseyId}/checks`)).body
+  gone.hasActiveStay === false && gone.lines.length === 0 && gone.status === null
+    ? ok('a discharged resident gets the no-active-stay payload, not an error')
+    : bad('discharged trail', JSON.stringify(gone))
+  const goneRec = (await tech(`/residents/${ramseyId}`)).body
+  goneRec.current === null
+    ? ok('their record still opens, with no current block to hang a dot on')
+    : bad('discharged record', JSON.stringify(goneRec.current))
 
   // ── Row-level security ───────────────────────────────────────────────────
   console.log('\n\x1b[1mRow-level security\x1b[0m')
