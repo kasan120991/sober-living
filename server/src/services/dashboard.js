@@ -79,9 +79,9 @@ export async function dashboard() {
     unhousedWithOptions(),
     cohortCapacity(),
     // One schedule call feeds two panels: `needsRoll` looks backwards on its
-    // own fortnight window regardless of the span asked for, and the seven-day
-    // window is the "Next 7 days" list. One expander, by construction.
-    scheduleWindow({ days: 7 }),
+    // own fortnight window regardless of the span asked for, and the one-day
+    // window is the "Today" list (a rolling week first; narrowed 2026-08-06).
+    scheduleWindow({ days: 1 }),
     prisma.maintenanceRequest.findMany({
       where: urgentOpenWhere(),
       include: { apartment: { select: { id: true, name: true } } },

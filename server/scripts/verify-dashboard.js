@@ -90,12 +90,18 @@ async function main() {
     ? ok('no flat session list rides along with the bands')
     : bad('flat list smuggled', JSON.stringify(Object.keys(d.upcoming ?? {})))
 
+  d.upcoming?.from === d.upcoming?.to
+    ? ok(`the window is one day — today's schedule only (${d.upcoming.from})`)
+    : bad('one-day window', `${d.upcoming?.from} .. ${d.upcoming?.to}`)
+
+  // Vacuously true on a day with no shared session — verify-schedule.js pins
+  // the merge itself; this only guards against a flat re-merge sneaking in.
   const laneEventIds = new Set(
     lanes.flatMap((l) => l.days.flatMap((day) => day.sessions.map((s) => s.eventId))),
   )
   const sharedSessions = (d.upcoming?.shared?.days ?? []).flatMap((day) => day.sessions)
-  sharedSessions.length && sharedSessions.every((s) => !laneEventIds.has(s.eventId))
-    ? ok(`a shared event is in the shared band and in neither lane (${sharedSessions.length} shared)`)
+  sharedSessions.every((s) => !laneEventIds.has(s.eventId))
+    ? ok(`nothing in the shared band is also in a lane (${sharedSessions.length} shared today)`)
     : bad('band disjointness', JSON.stringify(sharedSessions.map((s) => s.eventId)))
 
   console.log('\n\x1b[1mAgreement with the source endpoints\x1b[0m')
@@ -119,7 +125,7 @@ async function main() {
     ? ok(`attention.unhoused equals the census unhoused (${d.attention.unhoused.length})`)
     : bad('unhoused agreement', `${ids(d.attention.unhoused)} vs ${ids(census.body?.unhoused ?? [])}`)
 
-  const schedule = await tech('/schedule?days=7')
+  const schedule = await tech('/schedule?days=1')
   const rollKeys = (rows) => JSON.stringify(rows.map((s) => `${s.eventId}|${s.date}`).sort())
   rollKeys(d.attention.needsRoll) === rollKeys(schedule.body?.needsRoll ?? [])
     ? ok(`attention.needsRoll equals the schedule board's queue (${d.attention.needsRoll.length})`)

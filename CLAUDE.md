@@ -999,8 +999,11 @@ The layout is Kasan's own, chosen from a rendered mock: a **greeting header** ("
 afternoon, Dana" on the **facility clock**, never the browser's) with a **Quick actions**
 menu on the right; **three icon status cards** — signed out (with overdue), beds free,
 outstanding balances; then two columns, left wider — **Needs attention**, **Signed out**
-and **Outstanding balances** panels on the left, the **next 7 days** of the schedule on
-the right as FullCalendar's list view.
+and **Outstanding balances** panels on the left, **today's schedule** on the right as
+FullCalendar's one-day list view (`AppTodaySchedule`; it was a rolling 7-day list first,
+narrowed 2026-08-06 by request). The whole day shows, including sessions already over —
+the panel answers "what is today's schedule", and un-taken rolls are the queue's
+business, not this list's.
 
 **One read, `GET /dashboard`, composed entirely from the modules' own derivations** —
 `listSignOuts`, `unhousedWithOptions`, `cohortCapacity`, `scheduleWindow`,
@@ -1036,19 +1039,17 @@ Decisions with teeth, each chosen explicitly:
   which is the exact failure `cohortCapacity()`'s per-cohort shape exists to prevent.
 - **`upcoming` crosses the wire in band form**, `{ shared, lanes }` like `GET /schedule`
   and produced by the same merge — there is still no server endpoint returning a flat
-  schedule list. `AppUpcomingEvents` concatenates the provably-disjoint bands
-  client-side (the board's own sanctioned pattern), filters to sessions not yet ended,
-  and renders FullCalendar's list view over a rolling 7 days (a custom
-  `duration: { days: 7 }` view — `listWeek` is a calendar week and shows nothing on a
-  Sunday). Read-only; a row navigates to `/schedule`.
+  schedule list. `AppTodaySchedule` concatenates the provably-disjoint bands
+  client-side (the board's own sanctioned pattern) and renders FullCalendar's shipped
+  `listDay` view. Read-only; a row navigates to `/schedule`.
 - **Overdue is re-derived client-side on a 30-second tick** against `signedOut` rows
   the server sends un-filtered — the census pattern, so a resident crosses the grace
   window without a refetch. The needsRoll queue does NOT get the schedule board's 60s
   refetch tick here; the 30s tick's `refreshStatus()` nudge and the realtime socket
   cover this page, and a roll going missed surfaces on the next load — the dashboard
   is glanced at far more often than the board, so staleness is bounded by usage.
-- **The one `scheduleWindow({ days: 7 })` call feeds both** the roll queue (its
-  fortnight lookback is independent of the span) and the 7-day list — one expander, by
+- **The one `scheduleWindow({ days: 1 })` call feeds both** the roll queue (its
+  fortnight lookback is independent of the span) and the Today list — one expander, by
   construction.
 - **Quick actions open the existing shared dialogs**, never copies: `AppSignOutDialog`
   and `AppResidentIntake` were refactored to `v-model:open` (module 1's rule — two
@@ -1497,9 +1498,10 @@ Two verification suites, both run against a live database:
   in no whitelist immutable by default, an amendment as a pure INSERT that cannot fork or
   cross a stay, a void as zero minutes, no stored total column anywhere, and a tech who may
   log and verify but not set a target
-- `node scripts/verify-dashboard.js` — 21 assertions on the landing page's one read:
-  staff-gated, capacity per cohort with no combined total, `upcoming` in band form with
-  a shared event in neither lane, every queue equal to its source endpoint (sign-outs
+- `node scripts/verify-dashboard.js` — 22 assertions on the landing page's one read:
+  staff-gated, capacity per cohort with no combined total, `upcoming` in band form over
+  a one-day window with nothing shared also in a lane, every queue equal to its source
+  endpoint (sign-outs
   with matching overdue flags and destinations, the census's unhoused, the board's roll
   queue, open URGENT maintenance), balances summing to their own card and agreeing with
   the roster, a probe payment moving the total on the next read, and a probe sign-out

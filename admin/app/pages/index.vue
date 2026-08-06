@@ -1,9 +1,9 @@
 <script setup>
 // The landing page (decided 2026-08-05, from a rendered mock Kasan specified):
 // a greeting header with quick actions, three status cards, then two columns —
-// needs-attention, sign-outs and outstanding balances on the left, the next
-// seven days of the schedule on the right. The census board this replaced as
-// home lives at /census, one tap away in the nav.
+// needs-attention, sign-outs and outstanding balances on the left, today's
+// schedule on the right. The census board this replaced as home lives at
+// /census, one tap away in the nav.
 //
 // Everything renders from ONE read (GET /dashboard), which composes the same
 // derivations the bell, the pill and the module pages use — so a row here and
@@ -405,11 +405,11 @@ const quietDay = computed(
           </section>
         </div>
 
-        <!-- ── The week ahead ─────────────────────────────────────────────── -->
+        <!-- ── Today's schedule ───────────────────────────────────────────── -->
         <section class="bg-card min-w-0 rounded-md border">
           <div class="flex items-baseline gap-2 px-4 pt-3 pb-2">
             <h2 class="text-muted-foreground text-[10.5px] font-semibold tracking-[0.1em] uppercase">
-              Next 7 days
+              Today
             </h2>
             <NuxtLink
               to="/schedule"
@@ -419,7 +419,7 @@ const quietDay = computed(
             </NuxtLink>
           </div>
           <div class="border-t">
-            <AppUpcomingEvents :shared="data.upcoming.shared" :lanes="data.upcoming.lanes" />
+            <AppTodaySchedule :shared="data.upcoming.shared" :lanes="data.upcoming.lanes" />
           </div>
         </section>
       </div>
