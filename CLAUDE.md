@@ -45,7 +45,7 @@ Use these terms in code, schema, and UI. Do not invent synonyms.
 | **Apartment check** | One **hourly round** of an apartment: staff account for every resident who should be on site and note what each present resident is doing. Redefined by the facility 2026-08-06 — not an inspection checklist. Append-only; corrected by amendment. |
 | **Maintenance request** | Work needed on an **apartment** — never a bed. Has a reporter, a priority and a lifecycle; closing one requires a note saying what was done. Whether a specific bed is usable is a separate fact on the bed itself. |
 | **Stay** | One episode of residency, intake → discharge. A resident who returns gets a new Stay; the Resident record is the person and persists across both. |
-| **UA / drug screen** | A urinalysis or other test. Has a result, a collection witness, and chain-of-custody notes. |
+| **UA / drug screen** | A urinalysis or other test. Has a result, a **collection witness** (`witnessedById` in code — module 5's prose said "observing staff" and the glossary won), a specimen id, and chain-of-custody notes. Module 6's "observing staff member" is a *different act* and stays. |
 | **Med pass** | The scheduled window in which staff observe residents taking their own medication. |
 | **Community service** | Hours a resident owes and works off. Tracked against a target. |
 | **Intake / Discharge** | Entering and leaving the program. Discharge has a type (successful, AMA, administrative). |
@@ -120,6 +120,10 @@ instead of being re-decided per tab.
   result surfacing unbidden on a phone with residents nearby. Opening a named resident's
   record is a deliberate navigation by someone who already knows who they are looking at,
   and the audit log records it. The two are different acts and get different answers.
+  **Module 5 made that justification load-bearing**: because "the audit log records it" is
+  the whole argument, screen results are never bulk-shipped to a page — revealing one
+  fetches it by id, so the log can actually answer *who looked at whose result*. A
+  Clinical section carries **no dot**, for the same reason.
 - **Overview is "needs attention" over recent activity** — the flagged items with their
   action, then the last few events across all sections. It is the one place the modules
   interleave in time, because "what has been going on with this person" is the question a
@@ -794,9 +798,116 @@ skip its queries. Active stay only, the Service/Ledger/Schedule precedent, with 
 three empty states.
 
 ### 5. Drug screening
-Randomized and for-cause selection. Records test type, collection time, observing staff,
-result, and confirmation status if sent to a lab. Refusals and dilutes are distinct
-outcomes, not just "fail." Chain of custody matters — capture it.
+**Built (2026-08-06).** A cup is read on site; **on a confirmable non-negative the RESIDENT
+decides** whether the specimen goes to a lab, and is charged **$50** if they do. That
+answers open question 6 — *both*, resident-elected — and it makes their decision the
+record: **"he was offered confirmation and declined" is exactly the claim this module
+exists to prove**, so declining is a value of its own and never an absence.
+
+**Selection is recorded, never generated.** A screen is marked `RANDOM` or `FOR_CAUSE`
+after the fact; there is no randomizer and no draw table, because there is no cron. A
+randomizer would also be the first thing in this app that is *generated* rather than
+observed, which is a different kind of record and wants its own design.
+
+**One outcome plus substances**, not per-substance rows: `ScreenResult` is
+NEGATIVE / POSITIVE / REFUSAL / DILUTE / PENDING, and a positive names what was found in a
+`Substance[]` enum array. **REFUSAL and DILUTE are `--warning`, never red** — collapsing
+them into "fail" destroys the fact that defends the facility, and is why the theme carries
+`--warning` beside `--destructive` at all. `PENDING` means *collected and not read on
+site* and reads as **"Not read"**; it is emphatically not "at the lab", which is
+`REQUESTED`. Two different waits.
+
+**The glossary's term wins: `witnessedById`, the collection witness.** Module 5's old
+prose said "observing staff"; the glossary forbids synonyms. Module 6 keeps "observing
+staff member" and that is not an inconsistency to tidy — watching somebody swallow their
+own medication and taking custody of a specimen are different acts.
+
+**No staff cohort or gender field was added**, and no witness-matching rule is enforced.
+There is none in the schema, `Cohort` is explicitly forbidden from carrying gender
+identity, and who witnesses whom is facility policy enforced by a rota rather than a
+constraint.
+
+**The collection half is immutable; the confirmation arc transitions write-once, one
+way.** This is ServiceEntry's posture rather than module 4's zero-UPDATE one, because the
+resident's decision and the lab's result are **later facts about the screen**, not edits
+to it. The whitelist is a whole-row jsonb comparison, so a column added in six months is
+immutable by default — and it is **necessary but not sufficient**: the arc guard is what
+stops a lab result arriving alongside the decision, since both halves sit inside the
+whitelist and a whole-row diff cannot tell them apart. Eleven whitelisted columns is the
+widest UPDATE grant in the app; what makes it affordable is that every one is null until
+its own event and the arc runs once, forwards.
+
+**The lab is authoritative and the cup survives.** Nothing overwrites `result`. A
+contradiction is two facts and the second does not unmake the first, so a contradicted
+screen renders **both** chips — the cup struck through, the lab carrying the emphasis.
+`effectiveResult`, `contradicted` and `refundDue` are all **derived on read**, never
+stored.
+
+**A lab result moves no money, in either direction.** If the lab clears somebody who paid,
+the screen is **flagged** and a manager posts a credit by hand, case by case, through the
+manager-gated ledger route — how much to refund is a facility judgement. A settled refund
+is derived from a `CREDIT` whose `correctsId` points at the fee, so the review clears
+itself and nothing needs remembering.
+
+**`LedgerCategory` gains `LAB_FEE`**, and the $50 posts **server-side** from
+`services/screens.js`. That does not weaken module 11's manager-only rule: **that rule is
+a property of the `/residents/:id/ledger` ROUTE**, where a human picks an amount, a type,
+a category and a description. Here the tech picks none of them — the price, the category,
+the wording and whose ledger it lands on are all determined by the event being recorded.
+The rule to carry forward: *a service may post to the ledger when every term of the entry
+is determined by the domain event; anything a human chooses goes through the route.*
+`LAB_CONFIRMATION_FEE_CENTS` is the one knob and `GET /screens` echoes it as `feeCents`,
+so a dialog cannot quote a figure the ledger disagrees with.
+
+**A known, accepted disclosure:** confirmation is only ever offered on a non-negative, so a
+`LAB_FEE` line on a balance — which any staff member may read — implies a non-negative
+screen. The description names no result and no substance, and this is written down rather
+than discovered. **Before invoicing (module 11) sweeps charges to Stripe, this line item
+needs a decision**: "Lab confirmation fee" under category `LAB_FEE`, on an account
+belonging to a sober living facility, is a 42 CFR Part 2 disclosure to Stripe and every
+subprocessor. The existing "opaque ids only" rule covers metadata, not line-item text.
+
+**Nothing from this module reaches the bell or the dashboard.** Module 13 demands a
+separate think before anything from module 5 goes near the bell; the think happened on
+2026-08-06 and the answer is **no** — not a name, not a count, not a link. That is
+structural rather than intended: `GET /residents/:id` carries no screens block, so no dot
+can be hung on the rail, and `verify-screens.js` asserts the negative **against the
+serialised `/notifications` and `/dashboard` payloads** rather than a list of known keys,
+because a key-list assertion passes the day somebody adds `attention.screensPending`.
+
+**`/screens` is three action bands over a quiet history** (variant A, chosen 2026-08-06
+from rendered variants): *awaiting the resident's decision* — the loudest, because an offer
+with no recorded answer is the gap this module closes — then *at the lab*, *confirmation
+returned*, then *recent screens*. A negative never enters a band. **No clock tick**:
+nothing here crosses a threshold on time alone, and a specimen at the lab a fortnight is
+old rather than overdue, since the facility has no SLA to measure it against.
+
+**Results are hidden until asked for, and the hiding is REAL.** `GET /screens` carries no
+outcomes at all — no result, no substances, not even a lab result — and revealing a row
+calls `GET /screens/:id`. That matters because CLAUDE.md's own rule is *"client-side hiding
+is presentation, never protection"*: shipping every result and drawing a curtain would make
+the audit log record one bulk read covering everybody on the page, destroying its ability
+to answer **"who looked at whose result"** — which is the entire justification for techs
+seeing the Clinical group at all. A reveal **auto-collapses after 30 seconds** and when the
+tab is hidden, because a phone left face-up is the ambient case module 13 describes. Per
+row only; there is deliberately no "reveal all".
+
+**Band headings are neutral nouns** — "Confirmation returned", never "Refunds due" or
+"Positives". The bands still imply the class of outcome for anyone in them, and that is
+accepted knowingly: what the reveal protects is the **specific** result, which is the
+damaging part over a shoulder. Do not add a "Positives" filter chip.
+
+**On the resident record**, the Drug screens section is read-only, outcome-free until
+revealed, and carries **no dot** — decision 7 reaching the record page.
+
+**`GET /staff`** was added for the witness picker: staff-only, returning active staff names
+and roles, excluding RESIDENT so a resident's linked account can never appear as a pickable
+witness. Colleagues' names are not resident data. Module 6 will be its second consumer.
+
+**Still to build:** whether the collection was *directly observed* (a materially different
+custody fact from who witnessed, and a dignity question the facility has not been asked),
+and attaching the lab's own report — blocked on object storage **and** open question 8, so
+the lab is a text reference for now, the `ServiceEntry.supervisorName` precedent.
 
 ### 6. Medication administration
 Self-administration observed by staff (typical for sober living; **confirm the facility's
@@ -1669,6 +1780,23 @@ Two verification suites, both run against a live database:
   the hero riding on page one only; malformed date and cursor each a 400; and a
   discharged resident getting the no-active-stay payload while their record still opens.
   Posts checks — reseed after.
+- `node scripts/verify-screens.js` — 63 assertions on drug screening: the staff gate; the
+  queue carrying **no outcome fields and no outcome values at all**, so the reveal is a
+  boundary rather than a curtain; a positive without substances, a negative with them, and
+  a specimen with no seal number each refused; a REFUSAL landing NOT_OFFERED because there
+  is nothing to send; collection in the future and three days back both refused; the
+  reveal being audited; the decision arc (nothing to decide on a negative, no lab named,
+  a tech recording the election, one decision only) with **exactly one $50 LAB_FEE posted,
+  the balance moving by exactly the fee, and no result in the description**; the lab's
+  restricted vocabulary; **the cup surviving a contradicting lab**, `contradicted` and
+  `refundDue` derived; **no money moving on a lab result**, and the review clearing itself
+  once a manager posts the credit by hand; the amendment arc including **the arc carrying
+  forward** and the fee not posting twice; both append-only layers asserted separately
+  (privilege and trigger, plus a column in no whitelist immutable by default, the arc
+  refusing to run backwards, and a superseded screen refusing to transition); RLS in both
+  directions; the record section and its absent `current.screens`; and **the negative
+  assertion that the bell and dashboard payloads contain nothing from module 5**. Posts
+  screens and a ledger charge — reseed after.
 - `npm run verify:rls` — 28 assertions proving a resident actor cannot read, count or
   write another resident's rows — including their ledger and sign-outs — and that the
   app role cannot bypass the policies
@@ -1689,6 +1817,7 @@ npm run verify:constraints && node scripts/seed.js \
   && node scripts/verify-service.js && node scripts/seed.js \
   && node scripts/verify-dashboard.js && node scripts/seed.js \
   && node scripts/verify-checks.js && node scripts/seed.js \
+  && node scripts/verify-screens.js && node scripts/seed.js \
   && npm run verify:rls
 ```
 
@@ -1766,16 +1895,29 @@ no longer the default.
 
   ```js
   export const SCREEN_RESULT = Object.freeze({
-    NEGATIVE: 'negative',
-    POSITIVE: 'positive',
-    REFUSAL:  'refusal',
-    DILUTE:   'dilute',
-    PENDING:  'pending',
+    NEGATIVE: 'NEGATIVE',
+    POSITIVE: 'POSITIVE',
+    REFUSAL:  'REFUSAL',
+    DILUTE:   'DILUTE',
+    PENDING:  'PENDING',
   })
   ```
 
+  **VALUES ARE UPPERCASE, matching the Prisma enum.** This block used to illustrate them
+  in lowercase, which contradicted all fourteen real constants and all fourteen `enum`
+  blocks — an error in the durable record, corrected 2026-08-06 when module 5 made
+  `SCREEN_RESULT` real. A future implementer copying the old sample verbatim would have
+  produced a constant that silently disagreed with the schema, which is precisely the
+  failure the frozen-constant rule exists to prevent.
+
   Declare them as `enum` blocks in `schema.prisma` so Prisma and Postgres both reject
-  anything off-list. With no compiler, the schema is the type system.
+  anything off-list. With no compiler, the schema is the type system — and that extends
+  to **arrays**: module 5's `substances` is a `Substance[]` enum array rather than free
+  text, so the database rejects an off-list drug the same way it rejects an off-list
+  result. Note Prisma emits a scalar list as a **nullable column with no default**, so
+  such columns need `SET NOT NULL` + `SET DEFAULT ARRAY[]::"T"[]` in the migration —
+  otherwise `cardinality(NULL)` is NULL and any CHECK about them passes on NULL, which is
+  issue #1's hole wearing an array costume.
 - **Validate every request body at the route boundary** (Zod or similar). Nothing reaches
   a query unvalidated — this replaces what TS would have caught at compile time.
 - **JSDoc on domain functions and query modules.** Enough for editor autocomplete on
@@ -1823,7 +1965,12 @@ Resolve these as they come up; update this file when they do.
 4. Does the facility already have a system (Sober Living App, BestNotes, spreadsheets)
    with data to migrate?
 5. Do residents get accounts at intake, or is it staff-entry-only for phase 1?
-6. Are drug screens read in-house, sent to a lab, or both?
+6. ~~Are drug screens read in-house, sent to a lab, or both?~~ **Both, resident-elected**
+   (2026-08-06). A cup is read on site; on a confirmable non-negative the resident decides
+   whether it goes to a lab and is charged $50 if they do. See module 5. Still open
+   underneath it: whether the collection was *directly observed* is a separate custody
+   fact nobody has been asked about, and whether a lab-negative refund has a default
+   amount — it is case-by-case today.
 7. ~~Billing/rent — in scope?~~ **In scope, and broader than rent:** laundry, trips and
    program fees all land on the same balance, and payment will come through Stripe. Still
    open: what counts as "behind" (the roster deliberately does not colour a balance,

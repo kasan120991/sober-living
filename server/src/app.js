@@ -24,6 +24,7 @@ import scheduleRouter from './routes/schedule.js'
 import serviceRouter from './routes/service.js'
 import checksRouter from './routes/checks.js'
 import screensRouter from './routes/screens.js'
+import staffRouter from './routes/staff.js'
 
 export function createApp() {
   const app = express()
@@ -84,6 +85,7 @@ export function createApp() {
   app.use('/service', serviceRouter)
   app.use('/checks', checksRouter)
   app.use('/screens', screensRouter)
+  app.use('/staff', staffRouter)
 
   app.use(notFound)
   app.use(errorHandler)

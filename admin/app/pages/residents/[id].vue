@@ -442,6 +442,17 @@ const maskedSsn = computed(() =>
           </Suspense>
         </template>
 
+        <!-- ── Drug screens ──────────────────────────────────────────────── -->
+        <template v-else-if="section === 'screens'">
+          <!-- Same Suspense reasoning as the schedule and checks arms. -->
+          <Suspense>
+            <AppResidentScreens :resident-id="resident.id" />
+            <template #fallback>
+              <p class="text-muted-foreground text-sm">Loading drug screens…</p>
+            </template>
+          </Suspense>
+        </template>
+
         <!-- ── Sign-outs ─────────────────────────────────────────────────── -->
         <template v-else-if="section === 'signOuts'">
           <section class="flex flex-col gap-2">

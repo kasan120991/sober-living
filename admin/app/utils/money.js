@@ -39,6 +39,7 @@ export const LEDGER_CATEGORIES = [
   { label: 'Trip', value: 'TRIP' },
   { label: 'Program fee', value: 'PROGRAM_FEE' },
   { label: 'Damage', value: 'DAMAGE' },
+  { label: 'Lab fee', value: 'LAB_FEE' },
   { label: 'Other', value: 'OTHER' },
 ]
 

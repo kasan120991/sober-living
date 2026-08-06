@@ -56,17 +56,7 @@ export const RESIDENT_SECTIONS = Object.freeze([
   // name against a screen result appearing unbidden on a phone with residents
   // nearby. Opening a named resident's record is a deliberate navigation by
   // someone who already knows who they are looking at, and it is audited.
-  {
-    key: 'screens',
-    label: 'Drug screens',
-    group: 'Clinical',
-    built: false,
-    module: 'Module 5 — Drug screening',
-    summary:
-      'Test type, collection time, observing staff, result and chain of custody. Refusals ' +
-      'and dilutes are distinct outcomes here, never collapsed into "fail" — which is why ' +
-      'the theme carries --warning alongside --destructive.',
-  },
+  { key: 'screens', label: 'Drug screens', group: 'Clinical', built: true },
   {
     key: 'meds',
     label: 'Medications',
