@@ -873,14 +873,10 @@ and 6 will copy it — so the shape matters beyond this module:
 - An amendment **starts unverified**. The original's sign-off was an attestation about
   figures that have just changed.
 
-**Known soft spot, found while building module 4 (2026-08-06):**
-`service_amendment_reason_paired` passes on a NULL reason — `length(btrim(NULL))` is NULL
-and **a CHECK constraint passes on NULL**, so the second branch goes NULL and
-`FALSE OR NULL` slips through. The service layer requires the reason, so nothing reaches
-this in practice, but the DB backstop is softer than this section claims. The applied
-migration is immutable; the fix is an explicit `"amendmentReason" IS NOT NULL` in a **new**
-migration. Module 4's `check_amendment_reason_paired` and `check_present_needs_note` carry
-the guard already, with assertions pinning it.
+**`service_amendment_reason_paired` is weaker than it reads** — the database does not
+actually refuse a NULL reason. Tracked in **issue #1**; delete this line when it closes.
+Copy module 4's `check_amendment_reason_paired`, not this one, for any new table taking
+the amendment pattern.
 
 **Roles:** logging and **verifying are all-staff**, matching sign-outs — the tech handed the
 signed slip is the one at the door, and making them find a manager is how it ends up on
