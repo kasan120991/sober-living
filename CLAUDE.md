@@ -873,10 +873,12 @@ and 6 will copy it — so the shape matters beyond this module:
 - An amendment **starts unverified**. The original's sign-off was an attestation about
   figures that have just changed.
 
-**`service_amendment_reason_paired` is weaker than it reads** — the database does not
-actually refuse a NULL reason. Tracked in **issue #1**; delete this line when it closes.
-Copy module 4's `check_amendment_reason_paired`, not this one, for any new table taking
-the amendment pattern.
+**Every paired-nullability CHECK here spells out `IS NOT NULL`**, and that is not
+belt-and-braces: `length(btrim(NULL))` is NULL, `FALSE OR NULL` is NULL, and **a CHECK
+constraint passes on NULL** — it only rejects on FALSE. `service_amendment_reason_paired`
+shipped without it and accepted a reasonless amendment until it was replaced
+(issue #1, fixed 2026-08-06 in a new migration, since an applied one is immutable).
+Copy this shape for any new table taking the amendment pattern.
 
 **Roles:** logging and **verifying are all-staff**, matching sign-outs — the tech handed the
 signed slip is the one at the door, and making them find a manager is how it ends up on
@@ -1619,13 +1621,15 @@ Two verification suites, both run against a live database:
   tech taking a roll but not setting the schedule, a discharge dropping someone off future
   sessions with no write, and a resident on nothing getting an empty schedule rather than
   their cohort's
-- `node scripts/verify-service.js` — 39 assertions on community service: the pace rule
+- `node scripts/verify-service.js` — 40 assertions on community service: the pace rule
   without a database (day-1 clean, first month grace, whole-month steps, capped at target,
   no target means no dot), pending hours excluded from the total, the app role refused by
   **privilege** and a superuser refused by the **trigger** — asserted separately — a column
   in no whitelist immutable by default, an amendment as a pure INSERT that cannot fork or
-  cross a stay, a void as zero minutes, no stored total column anywhere, and a tech who may
-  log and verify but not set a target
+  cross a stay, a void as zero minutes, no stored total column anywhere, a tech who may
+  log and verify but not set a target, and a **NULL amendment reason refused by the
+  database** — the assertion that would have caught issue #1, which a CHECK passing on
+  NULL let through until 2026-08-06
 - `node scripts/verify-dashboard.js` — 22 assertions on the landing page's one read:
   staff-gated, capacity per cohort with no combined total, `upcoming` in band form over
   a one-day window with nothing shared also in a lane, every queue equal to its source

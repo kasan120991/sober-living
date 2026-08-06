@@ -179,6 +179,20 @@ async function main() {
       [entryId],
     ),
   )
+
+  // Issue #1: the constraint used to PASS here. length(btrim(NULL)) is NULL, so
+  // the second branch went NULL, FALSE OR NULL is NULL, and a CHECK only rejects
+  // on FALSE. The route has always required a reason — this asserts the database
+  // does too, which is the standard an append-only record is held to.
+  await rejects('a NULL amendment reason is refused by the DATABASE, not just the route', () =>
+    asOwner(
+      `INSERT INTO "service_entries"
+         ("id","stayId","minutes","workedOn","location","recordedById","supersedesId")
+       SELECT 'verify-null-reason', "stayId", 60, CURRENT_DATE, 'Nowhere', "recordedById", "id"
+         FROM "service_entries" WHERE "id" = $1`,
+      [entryId],
+    ),
+  )
   await owner.end()
 
   const reVerify = await tech(`/service/${entryId}/verify`, { method: 'POST' })
