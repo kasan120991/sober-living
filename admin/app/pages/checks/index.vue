@@ -54,6 +54,22 @@ const figures = computed(() => {
   }
 })
 
+/** Apartments this hour has not reached yet — what the round is for. */
+const dueCount = computed(() => figures.value.of - figures.value.checked)
+
+/**
+ * "Start 2 PM round · 3 apartments due" (variant B's button). When the hour is
+ * complete it stops shouting rather than disappearing: a second walk is a
+ * legitimate act, and a button that vanishes teaches nothing about where the
+ * round lives.
+ */
+const roundLabel = computed(() => {
+  if (!data.value) return 'Start round'
+  const hour = formatHourLabel(data.value.hour.key)
+  if (!dueCount.value) return `Open ${hour} round`
+  return `Start ${hour} round · ${dueCount.value} apartment${dueCount.value === 1 ? '' : 's'} due`
+})
+
 // The hallway query — width alone misses a tablet, pointer alone is invisible
 // when testing by resizing a desktop browser. Same media the tap floor uses.
 const isHallway = useMediaQuery('(max-width: 767px), (pointer: coarse)')
@@ -124,12 +140,6 @@ function accountedLabel(b) {
         </template>
       </template>
     </template>
-    <template #actions>
-      <Button v-if="isHallway" size="sm" as-child>
-        <NuxtLink to="/checks/round"><ClipboardCheck class="size-4" /> Start round</NuxtLink>
-      </Button>
-    </template>
-
     <AppCheckSheet
       v-model:open="sheetOpen"
       :apartment="sheetApartment"
@@ -140,6 +150,21 @@ function accountedLabel(b) {
     <p v-if="pending" class="text-muted-foreground text-sm">Loading…</p>
 
     <div v-else class="flex min-w-0 flex-col gap-6">
+      <!-- The hallway's way in (variant B): one full-width block naming the
+           hour and what is left, on the phone and the tablet only. On a desktop
+           the cards below ARE the picker, so a button to reach them would be a
+           second route to the same screen. -->
+      <Button
+        v-if="isHallway"
+        :variant="dueCount ? 'default' : 'outline'"
+        class="w-full"
+        as-child
+      >
+        <NuxtLink to="/checks/round">
+          <ClipboardCheck class="size-4" /> {{ roundLabel }}
+        </NuxtLink>
+      </Button>
+
       <section>
         <h2 class="text-muted-foreground mb-2 text-[10.5px] font-semibold tracking-[0.1em] uppercase">
           This hour
