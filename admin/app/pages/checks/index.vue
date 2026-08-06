@@ -73,6 +73,44 @@ function openAmend(row) {
   sheetAmendId.value = row.id
   sheetOpen.value = true
 }
+
+// ── Today's rounds (variant B's log, chosen 2026-08-06 over the per-check
+// list) ── one quiet line per hourly round; a line expands to its checks,
+// which is where the Amend action lives.
+const expandedHour = ref(null)
+
+function bucketStats(b) {
+  const total = data.value?.apartments.length ?? 0
+  const covered = new Set(b.checks.map((c) => c.apartmentId)).size
+  const acc = b.checks.reduce(
+    (t, c) => ({
+      present: t.present + c.accounted.present,
+      signedOut: t.signedOut + c.accounted.signedOut,
+      notFound: t.notFound + c.accounted.notFound,
+    }),
+    { present: 0, signedOut: 0, notFound: 0 },
+  )
+  return { total, covered, ...acc, people: acc.present + acc.signedOut + acc.notFound }
+}
+
+/** "2 apts", "1 of 2 apts · Apt 14 missed", or — this hour — "…so far". */
+function aptsLabel(b) {
+  const { total, covered } = bucketStats(b)
+  if (b.hourKey === data.value.hour.key && covered < total) {
+    return `${covered} of ${total} apts so far`
+  }
+  if (b.missing.length) return `${covered} of ${total} apts · ${b.missing.join(', ')} missed`
+  return total === 1 ? '1 apt' : `${total} apts`
+}
+
+function accountedLabel(b) {
+  const s = bucketStats(b)
+  if (!s.people) return ''
+  if (s.notFound) return `${s.present + s.signedOut} of ${s.people} accounted`
+  // "all accounted" is a claim about the whole round — it would read as a
+  // contradiction beside "Apt 14 missed", so an incomplete round says nothing.
+  return s.covered < s.total ? '' : 'all accounted'
+}
 </script>
 
 <template>
@@ -156,21 +194,38 @@ function openAmend(row) {
 
       <section>
         <h2 class="text-muted-foreground mb-2 text-[10.5px] font-semibold tracking-[0.1em] uppercase">
-          Today
+          Today's rounds
         </h2>
 
-        <p v-if="!data.log.length" class="text-muted-foreground text-sm">No checks recorded yet today.</p>
+        <p v-if="!data.log.length" class="text-muted-foreground text-sm">No rounds recorded yet today.</p>
 
-        <div v-else class="flex flex-col gap-3">
-          <div v-for="bucket in data.log" :key="bucket.hourKey">
-            <p class="text-muted-foreground mb-1 text-xs font-medium tabular-nums">
-              {{ formatHourLabel(bucket.hourKey) }}
-            </p>
-            <div class="flex flex-col">
+        <div v-else class="flex flex-col">
+          <div v-for="bucket in data.log" :key="bucket.hourKey" class="border-b last:border-b-0">
+            <!-- One quiet line per round; tapping expands it to its checks. -->
+            <button
+              type="button"
+              class="hover:bg-accent/40 flex w-full flex-wrap items-baseline gap-x-3 gap-y-1 rounded-md px-1 py-2.5 text-left text-sm transition-colors"
+              :aria-expanded="expandedHour === bucket.hourKey"
+              @click="expandedHour = expandedHour === bucket.hourKey ? null : bucket.hourKey"
+            >
+              <span class="font-semibold tabular-nums">{{ formatHourLabel(bucket.hourKey) }} round</span>
+              <span class="text-muted-foreground text-[13px]">
+                {{ aptsLabel(bucket) }}<template v-if="accountedLabel(bucket)">
+                  · {{ accountedLabel(bucket) }}</template
+                ><template v-if="bucketStats(bucket).notFound">
+                  · <span class="text-destructive font-medium">{{ bucketStats(bucket).notFound }} not found</span></template
+                >
+              </span>
+              <span class="text-muted-foreground ms-auto text-xs tabular-nums">
+                {{ bucket.checks.length ? formatFacilityTime(bucket.checks[0].at) : '' }}
+              </span>
+            </button>
+
+            <div v-if="expandedHour === bucket.hourKey && bucket.checks.length" class="flex flex-col pb-2 ps-4">
               <div
                 v-for="c in bucket.checks"
                 :key="c.id"
-                class="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b px-1 py-2 text-sm last:border-b-0"
+                class="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-1 py-1.5 text-sm"
               >
                 <span class="font-semibold">{{ c.apartmentName }}</span>
                 <span class="text-muted-foreground text-[13px] tabular-nums">
@@ -205,9 +260,6 @@ function openAmend(row) {
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
-              <p v-if="bucket.missing.length" class="text-warning-foreground bg-warning/10 mt-1 rounded-md px-2 py-1.5 text-xs">
-                No check: {{ bucket.missing.join(', ') }}
-              </p>
             </div>
           </div>
         </div>

@@ -749,8 +749,13 @@ same module-13 test the overdue sign-out item passes. **The status pill is untou
 
 **The UI is one page, one route, one sheet.** `/checks` is the picker on desktop —
 apartment cards most-overdue-first (destructive inset on OVERDUE, warning Due chip, quiet
-checked time), an hour progress line ("2 PM round · 2 of 5 checked"), and the day's
-hour-bucketed log with missed-hour callouts and a muted Amended badge carrying its reason.
+checked time), an hour progress line ("2 PM round · 2 of 5 checked"), and **the day's log
+as one quiet line per round** — variant B's "Today's rounds", chosen 2026-08-06 over the
+per-check list: "11 AM round · 2 apts · all accounted · 11:43 AM", a partial hour reading
+"1 of 2 apts · Apt 14 missed", a not-found count in destructive. "All accounted" is a
+claim about the whole round and is deliberately suppressed when an apartment was missed.
+A line expands to its checks — the muted Amended badge with its reason, and the ellipsis
+whose Amend action is the way into corrections.
 On the hallway hardware — `(max-width: 767px), (pointer: coarse)`, the tap-floor query,
 because width alone misses a tablet — a **Start round** button opens **round mode** at
 `/checks/round` (Kasan's choice): a full-screen picker with a progress track, tap →
