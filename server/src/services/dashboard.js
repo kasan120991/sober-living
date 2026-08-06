@@ -1,5 +1,6 @@
 import { prisma } from '../db/client.js'
 import { LEDGER_ENTRY_TYPE, STAY_STATUS } from '../domain/constants.js'
+import { overdueApartmentChecks, unaccountedResidents } from './checks.js'
 import { balancesByStay } from './ledger.js'
 import { urgentOpenWhere } from './maintenance.js'
 import { cohortCapacity, unhousedWithOptions } from './residents.js'
@@ -74,7 +75,8 @@ async function outstandingBalances() {
 }
 
 export async function dashboard() {
-  const [signOuts, unhoused, capacity, schedule, urgent, balances] = await Promise.all([
+  const [signOuts, unhoused, capacity, schedule, urgent, balances, checksOverdue, notAccounted] =
+    await Promise.all([
     listSignOuts(),
     unhousedWithOptions(),
     cohortCapacity(),
@@ -88,6 +90,10 @@ export async function dashboard() {
       orderBy: { reportedAt: 'asc' },
     }),
     outstandingBalances(),
+    // The hourly round's two situations, from the same helpers as the bell —
+    // one knob, so this panel and the bell cannot disagree.
+    overdueApartmentChecks(),
+    unaccountedResidents(),
   ])
 
   return {
@@ -102,6 +108,8 @@ export async function dashboard() {
     attention: {
       unhoused,
       needsRoll: schedule.needsRoll,
+      checksOverdue,
+      notAccounted,
       urgentMaintenance: urgent.map((r) => ({
         id: r.id,
         title: r.title,

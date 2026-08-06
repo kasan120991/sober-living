@@ -119,6 +119,8 @@ export const AUDITED_MODELS = Object.freeze([
   'ScheduleAttendee',
   'ScheduleAttendance',
   'ServiceEntry',
+  'ApartmentCheck',
+  'ApartmentCheckResident',
   // Facility configuration
   'Apartment',
   'Bed',
@@ -157,6 +159,10 @@ export const SOFT_DELETE_MODELS = Object.freeze([
   // ServiceEntry is absent for the same class of reason and has no deletedAt at
   // all: it is corrected by an AMENDMENT — a new row pointing at the original —
   // and the database refuses both UPDATE and DELETE.
+  //
+  // ApartmentCheck and ApartmentCheckResident are absent for the same reason,
+  // and go further: there is no verification transition, so the database
+  // refuses every UPDATE, not just most of them.
 ])
 
 /// Presence on the census board. DERIVED from a sign-out's returnedAt and
@@ -167,6 +173,29 @@ export const PRESENCE = Object.freeze({
   IN: 'IN',
   OUT: 'OUT',
   OVERDUE: 'OVERDUE',
+})
+
+/// How one resident was accounted for on one apartment check. Matches the
+/// `CheckResidentStatus` enum in schema.prisma.
+export const CHECK_RESIDENT_STATUS = Object.freeze({
+  PRESENT: 'PRESENT',
+  SIGNED_OUT: 'SIGNED_OUT',
+  NOT_FOUND: 'NOT_FOUND',
+})
+
+/// An apartment's standing in the hourly round. DERIVED from its latest
+/// check's checkedAt against the clock — deliberately NOT a schema enum,
+/// exactly like PRESENCE and SESSION_STATE. A stored state would need a job
+/// to flip DUE to OVERDUE and would lie the minute the job lagged.
+export const CHECK_STATE = Object.freeze({
+  /// A current check exists in the current facility hour.
+  CHECKED: 'CHECKED',
+  /// No check this hour yet; the rolling alarm has not fired.
+  DUE: 'DUE',
+  /// More than an hour plus grace since the last check — or no check ever.
+  OVERDUE: 'OVERDUE',
+  /// History only: an elapsed hour bucket with no check.
+  MISSED: 'MISSED',
 })
 
 /// How a scheduled occurrence repeats. Matches the `Recurrence` enum in

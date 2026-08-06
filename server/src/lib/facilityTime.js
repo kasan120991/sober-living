@@ -57,3 +57,22 @@ export function formatFacilityTime(instant) {
     minute: '2-digit',
   }).format(new Date(instant))
 }
+
+/**
+ * UTC instant → its facility hour bucket, as '2026-08-06 14'.
+ *
+ * A bucket is the wall-clock LABEL of a real instant, nothing more. On the
+ * fall-back day two real hours share the '01' label; on the spring-forward day
+ * no instant ever formats to '02'. Both are correct: buckets are presentation
+ * (the checks log, the DUE state), and anything with an alarm on it measures
+ * elapsed milliseconds between instants instead — see services/checks.js.
+ */
+export function facilityHourKey(instant) {
+  const p = Object.fromEntries(WALL.formatToParts(new Date(instant)).map((x) => [x.type, x.value]))
+  return `${p.year}-${p.month}-${p.day} ${p.hour}`
+}
+
+/** The UTC instant of facility midnight today — bounds "today's checks". */
+export function facilityStartOfToday(now = new Date()) {
+  return facilityWallClockToUtc(facilityToday(now), '00:00')
+}

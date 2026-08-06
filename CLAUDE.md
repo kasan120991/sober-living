@@ -42,7 +42,7 @@ Use these terms in code, schema, and UI. Do not invent synonyms.
 | **Census** | Who is in which bed right now. The single most-viewed board. It lives at `/census` — it was the landing page until **2026-08-05**, when the dashboard (module 14) took `/`; the sidebar still names it **Census**, because naming the destination by the domain term is what keeps the glossary honest in the UI. |
 | **Sign-out** | A resident leaving the property and returning the same day. Has an expected return time. |
 | **Travel pass** | An overnight or multi-day approved absence. Requires approval; bed is held. |
-| **Apartment check** | A scheduled or random inspection of an apartment. Produces a pass/fail with findings. |
+| **Apartment check** | One **hourly round** of an apartment: staff account for every resident who should be on site and note what each present resident is doing. Redefined by the facility 2026-08-06 — not an inspection checklist. Append-only; corrected by amendment. |
 | **Maintenance request** | Work needed on an **apartment** — never a bed. Has a reporter, a priority and a lifecycle; closing one requires a note saying what was done. Whether a specific bed is usable is a separate fact on the bed itself. |
 | **Stay** | One episode of residency, intake → discharge. A resident who returns gets a new Stay; the Resident record is the person and persists across both. |
 | **UA / drug screen** | A urinalysis or other test. Has a result, a collection witness, and chain-of-custody notes. |
@@ -675,9 +675,95 @@ occurrence with an `(apartmentId, cohort)` composite FK, so a men's session stru
 cannot be scheduled in the women's apartment.
 
 ### 4. Apartment checks
-Scheduled and random. Checklist-driven with per-item pass/fail plus notes and photos.
-Records who inspected, when, and which residents were present. Failures should be able
-to open a follow-up item.
+**Built (2026-08-06).** Redefined by the facility before building: not the checklist
+inspection sketched here originally, but the **hourly round** — staff walk each apartment
+**every hour, 24/7**, account for everyone who should be on site, and record a **required
+quick note** of what each present resident is doing. A checklist-with-photos inspection can
+still layer on later; nothing here forecloses it. Chosen from rendered variants: an A/B
+hybrid — no forced sequence, a round mode on the hallway hardware.
+
+Two tables — `ApartmentCheck` (the visit) and `ApartmentCheckResident` (one resident's
+line: `PRESENT` / `SIGNED_OUT` / `NOT_FOUND`). Lines reference the **stay**, like
+sign-outs, so a discharge drops someone from future rosters with no write.
+
+**The roster is derived, then snapshotted.** Who should be on site = occupants of the
+apartment's beds; an open sign-out **pre-accounts** its resident as `SIGNED_OUT` (no tap —
+the sign-out is the record), everyone else is marked present-with-note or not found. The
+rules at the boundary, each enforced in the service AND asserted in the suite:
+
+- **The submission must cover the live roster exactly**, re-derived inside the
+  transaction — an assignment or sign-out that changed between sheet-load and Save is a
+  409 and a reload, never a check that misdescribes who was there to be counted.
+- `PRESENT` needs a note — zod, service, **and a DB CHECK**. The CHECK carries an explicit
+  `IS NOT NULL`: `length(btrim(NULL))` is NULL and **a CHECK passes on NULL**, so without
+  it a NULL note walks straight through. There is an assertion pinning that guard.
+- `NOT_FOUND` for a signed-out resident is refused — the sign-out accounts for them. A
+  signed-out resident found on site may be `PRESENT`: truth wins.
+- An empty apartment is an empty roster; a zero-line check is legal — the walk still
+  counts, and completeness holds vacuously.
+
+**`checkedAt` is always the server clock.** A client-supplied time is an invitation to
+back-fill the 2 PM round at 4; a round genuinely saved late lands in the hour it was
+saved, which is the honest record.
+
+**Everything hour-shaped is derived on read — no cron, no stored state** (the PRESENCE /
+SESSION_STATE pattern; `CHECK_STATE` is a frozen constant, deliberately not a schema
+enum). Buckets are facility wall-clock labels via `facilityHourKey()`; **the alarm is
+rolling and bucket-free**: OVERDUE when `now − lastCheck > CHECK_INTERVAL_MS (60m) +
+CHECK_GRACE_MS (15m)` — the grace knob in `services/checks.js`, same figure and reasoning
+as sign-outs, and THE one derivation the page, bell and dashboard all share. DUE = no
+check in the current bucket; MISSED = an elapsed bucket with none (history only, shown as
+a callout in the day log). An apartment **never checked reads OVERDUE, not blank** — an
+apartment nobody has walked is exactly what the alarm is for. DST needs no special case:
+buckets come from stepping real 3,600,000 ms instants through the formatter and deduping
+labels (fall-back merges the repeated 1 AM, spring-forward never emits a 2 AM), and the
+alarm just measures elapsed milliseconds across either boundary.
+
+**Append-only, stricter than `service_entries`: zero UPDATEs.** There is no verification
+transition here, so both tables refuse every UPDATE and DELETE by trigger (what stops a
+superuser) AND by revoked privilege (what stops the app role) — asserted separately, the
+module 7 discipline. A correction is an **amendment**: a pure INSERT with
+`supersedesId @unique` and a required reason, which **carries the original's `checkedAt`
+verbatim** — it corrects what was observed, never when, so the amended check stays in its
+own hour bucket — must cover **exactly the original's line set** (the visit already
+happened; occupancy since is irrelevant), is re-validated **as of the original instant**
+(a sign-out open *then*, not now), and is pinned to the original's apartment by trigger.
+Both tables are deliberately absent from `SOFT_DELETE_MODELS` and present in
+`AUDITED_MODELS` and `RLS_MODELS`; reset.js clears them by TRUNCATE for the same reason
+as `service_entries`.
+
+**RLS:** lines get the sign_outs policy verbatim (staff, or the resident's own stay);
+**headers are staff-only** — the free-text apartment note can name other residents, and
+nothing in the resident portal needs it. Widening later is one deliberate policy change.
+
+**Recording and amending are all-staff** — the tech in the hallway is the one holding the
+phone, and a mis-tap fix is a hallway act too. Same reasoning as sign-outs and the roll.
+
+**The bell gains two ACTION kinds**, both derived through the module's own helpers
+(`overdueApartmentChecks()`, `unaccountedResidents()` — the `overdueWhere()` pattern, one
+knob shared with the dashboard's `attention.checksOverdue` / `attention.notAccounted`):
+`APARTMENT_CHECK_OVERDUE`, and `RESIDENT_NOT_ACCOUNTED` for a latest-check `NOT_FOUND`
+line on an active stay with no open sign-out — it clears itself on the next check, an
+amendment, a new sign-out, or discharge. A name against "not found" is operational, the
+same module-13 test the overdue sign-out item passes. **The status pill is untouched.**
+
+**The UI is one page, one route, one sheet.** `/checks` is the picker on desktop —
+apartment cards most-overdue-first (destructive inset on OVERDUE, warning Due chip, quiet
+checked time), an hour progress line ("2 PM round · 2 of 5 checked"), and the day's
+hour-bucketed log with missed-hour callouts and a muted Amended badge carrying its reason.
+On the hallway hardware — `(max-width: 767px), (pointer: coarse)`, the tap-floor query,
+because width alone misses a tablet — a **Start round** button opens **round mode** at
+`/checks/round` (Kasan's choice): a full-screen picker with a progress track, tap →
+sheet → save → back to the picker, no forced sequence, a live deep link at every width.
+`AppCheckSheet` is `AppRollSheet`'s twin (identity-keyed refetch watch, `pe-9` header,
+one POST for the whole check, 44px floors): Present reveals **note chips** (Sleeping, In
+room, Common area, Cooking, Watching TV — chips fill, typing edits), signed-out rows are
+muted and carry **state and time, never a destination** (the census-tile rule), and Save
+stays disabled until everyone is accounted and every present note is non-empty. Amend mode
+is the same sheet fed by `GET /checks/:id`, entered from a log row's ellipsis — one sheet
+per page, driven by refs. The page re-derives DUE/OVERDUE on the census's 30-second tick
+(`checkState()` in `utils/facilityTime.js` mirrors the server), because crossing into
+either mutates nothing and no socket event will come.
 
 ### 5. Drug screening
 Randomized and for-cause selection. Records test type, collection time, observing staff,
@@ -758,6 +844,15 @@ and 6 will copy it — so the shape matters beyond this module:
   an original claiming no work done is a half-filled form that reached the table.
 - An amendment **starts unverified**. The original's sign-off was an attestation about
   figures that have just changed.
+
+**Known soft spot, found while building module 4 (2026-08-06):**
+`service_amendment_reason_paired` passes on a NULL reason — `length(btrim(NULL))` is NULL
+and **a CHECK constraint passes on NULL**, so the second branch goes NULL and
+`FALSE OR NULL` slips through. The service layer requires the reason, so nothing reaches
+this in practice, but the DB backstop is softer than this section claims. The applied
+migration is immutable; the fix is an explicit `"amendmentReason" IS NOT NULL` in a **new**
+migration. Module 4's `check_amendment_reason_paired` and `check_present_needs_note` carry
+the guard already, with assertions pinning it.
 
 **Roles:** logging and **verifying are all-staff**, matching sign-outs — the tech handed the
 signed slip is the one at the door, and making them find a manager is how it ends up on
@@ -1515,6 +1610,20 @@ Two verification suites, both run against a live database:
   queue, open URGENT maintenance), balances summing to their own card and agreeing with
   the roster, a probe payment moving the total on the next read, and a probe sign-out
   surfacing and being cleaned up again. Posts a $1 payment — reseed after.
+- `node scripts/verify-checks.js` — 51 assertions on the hourly round: the staff gate, the
+  board derived from the latest check (95 minutes OVERDUE, most-overdue-first, the missed
+  bucket derived from absence, the amended marker), a roster that pre-accounts open
+  sign-outs and never carries a destination, roster-completeness 409s (missing, extra,
+  duplicated), PRESENT-needs-note at the route AND the DB CHECK (including the NULL-note
+  and NULL-reason CHECK holes — a CHECK passes on NULL, and the assertions pin the
+  explicit IS NOT NULL guards), NOT_FOUND refused for a signed-out resident and PRESENT
+  accepted for one found on site, the rolling alarm at 76 vs 74 minutes, both bell items
+  appearing and clearing themselves, the amendment arc (reason required, same line set,
+  re-validated as of the original instant, checkedAt carried verbatim, original preserved,
+  no fork, cross-apartment refused by trigger), append-only on both tables asserted at
+  both layers (app role by privilege, superuser by trigger), RLS (headers invisible to
+  residents, lines scoped to their own stay), and audit rows carrying ids only. Posts
+  checks — reseed after.
 - `npm run verify:rls` — 28 assertions proving a resident actor cannot read, count or
   write another resident's rows — including their ledger and sign-outs — and that the
   app role cannot bypass the policies
@@ -1534,6 +1643,7 @@ npm run verify:constraints && node scripts/seed.js \
   && node scripts/verify-schedule.js && node scripts/seed.js \
   && node scripts/verify-service.js && node scripts/seed.js \
   && node scripts/verify-dashboard.js && node scripts/seed.js \
+  && node scripts/verify-checks.js && node scripts/seed.js \
   && npm run verify:rls
 ```
 

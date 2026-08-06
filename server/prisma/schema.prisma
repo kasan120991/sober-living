@@ -123,6 +123,17 @@ enum MaintenancePriority {
   URGENT
 }
 
+enum CheckResidentStatus {
+  /// Seen on site. What they were doing is REQUIRED (CHECK in the migration).
+  PRESENT
+  /// Accounted for by an open sign-out — recorded so the check is complete
+  /// evidence of the whole apartment, not just of whoever was home.
+  SIGNED_OUT
+  /// Expected on site and not found. Lights the bell until a later check,
+  /// a sign-out, or a discharge accounts for them.
+  NOT_FOUND
+}
+
 enum DocumentType {
   RESIDENT_AGREEMENT
   PHOTO_ID
@@ -154,6 +165,7 @@ model Apartment {
   /// opens, that is the assumption to revisit.
   beds                Bed[]
   maintenanceRequests MaintenanceRequest[]
+  checks              ApartmentCheck[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -350,6 +362,7 @@ model Stay {
   scheduleAttendees   ScheduleAttendee[]
   scheduleAttendance  ScheduleAttendance[]
   serviceEntries      ServiceEntry[]
+  checkLines          ApartmentCheckResident[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -857,6 +870,87 @@ model ServiceEntry {
   @@map("service_entries")
 }
 
+/// One hourly round of one apartment: who was accounted for, and how.
+///
+/// Module 4, redefined by the facility (2026-08-06): staff walk EACH apartment
+/// EVERY HOUR, 24/7, account for everyone who should be on site, and note what
+/// each present resident is doing. Not an inspection checklist — a headcount.
+///
+/// APPEND-ONLY, stricter than service_entries: that table keeps one write-once
+/// UPDATE (verification); this one has no transition at all, so UPDATE and
+/// DELETE are refused by trigger AND revoked as privileges, on both tables.
+/// A mistake is corrected by an AMENDMENT — a new row with `supersedesId` and
+/// a reason — which carries the original's `checkedAt` VERBATIM: it corrects
+/// what was observed, never when, so the amended check stays in its own hour.
+///
+/// `checkedAt` is always the SERVER clock at recording. A client-supplied time
+/// is an invitation to back-fill the 2 PM round at 4; a round genuinely saved
+/// late lands in the hour it was saved, which is the honest record. Hour
+/// buckets, DUE/OVERDUE/MISSED — all of it is DERIVED from this instant on
+/// read (services/checks.js), never stored. Same pattern as PRESENCE.
+model ApartmentCheck {
+  id          String    @id @default(uuid(7))
+  apartmentId String
+  apartment   Apartment @relation(fields: [apartmentId], references: [id])
+
+  /// The UTC instant the round was recorded — always the server clock.
+  checkedAt DateTime
+
+  /// Whole-apartment note, optional ("smoke smell in hallway").
+  note String?
+
+  recordedById String
+  recordedBy   User   @relation("recordedApartmentChecks", fields: [recordedById], references: [id])
+
+  /// Amendment pattern per the footer of this file. @unique is total, not
+  /// partial — checks are never soft-deleted (unlike ScheduleEvent), so the
+  /// one_live_successor trade does not apply. A trigger additionally pins an
+  /// amendment to its original's apartment.
+  supersedesId    String?         @unique
+  supersedes      ApartmentCheck? @relation("CheckAmendment", fields: [supersedesId], references: [id])
+  supersededBy    ApartmentCheck? @relation("CheckAmendment")
+  /// Required whenever supersedesId is set, refused when it is not (CHECK).
+  amendmentReason String?
+
+  residents ApartmentCheckResident[]
+
+  createdAt DateTime @default(now())
+  // Deliberately no updatedAt and no deletedAt — append-only with no update
+  // transition, and absent from SOFT_DELETE_MODELS like ServiceEntry.
+
+  /// Serves "latest check per apartment" (the alarm) and the daily log.
+  @@index([apartmentId, checkedAt(sort: Desc)])
+  @@map("apartment_checks")
+}
+
+/// One resident's line on one check — the roster as found, snapshotted.
+///
+/// References the STAY, like sign-outs and the schedule roster: on discharge
+/// the person drops out of future rosters with no write, and a returning
+/// resident's old checks stay with the old episode.
+///
+/// Deliberately NO signOutId on a SIGNED_OUT line: which sign-out accounted
+/// for them is derivable (stayId + checkedAt interval containment), and a
+/// stored pointer would couple an append-only table to a soft-deletable one.
+model ApartmentCheckResident {
+  id      String         @id @default(uuid(7))
+  checkId String
+  check   ApartmentCheck @relation(fields: [checkId], references: [id])
+
+  stayId String
+  stay   Stay   @relation(fields: [stayId], references: [id])
+
+  status CheckResidentStatus
+  /// REQUIRED when PRESENT (CHECK in the migration): "what were they doing"
+  /// is the record the facility asked for. Optional otherwise.
+  note   String?
+
+  @@unique([checkId, stayId])
+  /// Serves the RLS own-stay policy and the resident record's future section.
+  @@index([stayId])
+  @@map("apartment_check_residents")
+}
+
 model InsurancePolicy {
   id String @id @default(uuid(7))
 
@@ -975,6 +1069,8 @@ model User {
 
   recordedServiceEntries ServiceEntry[] @relation("recordedServiceEntries")
   verifiedServiceEntries ServiceEntry[] @relation("verifiedServiceEntries")
+
+  recordedApartmentChecks ApartmentCheck[] @relation("recordedApartmentChecks")
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

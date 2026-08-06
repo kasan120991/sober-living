@@ -1,6 +1,7 @@
 import { prisma } from '../db/client.js'
 import { BED_STATUS, STAY_STATUS } from '../domain/constants.js'
 import { formatFacilityTime } from '../lib/facilityTime.js'
+import { overdueApartmentChecks, unaccountedResidents } from './checks.js'
 import { urgentOpenWhere } from './maintenance.js'
 import { overdueWhere } from './signOuts.js'
 
@@ -28,7 +29,7 @@ import { overdueWhere } from './signOuts.js'
 const LEVEL = { ACTION: 'action', WATCH: 'watch' }
 
 export async function listNotifications() {
-  const [overdue, unhoused, urgent, staleOpen] = await Promise.all([
+  const [overdue, unhoused, urgent, staleOpen, checksOverdue, notAccounted] = await Promise.all([
     // The loudest state in the app: someone off property past their expected
     // return (plus the grace window — see OVERDUE_GRACE_MS).
     prisma.signOut.findMany({
@@ -62,6 +63,12 @@ export async function listNotifications() {
       where: { status: BED_STATUS.OUT_OF_SERVICE },
       include: { apartment: { select: { id: true, name: true } } },
     }),
+
+    // The hourly round: an apartment past the alarm, and anyone the latest
+    // check could not find. Both derive through services/checks.js — the one
+    // knob — and clear themselves the moment a check or sign-out lands.
+    overdueApartmentChecks(),
+    unaccountedResidents(),
   ])
 
   const items = []
@@ -102,6 +109,35 @@ export async function listNotifications() {
       detail: `Urgent · ${r.apartment.name}`,
       to: `/apartments/${r.apartment.id}`,
       at: r.reportedAt,
+    })
+  }
+
+  for (const c of checksOverdue) {
+    items.push({
+      id: `check:${c.apartment.id}`,
+      level: LEVEL.ACTION,
+      kind: 'APARTMENT_CHECK_OVERDUE',
+      title: `${c.apartment.name} has not been checked`,
+      detail: c.lastCheckAt
+        ? `Last check ${formatFacilityTime(c.lastCheckAt)} · ${c.byName}`
+        : 'Never checked.',
+      to: '/checks',
+      // The longest-unwalked apartment sorts first.
+      at: c.since,
+    })
+  }
+
+  for (const r of notAccounted) {
+    items.push({
+      id: `notfound:${r.stayId}`,
+      level: LEVEL.ACTION,
+      kind: 'RESIDENT_NOT_ACCOUNTED',
+      // A name against "not found" is operational, the same test the overdue
+      // sign-out item passes: whoever acts needs to know who to look for.
+      title: `${r.fullName} was not found at the last check`,
+      detail: `${r.apartmentName} · ${formatFacilityTime(r.at)}`,
+      to: '/checks',
+      at: r.at,
     })
   }
 

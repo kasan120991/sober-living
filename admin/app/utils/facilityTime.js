@@ -13,6 +13,10 @@ export const FACILITY_TIMEZONE = 'America/New_York'
 /** Mirrors OVERDUE_GRACE_MS in server/src/services/signOuts.js. */
 export const OVERDUE_GRACE_MS = 15 * 60_000
 
+/** Mirror CHECK_INTERVAL_MS / CHECK_GRACE_MS in server/src/services/checks.js. */
+export const CHECK_INTERVAL_MS = 60 * 60_000
+export const CHECK_GRACE_MS = 15 * 60_000
+
 const TIME = new Intl.DateTimeFormat('en-US', {
   timeZone: FACILITY_TIMEZONE,
   hour: 'numeric',
@@ -147,6 +151,52 @@ export function daysAgoLabel(dateKey, today = facilityDateNow()) {
   if (days === -1) return 'yesterday'
   if (days === 1) return 'tomorrow'
   return days < 0 ? `${-days} days ago` : `in ${days} days`
+}
+
+const HOUR_KEY = new Intl.DateTimeFormat('en-US', {
+  timeZone: FACILITY_TIMEZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  hourCycle: 'h23',
+})
+
+/** UTC instant → its facility hour bucket, '2026-08-06 14'. Mirrors the server. */
+export function facilityHourKeyOf(instant) {
+  const p = Object.fromEntries(HOUR_KEY.formatToParts(new Date(instant)).map((x) => [x.type, x.value]))
+  return `${p.year}-${p.month}-${p.day} ${p.hour}`
+}
+
+/**
+ * '2026-08-06 14' → '2 PM'. A PURE STRING TRANSFORM of the hour suffix, the
+ * formatWallClock discipline: the key is already a facility label, and running
+ * it through `new Date()` would re-interpret it as an instant.
+ */
+export function formatHourLabel(hourKey) {
+  const h = Number(hourKey.slice(-2))
+  if (Number.isNaN(h)) return hourKey ?? ''
+  const suffix = h < 12 ? 'AM' : 'PM'
+  return `${h % 12 === 0 ? 12 : h % 12} ${suffix}`
+}
+
+/**
+ * An apartment's round standing against a moving clock — mirrors
+ * checkStateOf() in server/src/services/checks.js, for the same reason the
+ * client re-derives sign-out presence: crossing into DUE or OVERDUE mutates
+ * nothing server-side, so the page's tick has to see it without a refetch.
+ */
+export function checkState(lastCheckAt, nowMs = Date.now()) {
+  if (!lastCheckAt) return 'OVERDUE'
+  const last = new Date(lastCheckAt)
+  if (facilityHourKeyOf(last) === facilityHourKeyOf(nowMs)) return 'CHECKED'
+  if (nowMs - last.getTime() > CHECK_INTERVAL_MS + CHECK_GRACE_MS) return 'OVERDUE'
+  return 'DUE'
+}
+
+/** How late a round is, measured from when it fell due (last check + the hour). */
+export function checkOverdueLabel(lastCheckAt, nowMs = Date.now()) {
+  return overdueLabel(new Date(new Date(lastCheckAt).getTime() + CHECK_INTERVAL_MS), nowMs)
 }
 
 /** How late, measured from the expected return itself: '2h 41m' or '41m'. */

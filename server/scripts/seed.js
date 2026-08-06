@@ -358,6 +358,91 @@ async function main() {
     },
   })
 
+  // ── Apartment checks ──────────────────────────────────────────────────────
+  // The hourly round, backfilled over the last six hours with relative times
+  // (same reasoning as the sign-outs above). What a fresh seed shows: the
+  // men's apartment CHECKED minutes ago with one resident NOT FOUND (the bell
+  // and Needs attention light), the women's apartment OVERDUE (~95 minutes
+  // since its last check, past the hour plus the 15-minute grace), one
+  // mid-morning hour skipped on the women's side (the log shows a missed
+  // bucket — an absence, nothing written), and one earlier check amended with
+  // a reason. Lines agree with the sign-outs: Ocampo left an hour ago, so
+  // older checks mark him PRESENT and the latest marks him SIGNED_OUT; Boone
+  // has been out five hours, so every seeded women's check marks her out.
+  const MIN = 60_000
+  const createCheck = (apartmentId, at, byId, lines, extra = {}) =>
+    prisma.apartmentCheck.create({
+      data: {
+        apartmentId,
+        checkedAt: at,
+        recordedById: byId,
+        residents: { create: lines },
+        ...extra,
+      },
+    })
+
+  const mensNotes = [
+    'Sleeping',
+    'In room, reading',
+    'Common area, watching TV',
+    'Cooking dinner',
+    'On the porch with his sponsor book',
+    'Doing chores',
+  ]
+  for (let k = 6; k >= 1; k--) {
+    const at = new Date(nowMs - k * HOUR - 7 * MIN)
+    await createCheck(apt12.id, at, tech.id, [
+      { stayId: byLast('Whitfield'), status: 'PRESENT', note: mensNotes[k % mensNotes.length] },
+      // Ocampo signed out one hour ago; before that he was home.
+      k >= 2
+        ? { stayId: byLast('Ocampo'), status: 'PRESENT', note: mensNotes[(k + 2) % mensNotes.length] }
+        : { stayId: byLast('Ocampo'), status: 'SIGNED_OUT' },
+      { stayId: byLast('Castillo'), status: 'PRESENT', note: mensNotes[(k + 4) % mensNotes.length] },
+    ])
+  }
+  // The latest men's check, twenty minutes ago: CHECKED this hour, and
+  // Castillo could not be found — no open sign-out, so the bell carries him
+  // until the next check or a sign-out accounts for him.
+  await createCheck(apt12.id, new Date(nowMs - 20 * MIN), tech.id, [
+    { stayId: byLast('Whitfield'), status: 'PRESENT', note: 'Common area, watching TV' },
+    { stayId: byLast('Ocampo'), status: 'SIGNED_OUT' },
+    { stayId: byLast('Castillo'), status: 'NOT_FOUND', note: 'Not in his room or the common areas' },
+  ])
+
+  // The women's side: hourly until 95 minutes ago, then nothing — so the
+  // apartment sits OVERDUE on first login. Hour k=4 is skipped on purpose:
+  // that is what a missed bucket looks like in the log.
+  for (let k = 6; k >= 2; k--) {
+    if (k === 4) continue
+    const at = new Date(nowMs - k * HOUR - 12 * MIN)
+    await createCheck(apt14.id, at, k % 2 === 0 ? manager.id : tech.id, [
+      k >= 5
+        ? { stayId: byLast('Boone'), status: 'PRESENT', note: 'Getting ready for her shift' }
+        : { stayId: byLast('Boone'), status: 'SIGNED_OUT' },
+      { stayId: byLast('Ferrer'), status: 'PRESENT', note: 'In room, on the phone with family' },
+    ])
+  }
+  const womensLast = await createCheck(apt14.id, new Date(nowMs - 95 * MIN), tech.id, [
+    { stayId: byLast('Boone'), status: 'SIGNED_OUT' },
+    { stayId: byLast('Ferrer'), status: 'PRESENT', note: 'Doing laundry' },
+  ])
+
+  // One amendment, so the log renders the marker: same visit, same instant,
+  // corrected note, reason attached. The original stays.
+  await createCheck(
+    apt14.id,
+    womensLast.checkedAt,
+    manager.id,
+    [
+      { stayId: byLast('Boone'), status: 'SIGNED_OUT' },
+      { stayId: byLast('Ferrer'), status: 'PRESENT', note: 'Doing laundry in the downstairs room' },
+    ],
+    {
+      supersedesId: womensLast.id,
+      amendmentReason: 'Wrong room noted — corrected after the walk.',
+    },
+  )
+
   // ── Community service ───────────────────────────────────────────────────
   // Intake is 2026-05-01, so every seeded resident is months into a stay and
   // the quota has bitten several times over. The point of this block is that a
@@ -677,6 +762,7 @@ async function main() {
     ${await prisma.user.count()} staff users
     ${await prisma.maintenanceRequest.count()} maintenance requests (1 open urgent, 1 resolved)
     ${await prisma.signOut.count()} sign-outs (1 out, 1 OVERDUE, 1 returned)
+    ${await prisma.apartmentCheck.count()} apartment checks (men's CHECKED with 1 not found, women's OVERDUE, 1 missed hour, 1 amended)
     ${await prisma.ledgerEntry.count()} ledger entries (rent, laundry, a trip, a damage, one credit)
     ${await prisma.scheduleEvent.count()} scheduled events (5 weekly, 1 one-off; 2 of them both cohorts), ${await prisma.scheduleOccurrence.count()} occurrences
     ${await prisma.scheduleAttendance.count()} attendance marks on 2 taken rolls (one of them shared) — earlier days left un-taken on purpose
