@@ -1121,10 +1121,149 @@ Multi-day, approval-gated. Request → review → approve/deny with a reason. Bl
 by program phase. Bed is held, and the census reflects "out on pass" rather than empty.
 
 ### 10. Maintenance
-**Built.** Requests raised against an apartment: title, description, priority, status.
-Any staff may file one; admin and house managers close them, and closing requires a
-resolution note. Deliberately independent of `Bed.status` — maintenance is a property of
-the unit, out-of-service is a property of the bed, and neither drives the other.
+**Built 2026-08-02, planned out properly 2026-08-07.** Requests raised against an
+apartment: title, description, priority, status. Any staff may file one; admin and house
+managers close them, and closing requires a resolution note. Deliberately independent of
+`Bed.status` — maintenance is a property of the unit, out-of-service is a property of the
+bed, and neither drives the other.
+
+That paragraph was the entire section for five days, and it showed: **two of the four
+statuses were unreachable from any screen**, a NORMAL request could sit for six weeks and
+appear nowhere, and the facility's real workflow was leaking into free text — the seed
+read `"Window latch broken — work order 118"` with `"Vendor scheduled."` in the
+description, because there was nowhere else to put either. Four facility decisions on
+2026-08-07 fixed the rules rather than the symptoms.
+
+**A request is late against its OWN priority's target.** `MAINTENANCE_TARGET_MS` in
+`domain/constants.js` — **URGENT 24h, NORMAL 7 days, LOW 30 days** — and
+`overdueRequestWhere()` in `services/maintenance.js` is **THE one knob**, the
+`overdueWhere()` / `urgentOpenWhere()` idiom: one `where` with an OR arm per priority,
+shared by the page, the bell and the dashboard so the three cannot disagree about what is
+late.
+
+- **Measured from `reportedAt`**, not from the last time anybody touched it. "How long has
+  this been broken" is the question, and re-prioritising a request or assigning it to
+  somebody does not make the tenant's shower work.
+- **Derived on read, never stored** — no cron, no flag, and changing a target re-reads
+  every request correctly instead of needing a backfill.
+- **No clock tick on the page.** The census and sign-outs tick at 30s because a resident
+  crosses into overdue within the hour; the schedule board refetches at 60s. A request
+  crosses at **24 hours at the soonest**, so the next page load is soon enough — the
+  explicit `servicePace()` reasoning ("do not add a timer by analogy with the census"),
+  and the same call `/screens` made.
+- **`urgentOpenWhere()` was KEPT, not replaced.** An urgent request filed twenty minutes
+  ago is a hazard and belongs in the bell before any clock has run. The bell and dashboard
+  key on the **union** — urgent-and-open, OR overdue against its own target — and
+  `verify-maintenance.js` asserts that the bell's set is exactly that union and no third
+  rule. The bell item's detail says *which* of the two put it there, because they call for
+  different things; overdue wins when a request is both.
+- **The bell item now links to `/maintenance`, not `/apartments/:id`.** The apartment page
+  is manager-only, so the old destination sent a tech to a screen they cannot open.
+
+**`IN_PROGRESS` means somebody owns it.** The state earns its place by carrying an owner:
+`assignedToId` (a staff `User`) **and** `vendorName` + `workOrderRef`, deliberately **not**
+mutually exclusive — a house manager who owns the job and called a plumber is one request,
+not two. A CHECK refuses `IN_PROGRESS` with neither, and the vendor branch spells out
+`IS NOT NULL` for the reason written on `check_present_needs_note`: `length(btrim(NULL))`
+is NULL and **a CHECK passes on NULL**, so without it a NULL vendor name walks straight
+through. There are assertions for the NULL *and* the blank case.
+
+Taking a job is a hallway act, so `POST /:id/start` is **all-staff** and **defaults the
+assignee to the actor** when nobody is named and no vendor given. A tech taps "I'm on it"
+once and the state is true; making them fill in a name first is how `IN_PROGRESS` goes back
+to being a word nobody sets.
+
+**Raising a priority is all-staff; lowering it is managers.** Priority now decides when a
+request is late, which makes it consequential in a way it was not. Anyone who smells gas
+can make a request urgent — making them find a manager first is how it ends up unrecorded,
+the sign-out and roll-taking reasoning. **Quieting** an alarm is a judgement about the
+facility's own risk, so it sits where the other judgements do. The rule cannot be expressed
+as `requireRole` middleware because whether it applies depends on the body, so it lives in
+`setPriority()` with its reasoning rather than being split across a route.
+
+**Closing and reopening are APPENDED to `maintenance_events`, never overwritten.** Two
+kinds only — `CLOSED` (carrying which closed state, paired by CHECK) and `REOPENED` — each
+with an actor, an instant and a **required non-empty note**. Deliberately not an event log
+for everything: starting work and changing priority leave no row, because the facility
+asked for a trail of the *consequential* transitions and the audit extension already
+records who changed what.
+
+- **`resolvedById`, `resolvedAt` and `resolutionNote` were DROPPED from the request.**
+  Reopening used to *clear* them (`services/maintenance.js:76-80`), so a request closed,
+  reopened and closed again could only ever describe the second closure — in an app whose
+  whole posture is that records are evidence. Keeping them beside the trail would be a
+  second copy that can disagree, the same reasoning that dropped
+  `ServiceEntry.supersededById`. The current closure is a **read over the trail**
+  (`shapeRequest`'s `closure`), never a stored column.
+- **The note requirement became a database CHECK.** It lived only in a service function
+  until 2026-08-07, which meant any other code path — a script, a future route, a psql
+  session — could close a request silently. `maintenance_requests` had **no CHECK, no
+  trigger and no REVOKE at all**, unlike every other evidence table.
+- **Append-only at both layers, asserted separately** — `REVOKE UPDATE, DELETE` stops the
+  app role, a trigger stops a superuser. The module 7 discipline: a test that conflates the
+  two proves neither. Note the **request table stays freely updatable**: status, priority
+  and ownership are current state, not evidence. Only the trail is frozen.
+- `MaintenanceEvent` joins `AUDITED_MODELS`, stays **out** of `SOFT_DELETE_MODELS` (like
+  `ScheduleSession` and the check tables — soft-deleting a trail row would hide the fact it
+  records), and gets **no RLS**, following `maintenance_requests`: facility configuration,
+  gated by role in the API. `reset.js` clears it by TRUNCATE for the same reason as
+  `service_entries`.
+- **The migration is hand-written because the backfill must run BEFORE the columns are
+  dropped.** `prisma migrate dev` would have dropped three columns holding the only record
+  of every closure the facility had ever made.
+
+**Still no resident on a request, and that is a decision rather than an omission.** Naming
+the resident who reported an issue would make `maintenance_requests` resident data and pull
+in RLS policies and the resident block of `AUDITED_MODELS`. Revisit when the portal lets
+residents report their own issues — the migration says so at the point it declines to add
+policies.
+
+**Photos stay deferred**, blocked on the same object storage as module 1's documents. A
+broken thing is the most photographable record in the app, which is why this is named here
+rather than left to be noticed.
+
+**`/maintenance` is ONE WORK QUEUE** — a dense filterable table, chosen 2026-08-07 from
+three rendered variants. Overdue-first bands and a group-per-apartment list were the
+others, and both lost on the same axis: this is a **reference view that gets sorted and
+filtered**, not a queue with one urgent act at the top the way `/service` and `/billing`
+have. There is no single button to press here — the work is picking the right row — so
+promoting a band would be choosing for the reader.
+
+What that costs, accepted knowingly: **urgency is a chip in a column rather than a
+position on the page**, so it can be skimmed past. Two things pay for it — the destructive
+inset on an overdue row, which is the page's *only* inset, and the figures line, where the
+overdue count is the one number in destructive. If the house outgrows a screenful, the
+fallback is the bands variant and the figures carry over unchanged.
+
+- **The age column reads against its own target** — "10 days / 7d". A bare age would make
+  a 10-day NORMAL and a 10-day LOW look identical when one is late and the other has three
+  weeks left. A one-day target prints "24h", not "1d": the facility says urgent is a
+  twenty-four hour job, and "1d" beside an age of "3 hours" reads as a date.
+- **Filtering is client-side over the one composed read** (`GET /maintenance/house`). The
+  figures count the whole house, so a round-trip per chip would let a count and its rows
+  disagree for as long as the request took.
+- **No clock tick**, for the reason given above.
+- `AppMaintenanceList` stays **cards** and is now only the apartment detail page's: a
+  second table inside a page that already has a bed table reads as a continuation of the
+  first. Both surfaces share `AppMaintenanceActions` and the same dialogs, so they cannot
+  disagree about what an action does.
+- **`AppMaintenanceRequestDialog` was extracted from `pages/apartments/[id].vue`**, where
+  it was written inline and reachable from nowhere else — which is exactly why the
+  house-wide queue had no way to file a request at all. It takes `v-model:open` and no
+  trigger, per the two-screens rule, and grows an apartment picker only when no
+  `apartmentId` is bound (the `AppLedgerEntryDialog` pattern).
+
+Two smaller repairs made with it, both the sort that hide for months:
+
+- **`GET /maintenance` never validated its query.** `req.query.status` went straight into a
+  Prisma `where`, so `?status=FOO` came back a **500** where every other bad input in this
+  app is a 400. `parseQuery()` in `lib/http.js` is `parseBody`'s twin and exists so a route
+  reads honestly about what it validates.
+- **`shapeRequest` lived in `services/apartments.js`** and was imported *back* into
+  `services/maintenance.js` — the two modules pointing at each other for the shape of a
+  thing only one of them owns. The direction is reversed, and `REQUEST_ORDER` is now
+  shared, which fixed a second bug underneath it: the list and the apartment detail sorted
+  the same collection **two different ways**.
 
 ### 11. Fee ledger
 **Built (partly).** Not a rent ledger — a balance carries rent, laundry, trips, program
@@ -2149,7 +2288,28 @@ Two verification suites, both run against a live database:
 - `node scripts/verify-auth.js` — 15 assertions on the login/session/audit flow
 - `node scripts/verify-apartments.js` — 32 assertions on apartments, beds and
   maintenance, including the admin/manager field split, the rules the database
-  cannot enforce, and the remove/restore arc
+  cannot enforce, and the remove/restore arc. Its six maintenance assertions cover
+  the apartment-detail path and stay; the module's own arc is the suite below
+- `node scripts/verify-maintenance.js` — **55 assertions** on the repair lifecycle.
+  The target rule is proved **with no database** at 23h/25h URGENT, 6d/8d NORMAL and
+  29d/31d LOW, plus a closed request staying CLOSED however old — without which every
+  resolved request in the facility's history would light up. The **union is proved in
+  both directions**, which is the pair the design rests on: an urgent request two hours
+  old is *not* overdue and reaches the bell anyway, an aged NORMAL one *is* overdue and
+  reaches it, a young NORMAL one is in neither, and the bell's set equals urgent-open ∪
+  overdue exactly — so no third rule crept in. The bell and the dashboard are then
+  asserted to name the same requests. `IN_PROGRESS` with no owner is refused by the
+  CHECK, **and separately with a NULL and a blank vendor name** — issue #1's hole
+  wearing a maintenance costume. Closing is refused blank at the route *and* at the
+  CHECK, a REOPENED row carrying a `closedAs` is refused, and the arc that motivated the
+  whole table gets four: close → reopen → close leaves **three events**, the **first
+  closure is still readable**, the trail reads oldest-first, and `closure` resolves to
+  the **latest**. "The trail shows the latest closure" would pass with the first one
+  destroyed, which is exactly what the old columns did — the row count going *up* is the
+  guarantee. Append-only is asserted at **both layers separately** (privilege for the app
+  role, trigger for a superuser), the raise/lower priority split is proved in all four
+  combinations, `?status=FOO` is a **400 not a 500**, and the list and the apartment page
+  are asserted to return the **same order**. Posts requests and closes them — reseed after
 - `node scripts/verify-residents.js` — 47 assertions on the roster, intake,
   bed moves, discharge, the SSN read restriction, the notification bell, and search.
   Includes the cohort-mismatch 409 and a tech's 403 on bed assignment — the pair the
@@ -2172,6 +2332,12 @@ Two verification suites, both run against a live database:
   reported on its own; a payment with nothing invoiced reads as a **credit**; and it
   **nets against the next invoice**. Plus the keyless send **refused with nothing billed** —
   which is also why the arc drives `draftInvoice` directly rather than the route.
+  **Known environmental failure, not a regression** (noticed 2026-08-07): that one
+  assertion needs `STRIPE_SECRET_KEY` to be **absent**, so on a machine where `.env`
+  carries the test key it fails — the send genuinely succeeds against the Stripe sandbox
+  and returns 201 where the suite expects a 503. The other 71 pass. Unset the key for the
+  run, or read this line and move on; the real fix is for the suite to stub the key
+  rather than depend on the environment lacking one.
   **Five pin the net-3 term**, led by the regression that motivated it: an invoice sent
   today is **not overdue**; the due date is the end of the **third facility day** and two
   sends on that day share it whatever the hour, both proved on fixed instants so no DST
@@ -2297,6 +2463,12 @@ Two verification suites, both run against a live database:
   directions; the record section and its absent `current.screens`; and **the negative
   assertion that the bell and dashboard payloads contain nothing from module 5**. Posts
   screens and a ledger charge — reseed after.
+  **One trap worth knowing:** that negative is a regex over the *whole serialised*
+  payload (`/screen|POSITIVE|DILUTE|…/`), and since 2026-08-07 an overdue maintenance
+  request reaches the same payload — so a repair titled "screen door" fails a privacy
+  assertion with nothing actually wrong. The seed says "storm door" for exactly this
+  reason. Rename the data, never loosen the regex: its breadth is what catches an
+  `attention.screensPending` somebody adds later.
 - `npm run verify:rls` — 28 assertions proving a resident actor cannot read, count or
   write another resident's rows — including their ledger and sign-outs — and that the
   app role cannot bypass the policies
@@ -2315,6 +2487,7 @@ npm run verify:constraints && node scripts/seed.js \
   && node scripts/verify-signouts.js && node scripts/seed.js \
   && node scripts/verify-schedule.js && node scripts/seed.js \
   && node scripts/verify-service.js && node scripts/seed.js \
+  && node scripts/verify-maintenance.js && node scripts/seed.js \
   && node scripts/verify-dashboard.js && node scripts/seed.js \
   && node scripts/verify-checks.js && node scripts/seed.js \
   && node scripts/verify-screens.js && node scripts/seed.js \

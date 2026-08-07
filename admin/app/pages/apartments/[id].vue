@@ -5,7 +5,7 @@ import { previewLabels } from '~/composables/useApartments.js'
 
 const route = useRoute()
 const { user } = useAuth()
-const { getApartment, addBeds, createRequest } = useApartments()
+const { getApartment, addBeds } = useApartments()
 const notify = useNotify()
 
 const refreshList = inject('refreshApartments', () => {})
@@ -76,26 +76,10 @@ async function submitBeds() {
 }
 
 // ── File a maintenance request ──────────────────────────────────────────────
+// The form itself moved to AppMaintenanceRequestDialog on 2026-08-07. It was
+// written inline here and reachable from nowhere else, which is why the
+// house-wide /maintenance queue had no way to file anything at all.
 const reqOpen = ref(false)
-const reqForm = reactive({ title: '', description: '', priority: 'NORMAL' })
-const reqPending = ref(false)
-const reqError = ref('')
-
-async function submitRequest() {
-  reqError.value = ''
-  reqPending.value = true
-  try {
-    await createRequest({ apartmentId: route.params.id, ...reqForm })
-    notify.success('Request filed')
-    reqOpen.value = false
-    Object.assign(reqForm, { title: '', description: '', priority: 'NORMAL' })
-    await load()
-  } catch (err) {
-    reqError.value = err?.data?.error ?? 'Could not file the request.'
-  } finally {
-    reqPending.value = false
-  }
-}
 </script>
 
 <template>
@@ -215,39 +199,10 @@ async function submitRequest() {
     </DialogContent>
   </Dialog>
 
-  <!-- File maintenance request -->
-  <Dialog v-model:open="reqOpen">
-    <DialogContent class="sm:max-w-[440px]">
-      <DialogHeader><DialogTitle>File maintenance request</DialogTitle></DialogHeader>
-      <form class="flex flex-col gap-4" @submit.prevent="submitRequest">
-        <Alert v-if="reqError" variant="destructive">
-          <AlertDescription>{{ reqError }}</AlertDescription>
-        </Alert>
-
-        <AppField v-slot="{ id }" label="What is wrong">
-          <Input :id="id" v-model="reqForm.title" placeholder="Window latch broken" required />
-        </AppField>
-
-        <AppField v-slot="{ id }" label="Details">
-          <Textarea :id="id" v-model="reqForm.description" :rows="3" />
-        </AppField>
-
-        <AppField label="Priority">
-          <Select v-model="reqForm.priority">
-            <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="LOW">Low</SelectItem>
-              <SelectItem value="NORMAL">Normal</SelectItem>
-              <SelectItem value="URGENT">Urgent</SelectItem>
-            </SelectContent>
-          </Select>
-        </AppField>
-
-        <DialogFooter>
-          <Button type="button" variant="ghost" @click="reqOpen = false">Cancel</Button>
-          <Button type="submit" :disabled="reqPending">File request</Button>
-        </DialogFooter>
-      </form>
-    </DialogContent>
-  </Dialog>
+  <!-- The apartment is decided here, so no picker is shown. -->
+  <AppMaintenanceRequestDialog
+    v-model:open="reqOpen"
+    :apartment-id="route.params.id"
+    @created="load"
+  />
 </template>

@@ -95,11 +95,47 @@ export const MAINTENANCE_PRIORITY = Object.freeze({
   URGENT: 'URGENT',
 })
 
+/// The two transitions that leave a permanent row. Starting work and changing
+/// priority are ordinary updates and appear nowhere here — the facility asked
+/// for a trail of the consequential transitions, not an event log.
+export const MAINTENANCE_EVENT_KIND = Object.freeze({
+  CLOSED: 'CLOSED',
+  REOPENED: 'REOPENED',
+})
+
 /// A request in one of these states is finished and needs a resolution note.
 export const MAINTENANCE_CLOSED_STATUSES = Object.freeze([
   MAINTENANCE_STATUS.RESOLVED,
   MAINTENANCE_STATUS.CANCELLED,
 ])
+
+/// Still live work. The complement of MAINTENANCE_CLOSED_STATUSES, spelled out
+/// because it is what every "is this outstanding" read filters on.
+export const MAINTENANCE_OPEN_STATUSES = Object.freeze([
+  MAINTENANCE_STATUS.OPEN,
+  MAINTENANCE_STATUS.IN_PROGRESS,
+])
+
+/**
+ * How long a request of each priority may sit before it is overdue.
+ *
+ * THE one knob, the OVERDUE_GRACE_MS / MONTHLY_SERVICE_QUOTA_HOURS idiom:
+ * `overdueRequestWhere()` in services/maintenance.js is built from this and is
+ * shared by the page, the bell and the dashboard, so the three cannot disagree
+ * about what is late. Facility policy, chosen 2026-08-07.
+ *
+ * Measured from `reportedAt`, not from the last time anybody touched it —
+ * "how long has this been broken" is the question, and re-prioritising a
+ * request or assigning it to somebody does not make the tenant's shower work.
+ *
+ * Derived on read, never stored: no cron, no flag, and a target that changes
+ * re-reads every request correctly rather than needing a backfill.
+ */
+export const MAINTENANCE_TARGET_MS = Object.freeze({
+  [MAINTENANCE_PRIORITY.URGENT]: 24 * 60 * 60_000,
+  [MAINTENANCE_PRIORITY.NORMAL]: 7 * 24 * 60 * 60_000,
+  [MAINTENANCE_PRIORITY.LOW]: 30 * 24 * 60 * 60_000,
+})
 
 /**
  * Models whose every read and write is written to the audit log.
@@ -133,6 +169,7 @@ export const AUDITED_MODELS = Object.freeze([
   'Apartment',
   'Bed',
   'MaintenanceRequest',
+  'MaintenanceEvent',
   // The schedule is configuration too, and audited for the same reason as an
   // apartment: changing it changes how historical attendance reads. An auditor
   // asking "why does the Tuesday group show empty in March" deserves an answer.

@@ -61,8 +61,8 @@ async function main() {
     ? ok(`detail resolves the current resident (${occupiedBed.label} → ${occupiedBed.resident.fullName})`)
     : bad('detail resolves resident', JSON.stringify(detail.body?.beds?.[0]))
 
-  detail.body?.maintenanceRequests?.length === 2 && detail.body.openRequestCount === 1
-    ? ok('apartment detail carries its maintenance requests (2 total, 1 open)')
+  detail.body?.maintenanceRequests?.length === 4 && detail.body.openRequestCount === 3
+    ? ok('apartment detail carries its maintenance requests (4 total, 3 open)')
     : bad('maintenance on detail', JSON.stringify(detail.body?.openRequestCount))
 
   console.log('\n\x1b[1mWho may change what\x1b[0m')
@@ -171,28 +171,32 @@ async function main() {
     ? ok('any staff can file a request (a tech filed one)')
     : bad('tech can file', JSON.stringify(filed.body))
 
-  const techClose = await tech(`/maintenance/${filed.body.id}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ status: 'RESOLVED', resolutionNote: 'Changed the battery' }),
+  // Closing moved from `PATCH /maintenance/:id` to `POST /:id/close` on
+  // 2026-08-07, and the closure now lives in the trail rather than in three
+  // columns on the request. The rules asserted here are unchanged; only their
+  // address is. The full arc lives in verify-maintenance.js.
+  const techClose = await tech(`/maintenance/${filed.body.id}/close`, {
+    method: 'POST',
+    body: JSON.stringify({ status: 'RESOLVED', note: 'Changed the battery' }),
   })
   techClose.status === 403
     ? ok('a tech cannot close a request')
     : bad('tech blocked from closing', techClose.status)
 
-  const noNote = await manager(`/maintenance/${filed.body.id}`, {
-    method: 'PATCH',
+  const noNote = await manager(`/maintenance/${filed.body.id}/close`, {
+    method: 'POST',
     body: JSON.stringify({ status: 'RESOLVED' }),
   })
   noNote.status === 400
     ? ok(`closing without a resolution note is refused — "${noNote.body?.error}"`)
     : bad('resolution note required', noNote.status)
 
-  const closed = await manager(`/maintenance/${filed.body.id}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ status: 'RESOLVED', resolutionNote: 'Replaced the 9V battery.' }),
+  const closed = await manager(`/maintenance/${filed.body.id}/close`, {
+    method: 'POST',
+    body: JSON.stringify({ status: 'RESOLVED', note: 'Replaced the 9V battery.' }),
   })
-  closed.status === 200 && closed.body.resolvedBy?.fullName && closed.body.resolvedAt
-    ? ok(`a manager can close it with a note, and the closer is recorded (${closed.body.resolvedBy.fullName})`)
+  closed.status === 200 && closed.body.closure?.actor?.fullName && closed.body.closure?.at
+    ? ok(`a manager can close it with a note, and the closer is recorded (${closed.body.closure.actor.fullName})`)
     : bad('manager closes with note', JSON.stringify(closed.body))
 
   const openOnly = await manager('/maintenance?status=open')

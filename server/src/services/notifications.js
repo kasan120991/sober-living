@@ -2,7 +2,7 @@ import { prisma } from '../db/client.js'
 import { BED_STATUS, STAY_STATUS } from '../domain/constants.js'
 import { formatFacilityTime } from '../lib/facilityTime.js'
 import { overdueApartmentChecks, unaccountedResidents } from './checks.js'
-import { urgentOpenWhere } from './maintenance.js'
+import { MAINTENANCE_STATE, bellMaintenanceWhere, requestState } from './maintenance.js'
 import { overdueWhere } from './signOuts.js'
 
 /**
@@ -52,8 +52,13 @@ export async function listNotifications() {
       orderBy: { intakeAt: 'asc' },
     }),
 
+    // Urgent-and-open at any age, OR open past its own priority's target.
+    // A union, not a replacement: an urgent request filed twenty minutes ago
+    // is a hazard and belongs here before any clock has run, while a normal
+    // request that has sat a fortnight was invisible everywhere until
+    // 2026-08-07. One knob, shared with the dashboard.
     prisma.maintenanceRequest.findMany({
-      where: urgentOpenWhere(),
+      where: bellMaintenanceWhere(),
       include: { apartment: { select: { id: true, name: true } } },
       orderBy: { reportedAt: 'asc' },
     }),
@@ -101,13 +106,22 @@ export async function listNotifications() {
   }
 
   for (const r of urgent) {
+    // The detail says WHICH of the two reasons put it here, because they call
+    // for different things: an urgent repair needs somebody now, an overdue one
+    // needs chasing. Overdue wins when a request is both — it is the louder
+    // fact. `URGENT_MAINTENANCE` stays the kind: the client maps it to an icon,
+    // and renaming it would be a client change for no gain.
+    const overdue = requestState(r) === MAINTENANCE_STATE.OVERDUE
     items.push({
       id: `urgent:${r.id}`,
       level: LEVEL.ACTION,
       kind: 'URGENT_MAINTENANCE',
       title: r.title,
-      detail: `Urgent · ${r.apartment.name}`,
-      to: `/apartments/${r.apartment.id}`,
+      detail: `${overdue ? 'Overdue' : 'Urgent'} · ${r.apartment.name}`,
+      // /maintenance, not /apartments/:id — the apartment page is
+      // manager-only, so this item used to send a tech to a screen they
+      // cannot open. The bell is all-staff and so is its destination.
+      to: '/maintenance',
       at: r.reportedAt,
     })
   }
