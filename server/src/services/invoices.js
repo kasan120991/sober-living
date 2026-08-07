@@ -11,22 +11,29 @@ import {
   STRIPE_LINE_LABEL,
 } from '../domain/constants.js'
 import { stripe, stripeEmailsInvoices, stripeEnabled } from '../lib/stripe.js'
-import { balanceOfStay, balancesByStay } from './ledger.js'
+import { balanceOfStay, balancesByStay, draftByStay } from './ledger.js'
 
 /**
  * Invoices — module 11's second half, and the thing that finally gives
  * "overdue" a meaning.
  *
- * A charge is UNBILLED until an invoice sweeps it, and unbilled is the ABSENCE
+ * A charge is PENDING until an invoice sweeps it, and pending is the ABSENCE
  * of an `invoice_lines` row — never a column on the ledger, which refuses
  * updates by trigger and by revoked privilege. That was chosen over relaxing
  * the trigger for "only this one column, only null → value", which is exactly
  * how an append-only table stops being append-only.
  *
+ * Since 2026-08-07 an invoice is also what makes money OWED: the balance is
+ * this module's own totals minus payments, so pending charges sit outside it
+ * until they are billed. See the header of `services/ledger.js` for why, and
+ * for the failure that forced it.
+ *
  * Nothing here stores a balance. `Invoice.totalCents` is a SNAPSHOT of what was
  * billed on the day it was sent, and the migration puts it outside the UPDATE
  * grant so it cannot move — which is what makes it a snapshot rather than a
- * cache, since a cache is by definition something that gets recomputed.
+ * cache, since a cache is by definition something that gets recomputed. That
+ * immutability is now load-bearing twice over: the balance is built from these
+ * totals, so a movable one would silently rewrite what a resident owes.
  */
 
 const DAY_MS = 86_400_000
@@ -72,8 +79,8 @@ export function invoiceStatus(invoice, balanceCents, now = new Date()) {
   }
 }
 
-/** The unbilled lines of a stay: charges and credits with no invoice line. */
-export async function unbilledFor(stayId) {
+/** The PENDING lines of a stay: charges and credits with no invoice line. */
+export async function pendingFor(stayId) {
   return prisma.ledgerEntry.findMany({
     where: { stayId, type: { in: BILLABLE }, invoiceLine: { is: null } },
     orderBy: [{ occurredAt: 'asc' }, { createdAt: 'asc' }],
@@ -91,15 +98,17 @@ export function netOf(entries) {
  */
 export async function stayInvoiceSummary(stayId) {
   if (!stayId) return null
-  const [invoices, balanceCents, unbilled] = await Promise.all([
+  const [invoices, balanceCents, unbilled, drafts] = await Promise.all([
     prisma.invoice.findMany({
       where: { stayId },
       orderBy: { createdAt: 'desc' },
       include: { sentBy: { select: { id: true, fullName: true } } },
     }),
     balanceOfStay(stayId),
-    unbilledFor(stayId),
+    pendingFor(stayId),
+    draftByStay([stayId]),
   ])
+  const draft = drafts.get(stayId) ?? { cents: 0, count: 0 }
   const now = new Date()
   const shaped = invoices.map((i) => ({
     id: i.id,
@@ -118,8 +127,17 @@ export async function stayInvoiceSummary(stayId) {
   const overdue = shaped.filter((i) => i.overdue)
   return {
     invoices: shaped,
-    unbilledCents: netOf(unbilled),
-    unbilledCount: unbilled.length,
+    balanceCents,
+    pendingCents: netOf(unbilled),
+    pendingCount: unbilled.length,
+    // Money on an invoice nobody sent — in neither figure above, so it is
+    // stated rather than left to vanish. See `draftByStay`.
+    draftCents: draft.cents,
+    draftCount: draft.count,
+    // A resident who has paid more than has been invoiced. The send surfaces
+    // warn on it, because the invoice will still demand the full amount: the
+    // credit lives in our ledger and Stripe has never heard of it.
+    creditCents: balanceCents < 0 ? -balanceCents : 0,
     overdue: overdue.length > 0,
     // The dot is the LOUDEST of them, not a count — the rail is a status
     // board, and two overdue invoices are not twice as red as one.
@@ -169,7 +187,17 @@ export async function overdueByStay(stayIds) {
 /** Every invoice on a stay, newest first. */
 export async function listInvoices(stayId) {
   const summary = await stayInvoiceSummary(stayId)
-  return summary ?? { invoices: [], unbilledCents: 0, unbilledCount: 0 }
+  return (
+    summary ?? {
+      invoices: [],
+      balanceCents: 0,
+      pendingCents: 0,
+      pendingCount: 0,
+      draftCents: 0,
+      draftCount: 0,
+      creditCents: 0,
+    }
+  )
 }
 
 /**
@@ -190,7 +218,7 @@ export function draftInvoice(stayId, { dueAt }, actorId) {
   return runInTransaction(async () => {
     // Re-read INSIDE the transaction: two managers pressing Send at the same
     // instant both saw the same unbilled set a moment ago.
-    const entries = await unbilledFor(stayId)
+    const entries = await pendingFor(stayId)
     if (entries.length === 0) {
       throw new HttpError(409, 'There is nothing unbilled on this stay.')
     }
@@ -355,7 +383,20 @@ export async function pushToStripe(invoiceId, entries) {
  * checkable belongs here, in front of the commit.
  */
 async function preflight(stayId) {
-  if (!stripeEnabled()) return // A local-only invoice needs no email.
+  // A server with no Stripe key REFUSES rather than quietly making a local
+  // invoice. It used to return the DRAFT and a 200, which is indistinguishable
+  // from a real send at the UI: the lines came back billed and locked, staff
+  // got a success toast, and the invoice would never exist. That happened for
+  // real on 2026-08-07, when a merge left the keys behind in a worktree.
+  //
+  // A draft is also money in NEITHER the balance nor pending, so the silent
+  // version did not even show up as something owed.
+  if (!stripeEnabled()) {
+    throw new HttpError(
+      503,
+      'Stripe is not configured on this server, so an invoice cannot be sent. Nothing has been billed.',
+    )
+  }
   const stay = await prisma.stay.findUnique({
     where: { id: stayId },
     select: { resident: { select: { id: true, email: true } } },
@@ -386,9 +427,9 @@ export function canHostInvoice(resident) {
 
 /** Draft, then push. The whole act, in the order that makes a crash survivable. */
 export async function sendInvoice(stayId, { dueAt }, actorId) {
+  // The preflight refuses a keyless server, so by here Stripe is configured.
   await preflight(stayId)
   const { invoice, entries } = await draftInvoice(stayId, { dueAt }, actorId)
-  if (!stripeEnabled()) return invoice // A local invoice is still a real one.
   return pushToStripe(invoice.id, entries)
 }
 
@@ -451,17 +492,21 @@ export async function billableStays() {
   if (stays.length === 0) return []
 
   // ONE query for every unbilled line across every active stay, grouped in
-  // memory. A loop calling unbilledFor() per stay would be a query per
+  // memory. A loop calling pendingFor() per stay would be a query per
   // resident — the thing module 14 forbids of the dashboard, and no better
   // here just because this list is smaller.
-  const entries = await prisma.ledgerEntry.findMany({
-    where: {
-      stayId: { in: stays.map((s) => s.id) },
-      type: { in: BILLABLE },
-      invoiceLine: { is: null },
-    },
-    select: { stayId: true, type: true, amountCents: true },
-  })
+  const [entries, balances] = await Promise.all([
+    prisma.ledgerEntry.findMany({
+      where: {
+        stayId: { in: stays.map((s) => s.id) },
+        type: { in: BILLABLE },
+        invoiceLine: { is: null },
+      },
+      select: { stayId: true, type: true, amountCents: true },
+    }),
+    // For the credit warning below — also grouped, for the same reason.
+    balancesByStay(stays.map((s) => s.id)),
+  ])
 
   const byStay = new Map()
   for (const e of entries) {
@@ -484,6 +529,10 @@ export async function billableStays() {
         // fail, and a name beside an address is more disclosure than the
         // question needs.
         canInvoice: canHostInvoice(stay.resident),
+        // Money already received beyond what has been invoiced. The run still
+        // bills the full net — Stripe has never heard of the credit — so the
+        // preview names it rather than letting a resident discover it.
+        creditCents: Math.max(0, -(balances.get(stay.id) ?? 0)),
         ...acc,
       }
     })

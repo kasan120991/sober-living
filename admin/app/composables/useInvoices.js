@@ -8,10 +8,10 @@
 export function useInvoices() {
   const api = useApi()
 
-  /** `{ invoices, unbilledCents, unbilledCount, overdue, dotDue, stayId }`. */
+  /** `{ invoices, balanceCents, pendingCents, draftCents, overdue, dotDue, stayId }`. */
   const listInvoices = (residentId) => api(`/residents/${residentId}/invoices`)
 
-  /** Sweep this resident's unbilled lines into one invoice and send it. */
+  /** Sweep this resident's PENDING lines into one invoice and send it. */
   const sendInvoice = (residentId, body = {}) =>
     api(`/residents/${residentId}/invoices`, { method: 'POST', body })
 

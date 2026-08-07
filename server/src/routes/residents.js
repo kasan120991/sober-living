@@ -332,7 +332,16 @@ router.get(
   '/:id/ledger',
   handler(async (req, res) => {
     const stayId = await activeStayIdFor(req.params.id)
-    if (!stayId) return res.json({ entries: [], balanceCents: 0, stayId: null })
+    if (!stayId) {
+      return res.json({
+        entries: [],
+        balanceCents: 0,
+        pendingCents: 0,
+        draftCents: 0,
+        draftCount: 0,
+        stayId: null,
+      })
+    }
     res.json({ ...(await listEntries(stayId)), stayId })
   }),
 )

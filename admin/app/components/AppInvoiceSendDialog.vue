@@ -41,11 +41,11 @@ watch(
 )
 
 /** Charges and credits with no invoice yet. Payments are never billable. */
-const unbilled = computed(() =>
+const pendingLines = computed(() =>
   props.entries.filter((e) => !e.billed && e.type !== 'PAYMENT'),
 )
 const totalCents = computed(() =>
-  unbilled.value.reduce((t, e) => t + (e.type === 'CHARGE' ? e.amountCents : -e.amountCents), 0),
+  pendingLines.value.reduce((t, e) => t + (e.type === 'CHARGE' ? e.amountCents : -e.amountCents), 0),
 )
 const inCredit = computed(() => props.balanceCents < 0)
 
@@ -53,10 +53,11 @@ async function submit() {
   pending.value = true
   error.value = ''
   try {
+    // No "created but not sent" case any more: a server without a Stripe key
+    // refuses in the pre-flight, before anything is billed, rather than
+    // returning a local-only draft that looks exactly like a real send.
     const invoice = await sendInvoice(props.residentId)
-    notify.success(
-      invoice.hostedUrl ? 'Invoice sent' : 'Invoice created (Stripe is not configured)',
-    )
+    notify.success('Invoice sent')
     emit('update:open', false)
     emit('sent', invoice)
   } catch (err) {
@@ -73,7 +74,8 @@ async function submit() {
       <DialogHeader>
         <DialogTitle>Send invoice — {{ residentName }}</DialogTitle>
         <DialogDescription>
-          Every unbilled charge and credit on this stay, swept into one invoice. Due on receipt.
+          Every pending charge and credit on this stay, swept into one invoice. Due on receipt —
+          and billing them is what makes them owed.
         </DialogDescription>
       </DialogHeader>
 
@@ -81,14 +83,14 @@ async function submit() {
         <AlertDescription>{{ error }}</AlertDescription>
       </Alert>
 
-      <p v-if="!unbilled.length" class="text-muted-foreground text-sm">
-        There is nothing unbilled on this stay.
+      <p v-if="!pendingLines.length" class="text-muted-foreground text-sm">
+        There is nothing pending on this stay.
       </p>
 
       <template v-else>
         <div class="flex max-h-56 flex-col overflow-y-auto">
           <div
-            v-for="e in unbilled"
+            v-for="e in pendingLines"
             :key="e.id"
             class="flex items-baseline gap-3 border-b px-1 py-1.5 text-[13px] last:border-b-0"
           >
@@ -109,13 +111,15 @@ async function submit() {
           <span class="tabular-nums">{{ money(balanceCents) }}</span>
         </p>
 
-        <!-- The invoice bills NEW charges, not the balance. Say so rather than
-             let it surprise somebody. -->
+        <!-- The invoice bills PENDING charges, and STRIPE HAS NEVER HEARD OF
+             the credit — it lives only in our ledger. Said here rather than
+             left to surprise somebody when the resident rings up about it. -->
         <Alert v-if="inCredit">
           <AlertDescription class="text-xs">
             {{ residentName }} is {{ money(Math.abs(balanceCents)) }} in credit, and this invoice
-            still asks for {{ money(totalCents) }} — an invoice bills new charges, not the
-            balance. Their credit stays on the ledger and reduces what they owe.
+            will still ask Stripe for {{ money(totalCents) }} — the credit is on our ledger, not
+            on the invoice. Their balance here afterwards will be
+            {{ money(totalCents + balanceCents) }}.
           </AlertDescription>
         </Alert>
 
@@ -138,7 +142,7 @@ async function submit() {
 
       <DialogFooter>
         <Button
-          :disabled="pending || !unbilled.length || totalCents <= 0 || !residentEmail"
+          :disabled="pending || !pendingLines.length || totalCents <= 0 || !residentEmail"
           @click="submit"
         >
           Send {{ money(totalCents) }} invoice

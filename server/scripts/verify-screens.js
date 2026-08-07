@@ -216,9 +216,16 @@ async function main() {
   labFees.length === 1 && labFees[0].amountCents === 5000
     ? ok('exactly one $50 LAB_FEE charge is posted')
     : bad('one fee', JSON.stringify(labFees))
-  afterLedger.balanceCents - beforeLedger.balanceCents === 5000
-    ? ok('and the balance moved by exactly the fee')
-    : bad('balance moved', afterLedger.balanceCents - beforeLedger.balanceCents)
+  // PENDING, not the balance. Since 2026-08-07 a charge is not owed until an
+  // invoice picks it up, and the lab fee is an ordinary charge — the resident
+  // is billed for it on the next invoice like anything else.
+  afterLedger.pendingCents - beforeLedger.pendingCents === 5000 &&
+  afterLedger.balanceCents === beforeLedger.balanceCents
+    ? ok('and it lands as PENDING by exactly the fee, owed once it is invoiced')
+    : bad(
+        'fee is pending',
+        `pending +${afterLedger.pendingCents - beforeLedger.pendingCents}, balance +${afterLedger.balanceCents - beforeLedger.balanceCents}`,
+      )
   !/POSITIVE|THC|positive/.test(labFees[0]?.description ?? '')
     ? ok('the ledger description names no result and no substance')
     : bad('ledger description leaks', labFees[0]?.description)

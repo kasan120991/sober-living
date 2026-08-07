@@ -31,14 +31,22 @@ const emit = defineEmits(['posted'])
 
 const { user } = useAuth()
 const { listLedger } = useResidents()
-const { listInvoices } = useInvoices()
+const { listInvoices, resendInvoice } = useInvoices()
+const notify = useNotify()
 
 const entries = ref([])
 const balanceCents = ref(0)
-const unbilledCents = ref(0)
+// Charges and credits nobody has invoiced yet. NOT part of the balance: since
+// 2026-08-07 a resident owes what has been invoiced and not paid, so pending
+// money is stated beside it rather than folded into it.
+const pendingCents = ref(0)
+// Money on an invoice nobody sent — in neither figure, so it gets said out loud
+// rather than silently disappearing from both.
+const draftCents = ref(0)
 const invoices = ref([])
 const overdue = ref(null)
-const pending = ref(true)
+// Loading, not money. Named for what it is now that `pendingCents` exists.
+const loading = ref(true)
 
 // Posting money is a manager action. A tech can read a balance — answering
 // "what do I owe" at the door should not need a manager — but not change one.
@@ -48,17 +56,18 @@ const canManage = computed(
 )
 
 async function load() {
-  pending.value = true
+  loading.value = true
   const [data, inv] = await Promise.all([
     listLedger(props.residentId),
     listInvoices(props.residentId),
   ])
   entries.value = data.entries
   balanceCents.value = data.balanceCents
-  unbilledCents.value = data.unbilledCents
+  pendingCents.value = data.pendingCents
+  draftCents.value = data.draftCents
   invoices.value = inv.invoices
   overdue.value = inv.invoices.find((i) => i.overdue) ?? null
-  pending.value = false
+  loading.value = false
 }
 await load()
 
@@ -71,6 +80,24 @@ async function onPosted() {
   await load()
   emit('posted')
 }
+
+// Finish a draft whose Stripe half never completed. Idempotent on the server —
+// the deterministic idempotency keys mean a replay returns the same objects
+// rather than creating a second invoice — so this is safe to press twice.
+const resuming = ref(null)
+async function resume(invoice) {
+  resuming.value = invoice.id
+  try {
+    await resendInvoice(invoice.id)
+    notify.success('Invoice sent')
+    await load()
+    emit('posted')
+  } catch (err) {
+    notify.error(err?.data?.error ?? 'The invoice could not be sent.')
+  } finally {
+    resuming.value = null
+  }
+}
 </script>
 
 <template>
@@ -78,6 +105,10 @@ async function onPosted() {
     <div class="mb-2 flex items-center justify-between gap-3">
       <div class="flex items-baseline gap-3">
         <h2 class="font-heading text-[15px] font-semibold tracking-tight">Ledger</h2>
+        <!-- Two figures, not one, and the split is the point: the balance is
+             what has been INVOICED and not paid, pending is what has not been
+             billed yet. The beds-free card's treatment — a bare total would
+             hide which of the two a number belongs to. -->
         <span
           class="text-[13.5px] tabular-nums"
           :class="
@@ -93,6 +124,11 @@ async function onPosted() {
             {{ inCredit(balanceCents) ? 'in credit' : balanceCents === 0 ? 'balance' : 'owed' }}
           </span>
         </span>
+        <!-- Hidden at zero, the census-tile rule: absence of a figure means
+             nothing is waiting, which keeps a quiet record quiet. -->
+        <span v-if="pendingCents !== 0" class="text-muted-foreground text-[13.5px] tabular-nums">
+          {{ money(pendingCents) }} pending
+        </span>
       </div>
 
       <div class="flex items-center gap-2">
@@ -104,8 +140,8 @@ async function onPosted() {
           v-if="canManage"
           size="sm"
           variant="outline"
-          :disabled="unbilledCents <= 0"
-          :title="unbilledCents <= 0 ? 'Nothing unbilled on this stay' : undefined"
+          :disabled="pendingCents <= 0"
+          :title="pendingCents <= 0 ? 'Nothing pending on this stay' : undefined"
           @click="sendOpen = true"
         >
           <Send class="size-4" /> Send invoice
@@ -140,7 +176,7 @@ async function onPosted() {
       </a>
     </div>
 
-    <p v-if="pending" class="text-muted-foreground text-sm">Loading…</p>
+    <p v-if="loading" class="text-muted-foreground text-sm">Loading…</p>
 
     <div v-else class="overflow-hidden rounded-md border">
       <div class="overflow-x-auto">
@@ -148,10 +184,10 @@ async function onPosted() {
           <thead>
             <tr>
               <th
-                v-for="h in ['Date', 'Description', 'Type', 'Amount', 'Balance']"
+                v-for="h in ['Date', 'Description', 'Type', 'Amount']"
                 :key="h"
                 class="bg-card text-muted-foreground border-b px-3 py-2 text-left text-[10.5px] font-semibold tracking-[0.1em] whitespace-nowrap uppercase"
-                :class="['Amount', 'Balance'].includes(h) && 'text-right'"
+                :class="h === 'Amount' && 'text-right'"
               >
                 {{ h }}
               </th>
@@ -168,12 +204,13 @@ async function onPosted() {
                   · {{ categoryLabel(e.category) }}
                 </span>
                 <span v-if="e.corrects" class="text-warning">· correction</span>
-                <!-- UNBILLED is marked, not billed. Once invoicing is routine
+                <!-- PENDING is marked, not billed. Once invoicing is routine
                      most lines are billed, and marking the majority is
-                     wallpaper — the polish-pass lesson. Unbilled is the state
-                     somebody can act on. -->
+                     wallpaper — the polish-pass lesson. Pending is the state
+                     somebody can act on, and now also the one saying this line
+                     is not yet part of what the resident owes. -->
                 <span v-if="!e.billed && e.type !== 'PAYMENT'" class="text-muted-foreground">
-                  · unbilled
+                  · pending
                 </span>
                 <a
                   v-else-if="e.invoice?.hostedUrl"
@@ -195,15 +232,10 @@ async function onPosted() {
                   {{ e.type === 'CHARGE' ? '' : '−' }}{{ money(e.amountCents) }}
                 </span>
               </td>
-              <td
-                class="text-muted-foreground h-12 border-b px-3 text-right tabular-nums whitespace-nowrap"
-              >
-                {{ money(e.runningCents) }}
-              </td>
             </tr>
 
             <tr v-if="!entries.length">
-              <td colspan="5" class="bg-card text-muted-foreground px-3 py-8 text-center text-sm">
+              <td colspan="4" class="bg-card text-muted-foreground px-3 py-8 text-center text-sm">
                 Nothing billed yet.
               </td>
             </tr>
@@ -212,7 +244,7 @@ async function onPosted() {
       </div>
     </div>
     <!-- ── Invoices ────────────────────────────────────────────────────── -->
-    <div v-if="!pending && invoices.length" class="mt-5">
+    <div v-if="!loading && invoices.length" class="mt-5">
       <h3 class="text-muted-foreground mb-2 text-[10.5px] font-semibold tracking-[0.1em] uppercase">
         Invoices
       </h3>
@@ -242,6 +274,19 @@ async function onPosted() {
           >
             Open <ExternalLink class="size-3" />
           </a>
+          <!-- A DRAFT is an invoice whose Stripe half never finished. The
+               recovery path already existed on the server and was reachable
+               only by curl, which is how one sat unnoticed for 40 minutes. -->
+          <Button
+            v-else-if="canManage && i.status === 'DRAFT'"
+            size="sm"
+            variant="outline"
+            class="ms-auto"
+            :disabled="resuming === i.id"
+            @click="resume(i)"
+          >
+            <Send class="size-4" /> {{ resuming === i.id ? 'Sending…' : 'Send' }}
+          </Button>
         </div>
       </div>
     </div>

@@ -75,7 +75,7 @@ export function residentInvoiceRoutes(r) {
     '/:id/invoices',
     handler(async (req, res) => {
       const stayId = await activeStayIdFor(req.params.id)
-      if (!stayId) return res.json({ invoices: [], unbilledCents: 0, unbilledCount: 0, stayId: null })
+      if (!stayId) return res.json({ invoices: [], pendingCents: 0, pendingCount: 0, stayId: null })
       res.json({ ...(await listInvoices(stayId)), stayId })
     }),
   )

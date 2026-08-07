@@ -245,11 +245,60 @@ async function main() {
     },
   })
 
+  /**
+   * Bill a set of entries as one invoice, following the REAL arc rather than
+   * short-cutting it: lines may only be added while the invoice is DRAFT (a
+   * line appended after finalization would make totalCents stop matching what
+   * is beneath it), and the status only ever moves forwards. The seed going
+   * through the same doors as the app is what makes it a trustworthy fixture.
+   */
+  const invoiceEntries = async (stayId, entries, { issued, number, paidAt = null }) => {
+    const total = entries.reduce(
+      (t, e) => t + (e.type === 'CHARGE' ? e.amountCents : -e.amountCents),
+      0,
+    )
+    if (total <= 0) return null
+
+    const draft = await prisma.invoice.create({
+      data: {
+        stayId,
+        totalCents: total,
+        dueAt: issued, // Due on receipt, so the issue date is the due date.
+        createdAt: issued,
+        sentById: manager.id,
+        lines: { create: entries.map((e) => ({ ledgerEntryId: e.id })) },
+      },
+    })
+    await prisma.invoice.update({
+      where: { id: draft.id },
+      data: {
+        status: 'OPEN',
+        // Seed-shaped and unique: obviously not a real Stripe id.
+        stripeInvoiceId: `in_seed_${stayId.slice(-8)}_${number}`,
+        number: `SL-${number}-${stayId.slice(-4)}`,
+        hostedUrl: `https://invoice.stripe.com/i/seed_${stayId.slice(-8)}_${number}`,
+        issuedAt: issued,
+        finalizedAt: issued,
+      },
+    })
+    if (!paidAt) return prisma.invoice.findUnique({ where: { id: draft.id } })
+    return prisma.invoice.update({
+      where: { id: draft.id },
+      data: { status: 'PAID', paidAt },
+    })
+  }
+
   for (const { person, stayId } of seededStays) {
     const paid = paymentProfile[person.last] ?? [1, 1, 1]
 
     for (const [i, month] of MONTHS.entries()) {
-      await prisma.ledgerEntry.create({
+      // Rent is CHARGED and then INVOICED, month by month, because since
+      // 2026-08-07 an invoice is what makes money owed. A seed that charged
+      // rent and paid it without ever invoicing would put every resident in
+      // credit and leave the dashboard's Outstanding panel empty — which is
+      // exactly the divergence that forced the rule, so the fixture has to
+      // model the right way round.
+      const rent = await prisma.ledgerEntry.create({
         data: {
           stayId,
           type: 'CHARGE',
@@ -262,18 +311,34 @@ async function main() {
       })
 
       const share = paid[i] ?? 0
+      const settled = share === 1
+      const paidAt = new Date(`${month}-03T12:00:00Z`)
+      await invoiceEntries(stayId, [rent], {
+        issued: new Date(`${month}-01T12:00:00Z`),
+        number: `${month.replace('-', '')}`,
+        paidAt: settled ? paidAt : null,
+      })
+
       if (share > 0) {
+        // The most recent settled month is recorded the way a WEBHOOK would
+        // have written it — by the machine account, not by the manager who
+        // sent the invoice and never touched the money.
+        const viaStripe = settled && i === MONTHS.length - 1
         await prisma.ledgerEntry.create({
           data: {
             stayId,
             type: 'PAYMENT',
             amountCents: CENTS(650 * share),
-            description: share === 1 ? `Rent ${month} paid` : `Rent ${month} part payment`,
-            occurredAt: new Date(`${month}-03T12:00:00Z`),
-            recordedById: manager.id,
+            description: viaStripe
+              ? 'Card payment'
+              : settled
+                ? `Rent ${month} paid`
+                : `Rent ${month} part payment`,
+            occurredAt: paidAt,
+            recordedById: viaStripe ? stripeUser.id : manager.id,
             // Stripe-shaped, and unique: a webhook delivered twice must not be
             // able to post this payment a second time.
-            externalRef: `pi_seed_${stayId.slice(-8)}_${month}`,
+            externalRef: `${viaStripe ? 'stripe' : 'pi'}_seed_${stayId.slice(-8)}_${month}`,
           },
         })
       }
@@ -333,82 +398,16 @@ async function main() {
   })
 
   // ── Invoices ──────────────────────────────────────────────────────────────
-  // Two invoices with different fates, so a fresh seed shows both halves of
-  // module 11: one PAID (with the payment that settled it), and one long past
-  // due — old enough to be past the 7-day dot grace, so the resident record's
-  // red dot and the dashboard's overdue badge have something real to render.
-  // Everyone else's charges stay unbilled, which is what the Send invoice and
-  // the Friday weekly-run buttons act on.
-  const invoiceFor = async (stayId, { daysAgo, paid }) => {
-    const issued = new Date(Date.now() - daysAgo * 24 * 3_600_000)
-    const billable = await prisma.ledgerEntry.findMany({
-      where: { stayId, type: { in: ['CHARGE', 'CREDIT'] }, invoiceLine: { is: null } },
-      orderBy: { occurredAt: 'asc' },
-      take: 2,
-    })
-    if (!billable.length) return null
-    const total = billable.reduce(
-      (t, e) => t + (e.type === 'CHARGE' ? e.amountCents : -e.amountCents),
-      0,
-    )
-    if (total <= 0) return null
-    // Follows the REAL arc rather than short-cutting it: lines may only be
-    // added while an invoice is DRAFT (a line appended after finalization
-    // would make totalCents stop matching what is beneath it), and the status
-    // only ever moves forwards. The seed going through the same doors as the
-    // app is what makes it a trustworthy fixture.
-    const draft = await prisma.invoice.create({
-      data: {
-        stayId,
-        totalCents: total,
-        // Due on receipt, so the issue date is the due date.
-        dueAt: issued,
-        createdAt: issued,
-        sentById: manager.id,
-        lines: { create: billable.map((e) => ({ ledgerEntryId: e.id })) },
-      },
-    })
-
-    const open = await prisma.invoice.update({
-      where: { id: draft.id },
-      data: {
-        status: 'OPEN',
-        // Seed-shaped and unique: obviously not a real Stripe id.
-        stripeInvoiceId: `in_seed_${stayId.slice(-8)}_${daysAgo}`,
-        number: `SL-${1000 + daysAgo}`,
-        hostedUrl: `https://invoice.stripe.com/i/seed_${stayId.slice(-8)}`,
-        issuedAt: issued,
-        finalizedAt: issued,
-      },
-    })
-    if (!paid) return open
-
-    return prisma.invoice.update({
-      where: { id: draft.id },
-      data: { status: 'PAID', paidAt: new Date(issued.getTime() + 2 * 24 * 3_600_000) },
-    })
-  }
-
-  // Paid: Whitfield's, settled two days after it was sent.
-  const paidInvoice = await invoiceFor(byLast('Whitfield'), { daysAgo: 30, paid: true })
-  if (paidInvoice) {
-    await prisma.ledgerEntry.create({
-      data: {
-        stayId: byLast('Whitfield'),
-        type: 'PAYMENT',
-        amountCents: paidInvoice.totalCents,
-        description: 'Card payment',
-        occurredAt: paidInvoice.paidAt,
-        // What a real webhook would have written, recorded by the machine
-        // account rather than by a person who never touched the money.
-        externalRef: `stripe_pi_seed_${byLast('Whitfield').slice(-8)}`,
-        recordedById: stripeUser.id,
-      },
-    })
-  }
-
-  // Overdue by three weeks, so it is well past the dot's 7-day grace.
-  await invoiceFor(byLast('Castillo'), { daysAgo: 21, paid: false })
+  // Rent is invoiced month by month in the loop above, which is where a stay's
+  // balance now comes from. What is left here is the ONE case that needs to be
+  // arranged rather than falling out of the payment profile: an invoice past
+  // the 7-day dot grace, so the resident record's red dot and the dashboard's
+  // overdue badge have something real to render.
+  //
+  // Ocampo and Castillo both carry unpaid rent months, and a July invoice is
+  // already weeks past due by the time anybody runs this — so the dot is real
+  // without a special fixture. Everything that is NOT rent stays pending, which
+  // is what the Send invoice and Friday weekly-run buttons act on.
 
   // ── Sign-outs ─────────────────────────────────────────────────────────────
   // Relative times, because seed runs at arbitrary wall-clock moments: one
@@ -977,7 +976,8 @@ async function main() {
     ${await prisma.apartmentCheck.count()} apartment checks (men's CHECKED with 1 not found, women's OVERDUE, 1 missed hour, 1 amended)
     ${await prisma.drugScreen.count()} drug screens (1 negative, 1 awaiting the resident's decision, 1 declined, 1 at the lab, 1 lab-cleared after paying)
     ${await prisma.ledgerEntry.count()} ledger entries (rent, laundry, a trip, a damage, one credit)
-    ${await prisma.invoice.count()} invoices (1 paid, 1 three weeks overdue — past the dot's grace), the rest unbilled
+    ${await prisma.invoice.count()} invoices — rent billed monthly, most paid, 3 unpaid months past the dot's grace
+    balances are invoiced-and-due: 2 residents owe, the rest are square; fees stay pending
     ${await prisma.scheduleEvent.count()} scheduled events (5 weekly, 1 one-off; 2 of them both cohorts), ${await prisma.scheduleOccurrence.count()} occurrences
     ${await prisma.scheduleAttendance.count()} attendance marks on 2 taken rolls (one of them shared) — earlier days left un-taken on purpose
 

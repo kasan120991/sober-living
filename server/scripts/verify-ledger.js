@@ -9,6 +9,7 @@ import { createApp } from '../src/app.js'
 import { prisma } from '../src/db/client.js'
 import { runAsSystem } from '../src/lib/dbContext.js'
 import { postEntry } from '../src/services/ledger.js'
+import { draftInvoice } from '../src/services/invoices.js'
 
 /** Cents to a plain dollar string, for assertion labels only. */
 const money = (c) => `$${(c / 100).toFixed(2)}`
@@ -52,6 +53,39 @@ async function main() {
 
   const manager = as(await login('manager@facility.test'))
   const tech = as(await login('tech@facility.test'))
+  // Voiding is admins only — the narrowest gate in the app.
+  const admin = as(await login('admin@facility.test'))
+
+  const managerUser = await runAsSystem(async () =>
+    prisma.user.findUnique({ where: { email: 'manager@facility.test' }, select: { id: true } }),
+  )
+
+  /**
+   * Bill a stay's pending lines LOCALLY, then promote the draft the way
+   * Stripe's finalize would have.
+   *
+   * This suite runs with no Stripe key, and `sendInvoice` now refuses on a
+   * keyless server rather than quietly producing a local-only invoice — so the
+   * arc below is driven through the same two doors the seed uses. The route's
+   * refusal is asserted separately; what these exercise is the arithmetic.
+   */
+  const billLocally = async (stayId, { dueAt = new Date() } = {}) =>
+    runAsSystem(async () => {
+      const { invoice } = await draftInvoice(stayId, { dueAt }, managerUser.id)
+      return prisma.invoice.update({
+        where: { id: invoice.id },
+        data: {
+          status: 'OPEN',
+          number: `T-${invoice.id.slice(-8)}`,
+          // All four together, or `invoice_stripe_ids_paired` refuses the row:
+          // an OPEN invoice must carry the full set a finalize would have set.
+          stripeInvoiceId: `in_test_${invoice.id.slice(-8)}`,
+          hostedUrl: `https://invoice.stripe.com/i/test_${invoice.id.slice(-8)}`,
+          issuedAt: new Date(),
+          finalizedAt: new Date(),
+        },
+      })
+    })
 
   const roster = await manager('/residents')
   const rows = roster.body?.residents ?? []
@@ -61,14 +95,9 @@ async function main() {
   console.log('\n\x1b[1mBalances are derived, not stored\x1b[0m')
 
   const castillo = find('Castillo')
-  castillo?.balanceCents === 108000
-    ? ok('roster carries a balance per resident (Castillo $1080.00)')
+  castillo?.balanceCents === 97500
+    ? ok('roster carries a balance per resident (Castillo $975.00 invoiced and unpaid)')
     : bad('roster balance', `got ${castillo?.balanceCents}`)
-
-  const ferrer = find('Ferrer')
-  ferrer?.balanceCents === -10000
-    ? ok('a credit reads as a negative balance (Ferrer −$100.00)')
-    : bad('credit balance', `got ${ferrer?.balanceCents}`)
 
   const nakamura = find('Nakamura')
   nakamura?.balanceCents === 0
@@ -79,17 +108,70 @@ async function main() {
     SELECT column_name FROM information_schema.columns
      WHERE table_name IN ('stays','residents') AND column_name ILIKE '%balance%'`)
   cols.length === 0
-    ? ok('no balance column exists anywhere — the sum is the only source')
+    ? ok('no balance column exists anywhere — the derivation is the only source')
     : bad('stored balance', JSON.stringify(cols))
 
   const ledger = await manager(`/residents/${castillo.id}/ledger`)
-  const running = ledger.body.entries.at(-1)?.runningCents
   ledger.body.balanceCents === castillo.balanceCents
     ? ok('the record and the roster agree on the balance')
     : bad('agreement', `${ledger.body.balanceCents} vs ${castillo.balanceCents}`)
-  running === 65000
-    ? ok('a running balance is attached to each line')
-    : bad('running balance', `oldest line ran to ${running}`)
+  ledger.body.entries.every((e) => e.runningCents === undefined)
+    ? ok('no running-balance column — it could only ever agree with the header by luck')
+    : bad('running gone', 'runningCents is still on the wire')
+
+  // ── The rule itself ──────────────────────────────────────────────────────
+  // A resident owes what has been INVOICED and not yet paid. These four pin
+  // the rule in both directions, because the cheap version of each — checking
+  // only that a charge does nothing, or only that an invoice does something —
+  // passes just as well under the old arithmetic.
+  console.log('\n\x1b[1mA balance is what has been invoiced and not paid\x1b[0m')
+
+  const boone = find('Boone')
+  const beforePost = await manager(`/residents/${boone.id}/ledger`)
+  const posted = await manager(`/residents/${boone.id}/ledger`, {
+    method: 'POST',
+    body: {
+      type: 'CHARGE',
+      category: 'LAUNDRY',
+      amount: '30.00',
+      description: 'Laundry — probe',
+    },
+  })
+  const afterPost = await manager(`/residents/${boone.id}/ledger`)
+  posted.status === 201 &&
+  afterPost.body.balanceCents === beforePost.body.balanceCents &&
+  afterPost.body.pendingCents === beforePost.body.pendingCents + 3000
+    ? ok('posting a charge moves PENDING only — it is not owed until it is billed')
+    : bad(
+        'charge is pending',
+        `balance ${beforePost.body.balanceCents}→${afterPost.body.balanceCents}, pending ${beforePost.body.pendingCents}→${afterPost.body.pendingCents}`,
+      )
+
+  // A keyless server REFUSES the send, and bills nothing doing it. This is the
+  // guard that replaced returning 201 with a local-only DRAFT — which looked
+  // identical to a real send at the UI while the invoice would never exist.
+  const keyless = await manager(`/residents/${boone.id}/invoices`, { method: 'POST', body: {} })
+  const afterRefusal = await manager(`/residents/${boone.id}/ledger`)
+  keyless.status === 503 && afterRefusal.body.pendingCents === afterPost.body.pendingCents
+    ? ok('a server with no Stripe key refuses to send, and bills nothing doing it')
+    : bad('keyless refusal', `${keyless.status}, pending now ${afterRefusal.body.pendingCents}`)
+
+  const pendingNow = afterPost.body.pendingCents
+  await billLocally(boone.stayId)
+  const afterBill = await manager(`/residents/${boone.id}/ledger`)
+  afterBill.body.pendingCents === 0 &&
+  afterBill.body.balanceCents === beforePost.body.balanceCents + pendingNow
+    ? ok('invoicing moves it from pending into the balance, to the cent')
+    : bad(
+        'invoice moves it',
+        `pending ${afterBill.body.pendingCents}, balance ${afterBill.body.balanceCents}`,
+      )
+
+  // Nakamura has no entries at all: nothing invoiced, so nothing owed.
+  const joyLedger = await manager(`/residents/${nakamura.id}/ledger`)
+  joyLedger.body.balanceCents === 0 && joyLedger.body.pendingCents === 0
+    ? ok('a stay nobody has invoiced owes nothing — zero, not a hidden pile')
+    : bad('never invoiced', JSON.stringify(joyLedger.body).slice(0, 120))
 
   // ── Append-only ──────────────────────────────────────────────────────────
   console.log('\n\x1b[1mThe ledger cannot be rewritten\x1b[0m')
@@ -208,7 +290,6 @@ async function main() {
   // ── Corrections ──────────────────────────────────────────────────────────
   console.log('\n\x1b[1mCorrections stay in their own stay\x1b[0m')
 
-  const boone = find('Boone')
   const otherEntry = await prisma.ledgerEntry.findFirst({ where: { stayId: boone.stayId } })
   await rejects("a correction cannot point at another resident's line", () =>
     prisma.ledgerEntry.create({
@@ -250,37 +331,32 @@ async function main() {
   // ── Invoicing ────────────────────────────────────────────────────────────
   console.log('\n\x1b[1mInvoicing: the sweep and the snapshot\x1b[0m')
 
-  const sent = await manager(`/residents/${boone.id}/invoices`, {
-    method: 'POST',
-    body: {},
-  })
-  sent.status === 201
-    ? ok(`a manager sweeps a stay's unbilled lines into one invoice (${money(sent.body.totalCents)})`)
-    : bad('send invoice', `${sent.status} ${JSON.stringify(sent.body)}`)
+  // Ocampo still has pending fees; Boone's were swept by the rule section.
+  const ocampo = find('Ocampo')
+  const sent = await billLocally(ocampo.stayId)
+  sent.totalCents > 0
+    ? ok(`a sweep collects a stay's pending lines into one invoice (${money(sent.totalCents)})`)
+    : bad('send invoice', JSON.stringify(sent))
 
-  const invoiceId = sent.body.id
-  const afterSend = (await manager(`/residents/${boone.id}/ledger`)).body
-  afterSend.unbilledCents === 0
-    ? ok('and nothing is left unbilled on that stay')
-    : bad('all swept', afterSend.unbilledCents)
+  const invoiceId = sent.id
+  const afterSend = (await manager(`/residents/${ocampo.id}/ledger`)).body
+  afterSend.pendingCents === 0
+    ? ok('and nothing is left pending on that stay')
+    : bad('all swept', afterSend.pendingCents)
   afterSend.entries.some((e) => e.billed && e.invoice?.id === invoiceId)
     ? ok('the ledger marks those lines billed, and names the invoice')
     : bad('billed projection', 'no entry carries the invoice')
 
-  const nothingLeft = await manager(`/residents/${boone.id}/invoices`, {
-    method: 'POST',
-    body: {},
-  })
-  nothingLeft.status === 409
-    ? ok(`a second sweep with nothing unbilled is refused — "${nothingLeft.body?.error}"`)
-    : bad('empty sweep', nothingLeft.status)
+  await rejects('a second sweep with nothing pending is refused', () =>
+    billLocally(ocampo.stayId),
+  )
 
   // THE SNAPSHOT, proved three ways. CLAUDE.md warns the next reader will
   // otherwise delete the invoice total as a violation of "the balance is
   // derived" — it is a different fact, and these say so.
-  const beforeTotal = sent.body.totalCents
+  const beforeTotal = sent.totalCents
   const beforeBalance = afterSend.balanceCents
-  await manager(`/residents/${boone.id}/ledger`, {
+  await manager(`/residents/${ocampo.id}/ledger`, {
     method: 'POST',
     body: {
       type: 'CREDIT',
@@ -288,16 +364,23 @@ async function main() {
       description: 'Adjustment after invoicing',
     },
   })
-  const afterCorrection = (await manager(`/residents/${boone.id}/ledger`)).body
+  const afterCorrection = (await manager(`/residents/${ocampo.id}/ledger`)).body
   const invAfter = await runAsSystem(async () =>
     prisma.invoice.findUnique({ where: { id: invoiceId } }),
   )
-  invAfter.totalCents === beforeTotal && afterCorrection.balanceCents !== beforeBalance
-    ? ok('a correction moves the BALANCE and leaves the invoice total untouched')
+  invAfter.totalCents === beforeTotal
+    ? ok('a correction leaves the invoice total untouched — a snapshot, not a cache')
     : bad('snapshot holds', `${beforeTotal} → ${invAfter.totalCents}`)
-  afterCorrection.unbilledCents === -3000
-    ? ok('and it lands UNBILLED, to flow onto the next invoice')
-    : bad('correction unbilled', afterCorrection.unbilledCents)
+  // It lands PENDING and does NOT move the balance. Under the old rule this
+  // assertion read the other way round — the credit moved the balance at once.
+  // Now nothing is owed or forgiven until an invoice says so, which is the
+  // whole point: the correction flows onto the NEXT invoice.
+  afterCorrection.pendingCents === -3000 && afterCorrection.balanceCents === beforeBalance
+    ? ok('and it lands PENDING, leaving the balance alone until the next invoice')
+    : bad(
+        'correction pending',
+        `pending ${afterCorrection.pendingCents}, balance ${beforeBalance}→${afterCorrection.balanceCents}`,
+      )
 
   await runAsSystem(async () => {
     await rejects('the invoice total cannot be updated — a snapshot, not a cache', () =>
@@ -329,7 +412,7 @@ async function main() {
       `INSERT INTO "invoice_lines" ("id","invoiceId","ledgerEntryId")
        SELECT 'verify-pay-line', $1, "id" FROM "ledger_entries"
         WHERE "stayId" = $2 AND "type" = 'PAYMENT' LIMIT 1`,
-      [invoiceId, boone.stayId],
+      [invoiceId, ocampo.stayId],
     ),
   )
   await owner2.end()
@@ -354,6 +437,81 @@ async function main() {
   !canHostInvoice(null)
     ? ok('a resident with no email cannot be invoiced through Stripe — refused before anything is billed')
     : bad('canHostInvoice', 'the email rule does not hold')
+
+  // ── Void, draft, and money paid in advance ───────────────────────────────
+  console.log('\n\x1b[1mThe edges of the new rule\x1b[0m')
+
+  // VOIDING REMOVES THE DEMAND. That is why the balance is built from invoice
+  // totals rather than from billed ledger lines — it is what gives a wrong
+  // invoice a real undo. Its lines stay bound, so they still never re-bill.
+  const beforeVoid = (await manager(`/residents/${ocampo.id}/ledger`)).body.balanceCents
+  const voided = await admin(`/invoices/${invoiceId}/void`, {
+    method: 'POST',
+    body: { reason: 'probe — raised in error' },
+  })
+  const afterVoid = (await manager(`/residents/${ocampo.id}/ledger`)).body
+  voided.status < 400 && afterVoid.balanceCents === beforeVoid - beforeTotal
+    ? ok('voiding an invoice drops the balance by exactly its total')
+    : bad('void drops it', `${beforeVoid} → ${afterVoid.balanceCents} (total ${beforeTotal})`)
+  afterVoid.pendingCents === -3000
+    ? ok("and its lines do NOT come back as pending — a void is not a re-bill")
+    : bad('void does not unbill', afterVoid.pendingCents)
+
+  // A DRAFT is in NEITHER figure — not pending (its lines are bound) and not
+  // owed (nobody has been asked). Without its own figure that money simply
+  // vanishes from every screen, which is the state a keyless send used to
+  // leave behind.
+  const ferrer = find('Ferrer')
+  await postEntry(
+    {
+      stayId: ferrer.stayId,
+      type: 'CHARGE',
+      category: 'RENT',
+      amountCents: 44400,
+      description: 'Draft probe',
+    },
+    managerUser.id,
+  )
+  const draftInv = await runAsSystem(async () =>
+    draftInvoice(ferrer.stayId, { dueAt: new Date() }, managerUser.id),
+  )
+  const withDraft = (await manager(`/residents/${ferrer.id}/ledger`)).body
+  withDraft.draftCents === draftInv.invoice.totalCents &&
+  withDraft.pendingCents === 0 &&
+  withDraft.balanceCents === 0
+    ? ok('a DRAFT is in neither figure, and is stated on its own so it cannot hide')
+    : bad(
+        'draft surfaced',
+        `draft ${withDraft.draftCents}, pending ${withDraft.pendingCents}, balance ${withDraft.balanceCents}`,
+      )
+
+  // Money received before anything was invoiced reads as CREDIT, and nets
+  // against the next invoice rather than being held aside invisibly.
+  const joy = find('Nakamura')
+  await manager(`/residents/${joy.id}/ledger`, {
+    method: 'POST',
+    body: { type: 'PAYMENT', amount: '200.00', description: 'Paid ahead at the desk' },
+  })
+  const prepaid = (await manager(`/residents/${joy.id}/ledger`)).body
+  prepaid.balanceCents === -20000
+    ? ok('a payment with nothing invoiced reads as a credit, not a hidden pot')
+    : bad('prepayment credit', prepaid.balanceCents)
+
+  await postEntry(
+    {
+      stayId: joy.stayId,
+      type: 'CHARGE',
+      category: 'RENT',
+      amountCents: 65000,
+      description: 'Rent — probe',
+    },
+    managerUser.id,
+  )
+  await billLocally(joy.stayId)
+  const netted = (await manager(`/residents/${joy.id}/ledger`)).body
+  netted.balanceCents === 45000
+    ? ok('and it nets against the next invoice automatically ($650 billed − $200 held = $450)')
+    : bad('credit nets', netted.balanceCents)
 
   // ── Overdue ──────────────────────────────────────────────────────────────
   console.log('\n\x1b[1mOverdue is derived\x1b[0m')

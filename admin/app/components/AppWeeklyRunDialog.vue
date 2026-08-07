@@ -56,6 +56,10 @@ const blocked = computed(() => stays.value.filter((s) => !s.canInvoice))
 // promise — "Send 5" that produces 2 teaches staff to distrust the count.
 const sendable = computed(() => stays.value.filter((s) => s.canInvoice))
 const failures = computed(() => (results.value ?? []).filter((r) => !r.ok))
+// Stays that have paid more than has been invoiced. The run bills the full net
+// regardless — the credit is on our ledger, not on the Stripe invoice — so it
+// is named before the press rather than discovered by the resident.
+const inCredit = computed(() => stays.value.filter((s) => s.canInvoice && s.creditCents > 0))
 
 async function submit() {
   pending.value = true
@@ -81,7 +85,7 @@ async function submit() {
       <DialogHeader>
         <DialogTitle>Generate weekly invoices</DialogTitle>
         <DialogDescription>
-          One invoice per active stay with unbilled charges. Due on receipt.
+          One invoice per active stay with pending charges. Due on receipt.
         </DialogDescription>
       </DialogHeader>
 
@@ -109,7 +113,7 @@ async function submit() {
         <!-- A partial run is the normal outcome, so it gets said plainly
              rather than hidden behind a success toast. -->
         <p v-if="failures.length" class="text-muted-foreground text-xs">
-          {{ failures.length }} did not send. Their charges are still unbilled and will be
+          {{ failures.length }} did not send. Their charges are still pending and will be
           picked up by the next run once the reason is fixed.
         </p>
       </template>
@@ -117,7 +121,7 @@ async function submit() {
       <!-- ── Before the run ─────────────────────────────────────────────── -->
       <template v-else-if="!stays.length">
         <p class="text-muted-foreground text-sm">
-          There is nothing to bill — no active stay has unbilled charges.
+          There is nothing to bill — no active stay has pending charges.
         </p>
       </template>
 
@@ -153,7 +157,16 @@ async function submit() {
             {{ blocked.length === 1 ? 'has' : 'have' }} no email address on file, and Stripe
             needs one to host an invoice.
             {{ blocked.length === 1 ? 'That invoice' : 'Those invoices' }} will not send;
-            the charges stay unbilled for the next run.
+            the charges stay pending for the next run.
+          </AlertDescription>
+        </Alert>
+
+        <Alert v-if="inCredit.length">
+          <AlertDescription class="text-xs">
+            {{ inCredit.map((s) => s.residentName).join(', ') }}
+            {{ inCredit.length === 1 ? 'has' : 'have' }} paid ahead, and the invoice will still
+            ask Stripe for the full amount — the credit sits on our ledger, not on the invoice.
+            Their balance here nets down once it is sent.
           </AlertDescription>
         </Alert>
 

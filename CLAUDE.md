@@ -50,10 +50,11 @@ Use these terms in code, schema, and UI. Do not invent synonyms.
 | **Community service** | Hours a resident owes and works off. Tracked against a target. |
 | **Intake / Discharge** | Entering and leaving the program. Discharge has a type (successful, AMA, administrative). |
 | **Ledger** | A stay's fee history — rent, laundry, trips, program fees, damages, and the payments and credits against them. Append-only. |
-| **Balance** | What a resident owes, always `SUM(charges) − SUM(payments + credits)`. **Derived, never stored.** Negative means they are in credit. |
-| **Invoice** | A dated demand for payment, sent through Stripe. Holds a **total** — a snapshot of what was billed the day it was sent, which must not move when a later correction lands. Voided, never deleted. Distinct from the balance, which is always derived. |
+| **Balance** | What a resident owes: `SUM(invoice totals, excluding VOID and DRAFT) − SUM(payments)`. **Derived, never stored.** Negative means they are in credit. **This REVERSES the original rule** (`SUM(charges) − SUM(payments + credits)`), changed 2026-08-07 — a charge is not owed until an invoice asks for it. See module 11 for the failure that forced it. |
+| **Invoice** | A dated demand for payment, sent through Stripe, and **the thing that makes money owed**. Holds a **total** — a snapshot of what was billed the day it was sent, which must not move when a later correction lands. That immutability is load-bearing twice over since 2026-08-07: the balance is built from these totals, so a movable one would silently rewrite what a resident owes. **Voiding removes the demand** and drops the balance by exactly its total; its lines stay bound and never re-bill. Voided, never deleted. |
 | **Invoice line** | The join row binding one ledger entry to one invoice. Its own table (`invoice_lines`) precisely so `ledger_entries` keeps its no-update guarantee; unique on the entry, so a charge cannot be billed twice — and a voided invoice's lines are never re-billable. |
-| **Unbilled** | A CHARGE or CREDIT with **no row in `invoice_lines`**. A read, never a stored flag. Payments are never billable. |
+| **Pending** | A CHARGE or CREDIT with **no row in `invoice_lines`**. A read, never a stored flag. Payments are never billable, so never pending. **Not part of the balance** — pending money is stated beside it, never folded into it. Called **Unbilled** until 2026-08-07; the word changed with the rule, in the UI *and* in the code (`pendingCents`). |
+| **Draft** | An invoice whose Stripe half never finished. Its lines are bound, so they are not pending; it was never issued, so it is not owed. In **neither** figure — which is why `draftCents` is surfaced on its own, and why a keyless send now refuses rather than quietly making one. |
 | **Overdue** | An OPEN invoice past its `dueAt` on a stay whose balance is still positive. **Derived**, so cash paid at the desk clears it without touching the invoice. The record's red dot waits a further 7 days (`INVOICE_DOT_GRACE_DAYS`) — grace delays the alarm, not the arithmetic, the `OVERDUE_GRACE_MS` idiom. Note the **status pill's "overdue" means sign-outs** and always has; the two never merged. |
 
 ---
@@ -1127,11 +1128,61 @@ the unit, out-of-service is a property of the bed, and neither drives the other.
 fees and damages, categorised so "what did we bill in laundry last quarter" is answerable
 without grepping descriptions.
 
+**A resident owes what has been INVOICED and not yet paid** (facility, 2026-08-07). This
+reversed the original rule and it is the most consequential change the ledger has taken, so
+the old one is recorded rather than deleted:
+
+```
+was:  balance = SUM(charges) − SUM(payments + credits)
+now:  balance = SUM(invoice totals, excluding VOID and DRAFT) − SUM(payments)
+      pending = SUM(unbilled charges) − SUM(unbilled credits)
+```
+
+**The failure that forced it.** Tasha Boone's May, June and July rent were each charged and
+each paid — but never invoiced. The Friday sweep bills every unbilled *charge*, and its
+guard is `charges + credits > 0`, **not `balance > 0`** — so it billed $2,055 at a resident
+who owed $105, demanding three months of rent she had already paid. Excluding payments as
+*lines* had never stopped already-paid *charges* from being swept; the two figures could
+diverge silently, and on first adoption or after any cash-at-the-desk payment they always
+would. Under the new rule they cannot, because the thing that makes money owed is the same
+thing that bills it.
+
+Three consequences, each chosen rather than fallen into:
+
+- **A payment with nothing invoiced reads as a CREDIT** — a negative balance that nets
+  against the next invoice. Flooring it at zero was considered and rejected: it would hide
+  money that was really received.
+- **Voiding an invoice removes its demand.** That is why the balance is built from invoice
+  *totals* rather than from billed ledger lines — it is what gives a wrong invoice a real
+  undo. Its lines stay bound and therefore still never re-bill. The cost, accepted: voiding
+  an invoice that carried a CREDIT discards that credit too, so the net effect is that the
+  invoice never happened.
+- **A DRAFT is in neither figure**, which is a genuine hole rather than a tidy edge: its
+  lines are bound so it is not pending, and it was never issued so it is not owed. Hence
+  `draftCents` as its own figure, a warning row with a **Send** action in the ledger
+  section, and the pre-flight refusal below.
+
+**A keyless server now REFUSES to send** (503, before `draftInvoice` commits) instead of
+returning 200 with a local-only draft. The old behaviour was indistinguishable from a real
+send at the UI — the lines came back billed and locked, staff got a success toast, and the
+invoice would never exist. It happened for real on 2026-08-07, when a merge left
+`STRIPE_SECRET_KEY` behind in a worktree (`.env` is gitignored, so the code moved and the
+credentials did not). The cost: `verify-ledger.js` can no longer create invoices through the
+route, so its arc assertions drive `draftInvoice` directly and promote the draft the way the
+seed does — and the route's refusal is asserted on its own.
+
+**A resident in credit is still invoiced the full amount, and that is unsolved.** The credit
+lives in our ledger; Stripe has never heard of it. Both send surfaces warn and name the
+figure. Pushing the credit to Stripe needs its customer credit balance *and* a decision
+about what happens if they pay the full amount anyway — a facility question nobody has been
+asked.
+
 Three properties do the work:
 
 - **The balance is derived on every read**, never stored. A stored total is a second source
   of truth, and the day it disagrees with the lines beneath it there is no way to tell which
-  is wrong. `verify-ledger.js` asserts no `balance` column exists anywhere.
+  is wrong. `verify-ledger.js` asserts no `balance` column exists anywhere — that assertion
+  survived the 2026-08-07 reversal untouched, which is the point of it.
 - **The table is append-only**, more strictly than `bed_assignments` — no updates at all.
   A mistake is corrected by a new entry with `correctsId` pointing at the one it fixes, and
   a correction must stay inside its own stay. Enforced by trigger and by revoked privilege,
@@ -1272,11 +1323,15 @@ not caught it because its assertion used `rejects()`, which only proves *somethi
 
 **Still to build:**
 
-- **The Friday nag** — a Needs-attention row once a Friday has passed with lines unbilled.
+- **The Friday nag** — a Needs-attention row once a Friday has passed with lines pending.
   It is the honest counterweight to having no cron, and it is deliberately *not* "there are
-  unbilled charges", which is true every day and would be exactly the noisy dot this file
+  pending charges", which is true every day and would be exactly the noisy dot this file
   warns about twice. Derivable with no new table: the most recent invoice's `createdAt`
-  against the last Friday.
+  against the last Friday. **It matters more since 2026-08-07**: pending money is now
+  outside the balance, so forgetting to press the button means nobody is shown as owing it.
+- **Pushing a resident's credit to Stripe**, so an invoice does not demand money already
+  received. Needs Stripe's customer credit balance *and* a facility decision about what
+  happens if they pay the full amount anyway. Both send surfaces warn in the meantime.
 - **Resident-facing balances**, which is open question 7's remaining half.
 - **A default payment term other than on-receipt.** `dueAt` is already a parameter on the
   send, so this is a facility policy nobody has been asked for rather than a code change.
@@ -1404,8 +1459,11 @@ Decisions with teeth, each chosen explicitly:
   where to start looking) — decided against the census tile's never-a-destination rule,
   knowingly, because this is a work queue and not a wall board.
 - **"Outstanding" balances: a positive derived balance on an active stay — and the
-  panel KEEPS that name now that invoicing exists** (2026-08-07). It is still the
-  complete list; overdue is a property of *some rows*, not a different list. The card
+  panel KEEPS that name now that invoicing exists** (2026-08-07). Its meaning
+  **sharpened for free** the same day, when a balance became invoiced-and-due: the panel
+  now lists money the facility has actually asked for, not charges nobody has billed.
+  It needed no edit, which is what keeping the derivation in `services/ledger.js` buys.
+  It is still the complete list; overdue is a property of *some rows*, not a different list. The card
   total is computed as the sum of the rows beneath it, in the same read, so the two
   cannot drift, and `overdueCents` is the same sum over the overdue rows — the
   beds-free card's split treatment, because a bare total hides the difference between
@@ -1912,14 +1970,23 @@ Two verification suites, both run against a live database:
   Includes the cohort-mismatch 409 and a tech's 403 on bed assignment — the pair the
   census board's free-tile placement rests on, and the intake and expected-out dates
   coming back on the day they were typed rather than the day before
-- `node scripts/verify-ledger.js` — **49 assertions** on derived balances, invoicing, the
+- `node scripts/verify-ledger.js` — **57 assertions** on derived balances, invoicing, the
   append-only guards, dollar-to-cent parsing, and processor-reference idempotency.
   Includes the invoice **snapshot proved three ways**, a duplicate webhook returning
   **200 with one PAYMENT**, overdue flipping on a cash payment **with no write to the
   invoice**, `stripeLineLabel` exhaustively over the whole enum, and the rule that a
   resident with **no email cannot be invoiced through Stripe** — refused before anything
   is billed, so no draft is stranded. Two pin `occurredAt` on the facility clock, in
-  **both** directions, since a regression to the naive parse still passes a one-way check
+  **both** directions, since a regression to the naive parse still passes a one-way check.
+  **Eight pin the invoiced-and-due rule**, and each in both directions because the cheap
+  half of every one of them passes under the old arithmetic too: posting a charge moves
+  **pending only**; invoicing moves it into the balance **to the cent**; a stay nobody has
+  invoiced owes **zero, not a hidden pile**; a correction after invoicing lands pending and
+  leaves the balance **alone**; **voiding drops the balance by exactly the invoice total**
+  while its lines do *not* return to pending; a **DRAFT is in neither figure** and is
+  reported on its own; a payment with nothing invoiced reads as a **credit**; and it
+  **nets against the next invoice**. Plus the keyless send **refused with nothing billed** —
+  which is also why the arc drives `draftInvoice` directly rather than the route
 - `node scripts/verify-census.js` — 12 assertions on the census read: derived occupancy,
   the figures row, the three tile states, and the staff-only gate
 - `node scripts/verify-realtime.js` — 14 assertions on the invalidation socket: the
