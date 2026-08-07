@@ -99,7 +99,8 @@ const active = ref(null)
 const closeOpen = ref(false)
 const closeMode = ref('RESOLVED')
 const reopenOpen = ref(false)
-const editOpen = ref(false)
+const detailOpen = ref(false)
+const detailEditing = ref(false)
 const assignOpen = ref(false)
 
 function openClose({ request, status }) {
@@ -111,10 +112,29 @@ function openReopen(request) {
   active.value = request
   reopenOpen.value = true
 }
-function openEdit(request) {
-  active.value = request
-  editOpen.value = true
+/**
+ * Refetch, then re-point `active` at the row that came back.
+ *
+ * The detail modal stays OPEN after a save, and `active` holds the object it
+ * was given — which `load()` replaces wholesale. Without this the modal would
+ * sit there showing the title you just changed away from.
+ */
+async function reloadAndSync() {
+  await load()
+  if (!active.value) return
+  const fresh = (data.value?.requests ?? []).find((x) => x.id === active.value.id)
+  if (fresh) active.value = fresh
 }
+
+/** Clicking the row, or "Open…" — the detail modal in view mode. */
+function openDetail(request, editing = false) {
+  active.value = request
+  detailEditing.value = editing
+  detailOpen.value = true
+}
+/** "Edit…" is the same modal, opened straight into its form. */
+const openEdit = (request) => openDetail(request, true)
+
 function openAssign(request) {
   active.value = request
   assignOpen.value = true
@@ -156,71 +176,13 @@ const COLUMNS = [
     <p v-if="pending" class="text-muted-foreground text-sm">Loading…</p>
 
     <div v-else class="flex min-w-0 flex-col gap-4">
-      <!-- ── Figures ───────────────────────────────────────────────────────
-           billing.vue's card shape, and its rule that the alarming card takes
-           the inset only when it is non-zero. That inset and the one on an
-           overdue ROW both mean "past its target", so they agree rather than
-           competing — which is what lets this page keep more than one.
-
-           Nothing is hidden at zero: these are labelled figures, not chips, and
-           "no repairs are late" is an answer worth showing. The census's
-           absence-means-fine rule is for chips. -->
-      <div class="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
-        <div class="bg-card rounded-md border p-3.5">
-          <p class="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
-            Open
-          </p>
-          <p class="mt-0.5 text-[23px] font-semibold tracking-tight tabular-nums">
-            {{ figures.open ?? 0 }}
-          </p>
-          <p class="text-muted-foreground mt-1 text-[12.5px]">
-            {{ figures.urgent ? `${figures.urgent} urgent` : 'None urgent' }}
-          </p>
-        </div>
-
-        <div
-          class="rounded-md border p-3.5"
-          :class="
-            figures.overdue > 0
-              ? 'border-destructive bg-card shadow-[inset_3px_0_0_var(--destructive)]'
-              : 'bg-card'
-          "
-        >
-          <p
-            class="text-[11px] font-semibold tracking-wider uppercase"
-            :class="figures.overdue > 0 ? 'text-destructive' : 'text-muted-foreground'"
-          >
-            Overdue
-          </p>
-          <p class="mt-0.5 text-[23px] font-semibold tracking-tight tabular-nums">
-            {{ figures.overdue ?? 0 }}
-          </p>
-          <p class="text-muted-foreground mt-1 text-[12.5px]">
-            {{ figures.overdue > 0 ? 'Past their own target' : 'Everything inside target' }}
-          </p>
-        </div>
-
-        <div class="bg-card rounded-md border p-3.5">
-          <p class="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
-            In progress
-          </p>
-          <p class="mt-0.5 text-[23px] font-semibold tracking-tight tabular-nums">
-            {{ figures.inProgress ?? 0 }}
-          </p>
-          <p class="text-muted-foreground mt-1 text-[12.5px]">Somebody owns these</p>
-        </div>
-
-        <div class="bg-card rounded-md border p-3.5">
-          <p class="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
-            Closed this month
-          </p>
-          <p class="mt-0.5 text-[23px] font-semibold tracking-tight tabular-nums">
-            {{ figures.closedThisMonth ?? 0 }}
-          </p>
-          <p class="text-muted-foreground mt-1 text-[12.5px]">On the facility calendar</p>
-        </div>
-      </div>
-
+      <!-- No figure cards. They were built from the variant C mock and then
+           dropped again on request (2026-08-07): the description line already
+           states open / overdue / in progress, and four cards restating it
+           pushed the queue itself below the fold on a laptop. The one figure
+           the cards added, `closedThisMonth`, is still on the wire — a filter
+           chip reaches the same rows, and a card that only ever says "3" is
+           not worth a quarter of the screen above a work queue. -->
       <div class="flex flex-wrap items-center gap-2">
         <Button
           v-for="f in FILTERS"
@@ -288,12 +250,20 @@ const COLUMNS = [
                   </span>
                 </td>
 
+                <!-- The title OPENS the request. A row you cannot open is what
+                     buried Edit in an ellipsis nobody found, and the table has
+                     nowhere to show a description or a trail anyway. -->
                 <td class="h-12 border-b px-3">
-                  <span class="font-medium">{{ r.title }}</span>
+                  <button
+                    type="button"
+                    class="text-start font-medium underline-offset-2 hover:underline"
+                    @click="openDetail(r)"
+                  >
+                    {{ r.title }}
+                  </button>
                   <span
                     v-if="r.events?.length"
                     class="text-muted-foreground ms-2 text-[11px] whitespace-nowrap"
-                    :title="r.closure?.note"
                   >
                     {{ r.events.length }} {{ r.events.length === 1 ? 'entry' : 'entries' }}
                   </span>
@@ -332,6 +302,7 @@ const COLUMNS = [
                     @reopen-request="openReopen"
                     @edit-request="openEdit"
                     @assign-request="openAssign"
+                    @view-request="openDetail"
                   />
                 </td>
               </tr>
@@ -363,7 +334,17 @@ const COLUMNS = [
       :request-title="active?.title"
       @done="load"
     />
-    <AppMaintenanceEditDialog v-model:open="editOpen" :request="active" @done="load" />
+    <!-- The detail modal hands off anything needing a note or a picker, so the
+         parent closes it before opening the next — never two stacked modals. -->
+    <AppMaintenanceDetailDialog
+      v-model:open="detailOpen"
+      :request="active"
+      :start-in-edit="detailEditing"
+      @done="reloadAndSync"
+      @close-request="openClose"
+      @reopen-request="openReopen"
+      @assign-request="openAssign"
+    />
     <AppMaintenanceAssignDialog v-model:open="assignOpen" :request="active" @done="load" />
   </AppPage>
 </template>
