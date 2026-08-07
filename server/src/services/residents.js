@@ -1,4 +1,5 @@
 import { prisma, runInTransaction } from '../db/client.js'
+import { facilityDayInstant } from '../lib/facilityTime.js'
 import { HttpError } from '../middleware/authorize.js'
 import { STAY_STATUS } from '../domain/constants.js'
 import { balancesByStay, balanceOfStay } from './ledger.js'
@@ -218,9 +219,17 @@ export async function intakeResident(input, actorId) {
         residentId: resident.id,
         cohort: input.cohort,
         programId: input.programId || null,
-        intakeAt: input.intakeAt ? new Date(input.intakeAt) : new Date(),
-        expectedDischargeAt: input.expectedDischargeAt ? new Date(input.expectedDischargeAt) : null,
+        // Both are DateTime columns holding a DAY somebody typed, so a bare
+        // date goes through the facility clock — `new Date('2026-08-06')` is
+        // UTC midnight, which is the 5th here, and an admission date off by a
+        // day is wrong on every record that quotes it.
+        intakeAt: facilityDayInstant(input.intakeAt),
+        expectedDischargeAt: input.expectedDischargeAt
+          ? facilityDayInstant(input.expectedDischargeAt)
+          : null,
         referralSource: input.referralSource || null,
+        // NOT facilityDayInstant: `sobrietyDate` is @db.Date, so Postgres keeps
+        // only the date part and there is no instant to get wrong.
         sobrietyDate: input.sobrietyDate ? new Date(input.sobrietyDate) : null,
         intakeNotes: input.intakeNotes || null,
       },

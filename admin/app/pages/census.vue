@@ -1,7 +1,11 @@
 <script setup>
 import { UserPlus } from '@lucide/vue'
-import { isoDate } from '~/composables/useResidents.js'
-import { formatFacilityTime, overdueLabel, presenceState } from '~/utils/facilityTime.js'
+import {
+  facilityDateOf,
+  formatFacilityTime,
+  overdueLabel,
+  presenceState,
+} from '~/utils/facilityTime.js'
 import { STAFF_ROLE } from '~/utils/roles.js'
 
 // The bed board — variant A of the census mocks. Chosen over a table because
@@ -195,7 +199,7 @@ const figures = computed(() => {
                   {{ b.resident.fullName }}
                 </NuxtLink>
                 <p class="text-muted-foreground text-xs">
-                  {{ b.resident.programName ?? 'No program' }} · since {{ isoDate(b.since) }}
+                  {{ b.resident.programName ?? 'No program' }} · since {{ facilityDateOf(b.since) }}
                 </p>
               </div>
 

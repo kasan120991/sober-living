@@ -1,6 +1,6 @@
 <script setup>
 import { Ellipsis, UserPlus } from '@lucide/vue'
-import { isoDate } from '~/composables/useResidents.js'
+import { facilityDateOf } from '~/utils/facilityTime.js'
 import { money, inCredit } from '~/utils/money.js'
 import { STAFF_ROLE } from '~/utils/roles.js'
 
@@ -221,7 +221,7 @@ const shownCapacity = computed(() => {
                   {{ r.program?.name ?? '—' }}
                 </td>
                 <td class="border-border h-12 border-b px-3 tabular-nums whitespace-nowrap">
-                  {{ isoDate(r.intakeAt) ?? '—' }}
+                  {{ facilityDateOf(r.intakeAt) ?? '—' }}
                 </td>
                 <td class="border-border h-12 border-b px-3 tabular-nums whitespace-nowrap">
                   <span v-if="r.status === 'ACTIVE'">{{ r.dayOfStay }}</span>

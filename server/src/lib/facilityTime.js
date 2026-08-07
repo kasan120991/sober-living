@@ -49,6 +49,34 @@ export function facilityToday(now = new Date()) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(now)
 }
 
+/**
+ * The instant to STORE for a field that is a calendar date wearing a DateTime.
+ *
+ * Several columns mean a day rather than a moment — `LedgerEntry.occurredAt`,
+ * `Stay.intakeAt`, `Stay.expectedDischargeAt` — but are typed DateTime, so a
+ * bare 'YYYY-MM-DD' from a form reaches `new Date()` and is read as UTC
+ * midnight. That is 8pm the PREVIOUS day in New York, so a date somebody typed
+ * was stored, and read back, as the day before.
+ *
+ * Anchored at facility NOON, which is the load-bearing part: far enough from
+ * either midnight that the stored instant falls on the intended day whether it
+ * is later read on the facility clock or sliced in UTC. That is what stops this
+ * drifting back the next time somebody reaches for the wrong display helper.
+ *
+ * A real instant (Stripe's `paid_at`, a server clock) passes through untouched
+ * — that is a moment, not a calendar date, and it already knows its own day.
+ *
+ * NOT for a `@db.Date` column (`workedOn`, `sobrietyDate`): Postgres keeps only
+ * the date part there, so those are unambiguous already.
+ */
+export function facilityDayInstant(value) {
+  if (!value) return new Date()
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
+    return facilityWallClockToUtc(value.trim(), '12:00')
+  }
+  return new Date(value)
+}
+
 /** UTC instant → 'h:mm AM/PM' on the facility clock. */
 export function formatFacilityTime(instant) {
   return new Intl.DateTimeFormat('en-US', {

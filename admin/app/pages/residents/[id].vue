@@ -4,7 +4,12 @@ import { DISCHARGE_TYPES, isoDate } from '~/composables/useResidents.js'
 import { STAFF_ROLE } from '~/utils/roles.js'
 import { money } from '~/utils/money.js'
 import { hours } from '~/utils/serviceHours.js'
-import { formatFacilityTime, overdueLabel, presenceState } from '~/utils/facilityTime.js'
+import {
+  facilityDateOf,
+  formatFacilityTime,
+  overdueLabel,
+  presenceState,
+} from '~/utils/facilityTime.js'
 import { sectionByKey, sectionDots } from '~/utils/residentSections.js'
 
 const route = useRoute()
@@ -112,10 +117,13 @@ async function dropContact(id) {
 
 const FACTS = [
   { k: 'Program', v: (r) => r.current.program?.name ?? '—' },
-  { k: 'Intake', v: (r) => isoDate(r.current.intakeAt), num: true },
+  // facilityDateOf for the instants, isoDate for `sobrietyDate` — that one is
+  // a @db.Date column, where Postgres keeps only the date part and reading it
+  // on the facility clock would shift it a day the wrong way.
+  { k: 'Intake', v: (r) => facilityDateOf(r.current.intakeAt), num: true },
   { k: 'Sober since', v: (r) => isoDate(r.current.sobrietyDate) ?? '—', num: true },
   { k: 'Day', v: (r) => r.current.dayOfStay, num: true },
-  { k: 'Expected out', v: (r) => isoDate(r.current.expectedDischargeAt) ?? '—', num: true },
+  { k: 'Expected out', v: (r) => facilityDateOf(r.current.expectedDischargeAt) ?? '—', num: true },
   {
     // Verified hours only — the figure the target is actually measured against.
     // Pending hours are deliberately not folded in here: a number on the
@@ -390,7 +398,7 @@ const maskedSsn = computed(() =>
                   </span>
                 </div>
                 <span class="text-muted-foreground shrink-0 text-xs tabular-nums">
-                  {{ isoDate(s.outAt) }}
+                  {{ facilityDateOf(s.outAt) }}
                 </span>
               </div>
             </div>
@@ -476,7 +484,7 @@ const maskedSsn = computed(() =>
                   <tbody>
                     <tr v-for="s in signOuts" :key="s.id" class="bg-card">
                       <td class="h-12 border-b px-3 whitespace-nowrap tabular-nums">
-                        {{ isoDate(s.outAt) }} · {{ formatFacilityTime(s.outAt) }}
+                        {{ facilityDateOf(s.outAt) }} · {{ formatFacilityTime(s.outAt) }}
                       </td>
                       <td class="h-12 max-w-[24ch] truncate border-b px-3">{{ s.destination }}</td>
                       <td class="h-12 border-b px-3 whitespace-nowrap tabular-nums">
@@ -603,11 +611,11 @@ const maskedSsn = computed(() =>
                   <tbody>
                     <tr v-for="s in resident.stays" :key="s.id" class="bg-card">
                       <td class="h-12 border-b px-3 whitespace-nowrap tabular-nums">
-                        {{ isoDate(s.intakeAt) }}
+                        {{ facilityDateOf(s.intakeAt) }}
                       </td>
                       <td class="h-12 border-b px-3 whitespace-nowrap">
                         <span v-if="s.dischargedAt" class="tabular-nums">
-                          {{ isoDate(s.dischargedAt) }}
+                          {{ facilityDateOf(s.dischargedAt) }}
                         </span>
                         <Badge v-else variant="outline" class="border-dashed">Current</Badge>
                       </td>

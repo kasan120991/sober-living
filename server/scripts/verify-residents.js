@@ -105,6 +105,8 @@ async function main() {
       lastName: 'Okonkwo',
       cohort: 'WOMEN',
       bedId: freeBed.id,
+      intakeAt: '2026-08-06',
+      expectedDischargeAt: '2026-11-06',
       referralSource: 'Hospital discharge planner',
       emergencyContact: { name: 'Ada Okonkwo', relationship: 'Sister', phone: '512-555-0177' },
     }),
@@ -119,6 +121,19 @@ async function main() {
   nadia.body?.emergencyContacts?.length === 1
     ? ok('the emergency contact given at intake was saved')
     : bad('intake contact', JSON.stringify(nadia.body?.emergencyContacts))
+
+  // An admission date is a FACILITY calendar date. Stored naively it becomes
+  // UTC midnight — the 5th in New York — and every record quoting the intake
+  // date is then a day out. Both fields are checked because only one of them
+  // has a default, so a fix to one can miss the other.
+  const { facilityToday } = await import('../src/lib/facilityTime.js')
+  facilityToday(new Date(nadia.body?.current?.intakeAt)) === '2026-08-06' &&
+  facilityToday(new Date(nadia.body?.current?.expectedDischargeAt)) === '2026-11-06'
+    ? ok('the intake and expected-out dates come back on the day they were typed')
+    : bad(
+        'intake dates',
+        `${nadia.body?.current?.intakeAt} / ${nadia.body?.current?.expectedDischargeAt}`,
+      )
 
   const takenAgain = await manager('/residents', {
     method: 'POST',

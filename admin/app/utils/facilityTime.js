@@ -61,9 +61,18 @@ export function formatWallClock(hhmm) {
   return `${hour}:${String(m).padStart(2, '0')} ${suffix}`
 }
 
-/** The facility calendar date of an instant, 'YYYY-MM-DD'. */
+/**
+ * The facility calendar date of an instant, 'YYYY-MM-DD'.
+ *
+ * Null in, null out — deliberately the same contract as `isoDate`, because
+ * this replaced it at call sites that render `?? '—'` for a date nobody has
+ * set yet. Without the guard `new Date(null)` is the epoch and an empty
+ * discharge date reads "1969-12-31".
+ */
 export function facilityDateOf(iso) {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: FACILITY_TIMEZONE }).format(new Date(iso))
+  return iso
+    ? new Intl.DateTimeFormat('en-CA', { timeZone: FACILITY_TIMEZONE }).format(new Date(iso))
+    : null
 }
 
 /** Today on the facility calendar, 'YYYY-MM-DD'. */

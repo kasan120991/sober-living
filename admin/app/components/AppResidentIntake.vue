@@ -11,6 +11,7 @@
 // Nothing is submitted until Complete intake, and the whole thing lands in one
 // transaction on the server.
 import { Check, ChevronLeft, ChevronRight, MapPin, Phone, Shield, User } from '@lucide/vue'
+import { facilityDateNow } from '~/utils/facilityTime.js'
 
 // Takes v-model:open and no trigger of its own — the roster and the
 // dashboard's quick actions both open it (module 1's shared-dialog rule).
@@ -39,7 +40,9 @@ const NO_BED = 'none'
 
 const blank = () => ({
   firstName: '', lastName: '', cohort: 'MEN', dateOfBirth: '', ssnLast4: '', intakeNotes: '',
-  programId: '', intakeAt: new Date().toISOString().slice(0, 10), expectedDischargeAt: '',
+  // facilityDateNow, not a UTC slice: after 8pm ET this prefilled TOMORROW,
+  // and an admission date is quoted on every record that follows from it.
+  programId: '', intakeAt: facilityDateNow(), expectedDischargeAt: '',
   sobrietyDate: '', bedId: NO_BED, referralSource: '',
   email: '', phone: '',
   contactName: '', contactRelationship: '', contactPhone: '',

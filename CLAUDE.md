@@ -1216,25 +1216,12 @@ staff learn it lies.
 
 **`occurredAt` is a DATE wearing a DateTime, and it is anchored at facility NOON**
 (fixed 2026-08-07). The schema always said it is "the date the line applies to", but a
-bare `'2026-08-06'` from the form was parsed with `new Date()` — UTC midnight, which is
-8pm on the *5th* in New York. So an entry a manager dated the 6th was stored as, and read
-back as, the 5th. `occurredAtInstant()` in `services/ledger.js` reads it through
-`facilityWallClockToUtc(date, '12:00')` instead; a genuine instant (Stripe's `paid_at`)
-passes through untouched, because that is a moment rather than a calendar date.
-
-Noon is the load-bearing part, not an arbitrary pick: it is far enough from **either**
-midnight that the stored instant lands on the intended day whether it is later read on the
-facility clock or sliced in UTC. That is what stops this drifting back the next time
-somebody reaches for the wrong helper — and it is the convention the seed already used.
-
-The display half moved with it: the ledger section renders every date through
-**`facilityDateOf`, never `isoDate`**, and `AppLedgerEntryDialog`'s date box prefills
-`facilityDateNow()` rather than a UTC slice — after 8pm ET it offered **tomorrow**, and a
-manager pressing Save wrote that date into a table nothing can ever update. The general
-rule this settles, worth knowing before touching any date in this app: **a `@db.Date`
-column takes `isoDate`** (`ServiceEntry.workedOn` is the precedent, and `facilityDateOf`
-would be *wrong* on it); **a DateTime instant takes `facilityDateOf`**. Getting those two
-backwards is the same bug the dashboard's `lastPaymentAt` had.
+bare `'2026-08-06'` from the form reached `new Date()` — UTC midnight, which is 8pm on
+the *5th* in New York — so an entry a manager dated the 6th was stored as, and read back
+as, the 5th. It goes through `facilityDayInstant()` now, and the ledger section renders
+every date with `facilityDateOf`. The rule generalised past this module and the reasoning
+lives under **Conventions**, with `Stay.intakeAt` and `Stay.expectedDischargeAt`, which
+had the identical fault.
 
 **The weekly run is a BUTTON, not a cron** (facility, 2026-08-06). Every Friday staff press
 *Generate weekly invoices* — a Quick action on the dashboard, managers only — which bills
@@ -1920,10 +1907,11 @@ Two verification suites, both run against a live database:
 - `node scripts/verify-apartments.js` — 32 assertions on apartments, beds and
   maintenance, including the admin/manager field split, the rules the database
   cannot enforce, and the remove/restore arc
-- `node scripts/verify-residents.js` — 46 assertions on the roster, intake,
+- `node scripts/verify-residents.js` — 47 assertions on the roster, intake,
   bed moves, discharge, the SSN read restriction, the notification bell, and search.
   Includes the cohort-mismatch 409 and a tech's 403 on bed assignment — the pair the
-  census board's free-tile placement rests on
+  census board's free-tile placement rests on, and the intake and expected-out dates
+  coming back on the day they were typed rather than the day before
 - `node scripts/verify-ledger.js` — **49 assertions** on derived balances, invoicing, the
   append-only guards, dollar-to-cent parsing, and processor-reference idempotency.
   Includes the invoice **snapshot proved three ways**, a duplicate webhook returning
@@ -2013,7 +2001,13 @@ Two verification suites, both run against a live database:
   empty rather than an error; keyset pages that neither overlap nor break the ordering;
   the hero riding on page one only; malformed date and cursor each a 400; and a
   discharged resident getting the no-active-stay payload while their record still opens.
-  Posts checks — reseed after.
+  Posts checks — reseed after. **Known fragility, not a regression: it cannot pass in the
+  first ~2 hours of the facility day.** Its missed-bucket and amendment probes sit 95
+  minutes back, which before ~2 AM falls into *yesterday*, so today's log has no elapsed
+  bucket for them to land in and two assertions fail. Running it with
+  `FACILITY_TIMEZONE` set to a zone where it is currently mid-day gives 65/65 and is the
+  quickest way to confirm nothing is actually broken. The real fix is to anchor those
+  probes to the start of the facility day.
 - `node scripts/verify-screens.js` — 66 assertions on drug screening: the staff gate; the
   queue carrying **no outcome fields and no outcome values at all**, so the reveal is a
   boundary rather than a curtain; a positive without substances, a negative with them, and
@@ -2165,6 +2159,35 @@ no longer the default.
   display half in `utils/facilityTime.js` as a copied constant. The older `isoDate()`
   UTC-slice helper is fine for dates, wrong for times — do not reuse it for anything
   with a clock.
+
+  **Which helper a date takes is decided by the COLUMN TYPE, and getting it backwards
+  is a real bug in both directions** (swept 2026-08-07). A **`@db.Date`** column —
+  `ServiceEntry.workedOn`, `Stay.sobrietyDate`, `Resident.dateOfBirth` — keeps only the
+  date part, so it takes **`isoDate`** and `facilityDateOf` would shift it a day the
+  wrong way. A **`DateTime` instant** — `intakeAt`, `dischargedAt`, `outAt`,
+  `occurredAt`, `dueAt`, `BedAssignment.startedAt` — takes **`facilityDateOf`**, because
+  `isoDate` slices UTC and anything recorded after 8pm ET then renders as tomorrow.
+
+  **Several DateTime columns are calendar DATES, and those need the facility clock on
+  the WRITE side too.** `LedgerEntry.occurredAt`, `Stay.intakeAt` and
+  `Stay.expectedDischargeAt` are all fed a bare `'YYYY-MM-DD'` from a form, and
+  `new Date('2026-08-06')` is UTC midnight — 8pm on the **5th** here — so a date
+  somebody typed was stored, and read back, as the day before.
+  **`facilityDayInstant()`** in `lib/facilityTime.js` is the one knob: a bare date is
+  anchored at facility **noon**, a real instant passes through untouched. Noon is the
+  load-bearing part rather than an arbitrary pick — it is far enough from *either*
+  midnight that the stored instant lands on the intended day whether it is later read on
+  the facility clock or sliced in UTC, which is what stops this drifting back the next
+  time somebody reaches for the wrong display helper. It is **not** for a `@db.Date`
+  column, which is unambiguous already.
+
+  Two form prefills had the same fault and wrote it into the database rather than merely
+  showing it: `AppLedgerEntryDialog` and `AppResidentIntake` both defaulted their date
+  box to `new Date().toISOString().slice(0, 10)`, so after 8pm ET they offered
+  **tomorrow** — and in the ledger's case Save wrote that date into a table nothing can
+  update. Both now use `facilityDateNow()`. The admin's `facilityDateOf` returns **null
+  for null**, deliberately matching `isoDate`'s contract, because it replaced it at call
+  sites rendering `?? '—'`.
 
   **The value is `America/New_York`** — the facility is in Georgia. It was
   `America/Chicago` first and every time in the app read an hour early. Note the zone
