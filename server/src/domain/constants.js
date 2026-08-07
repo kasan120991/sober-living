@@ -228,17 +228,23 @@ export const INVOICE_STATUS = Object.freeze({
 })
 
 /**
- * How long a past-due invoice waits before the resident record's RED DOT
- * lights (facility policy, 2026-08-06).
+ * The payment term: an invoice is due at the END of the Nth facility day after
+ * it is sent (facility policy, 2026-08-07).
  *
- * Invoices are due ON RECEIPT, so an unpaid one is past due the next day —
- * that is the arithmetic, and it is what the invoice itself says. This is the
- * ALARM, and it is deliberately slower: OVERDUE_GRACE_MS's exact idiom, where
- * grace delays the shouting without moving the deadline. A dot that lit the
- * morning after every invoice would light on nearly everyone, which is the
- * noise module 11 predicted and refused to ship.
+ * This REPLACES "due on receipt", which was not a term so much as a bug: with
+ * `dueAt` set to the moment of sending and `overdue` derived as `dueAt < now`,
+ * every invoice this app had ever produced was overdue about a second after it
+ * went out. A separate 7-day `INVOICE_DOT_GRACE_DAYS` hid that from the record's
+ * red dot but never from the ledger's own label, which is where it was caught.
+ *
+ * That grace is GONE rather than reduced, and the dot now lights the moment an
+ * invoice is overdue. Three days of terms is the grace; a second grace stacked
+ * on top would be two knobs for one idea and the next reader would have to work
+ * out which one a screen was showing. The `OVERDUE_GRACE_MS` idiom still stands
+ * where it was born — sign-outs, where the deadline is a promise a resident made
+ * and the alarm should lag it.
  */
-export const INVOICE_DOT_GRACE_DAYS = 7
+export const INVOICE_NET_DAYS = 3
 
 /**
  * What a line on a Stripe invoice is allowed to SAY.

@@ -42,7 +42,9 @@ router.post(
     const results = []
     for (const s of stays) {
       try {
-        const invoice = await sendInvoice(s.stayId, { dueAt: new Date() }, req.session.userId)
+        // No dueAt: the service applies the facility's payment term, so the
+        // Friday run and a one-off send cannot disagree about what it is.
+        const invoice = await sendInvoice(s.stayId, {}, req.session.userId)
         results.push({ ...s, ok: true, invoiceId: invoice.id, status: invoice.status })
       } catch (err) {
         results.push({ ...s, ok: false, error: err?.message ?? 'Failed' })
@@ -87,9 +89,10 @@ export function residentInvoiceRoutes(r) {
       const { dueAt } = parseBody(sendBody, req.body ?? {})
       const stayId = await activeStayIdFor(req.params.id)
       if (!stayId) throw new HttpError(409, 'This resident has no active stay to bill.')
+      // Omitted rather than defaulted: the term lives in the service.
       const invoice = await sendInvoice(
         stayId,
-        { dueAt: dueAt ? new Date(dueAt) : new Date() },
+        { dueAt: dueAt ? new Date(dueAt) : undefined },
         req.session.userId,
       )
       res.status(201).json(invoice)

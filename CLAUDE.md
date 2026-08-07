@@ -55,7 +55,7 @@ Use these terms in code, schema, and UI. Do not invent synonyms.
 | **Invoice line** | The join row binding one ledger entry to one invoice. Its own table (`invoice_lines`) precisely so `ledger_entries` keeps its no-update guarantee; unique on the entry, so a charge cannot be billed twice — and a voided invoice's lines are never re-billable. |
 | **Pending** | A CHARGE or CREDIT with **no row in `invoice_lines`**. A read, never a stored flag. Payments are never billable, so never pending. **Not part of the balance** — pending money is stated beside it, never folded into it. Called **Unbilled** until 2026-08-07; the word changed with the rule, in the UI *and* in the code (`pendingCents`). |
 | **Draft** | An invoice whose Stripe half never finished. Its lines are bound, so they are not pending; it was never issued, so it is not owed. In **neither** figure — which is why `draftCents` is surfaced on its own, and why a keyless send now refuses rather than quietly making one. |
-| **Overdue** | An OPEN invoice past its `dueAt` on a stay whose balance is still positive. **Derived**, so cash paid at the desk clears it without touching the invoice. The record's red dot waits a further 7 days (`INVOICE_DOT_GRACE_DAYS`) — grace delays the alarm, not the arithmetic, the `OVERDUE_GRACE_MS` idiom. Note the **status pill's "overdue" means sign-outs** and always has; the two never merged. |
+| **Overdue** | An OPEN invoice past its `dueAt` on a stay whose balance is still positive. **Derived**, so cash paid at the desk clears it without touching the invoice. Invoices are **net 3 days** (`INVOICE_NET_DAYS`), due at the *end* of the third facility day, and **the record's red dot is exactly this** — there is no second grace period and no `dotDue` field (both removed 2026-08-07; the term carries the grace). Note the **status pill's "overdue" means sign-outs** and always has; the two never merged. |
 
 ---
 
@@ -119,8 +119,11 @@ instead of being re-decided per tab.
   RESIDENT_NOT_ACCOUNTED item uses, one knob, so the record and the bell cannot disagree.
   **Balance-overdue HAS joined red** (2026-08-06), now that invoicing gives a charge a due
   date — `dots.ledger`, derived through `stayInvoiceSummary()` in services/invoices.js, the
-  same helper the dashboard reads. Note it keys on `dotDue`, not `overdue`: an invoice is
-  past due the morning after it is sent, and the dot waits seven days. A resident can carry
+  same helper the dashboard reads. It keys on **`overdue`** — plainly, since 2026-08-07.
+  It used to key on a separate `dotDue`, because invoices were due on receipt and were
+  therefore past due the morning after they were sent, so the dot needed seven days of its
+  own grace to avoid lighting on nearly everyone. Net-3 terms replaced that: the invoice
+  itself now carries the grace, and one fact has one name again. A resident can carry
   **two red dots at once** — unaccounted-for and overdue — and the rail renders one per
   section, which is right; where anything ever needs a single answer, **unaccounted-for
   outranks overdue**, because one is a person nobody can find and the other is money. A
@@ -1258,12 +1261,42 @@ the ledger's own — a CREDIT with `correctsId`, then fresh charges. Making "unb
 "no row pointing at a *live* invoice" would turn a one-predicate read into a join on status
 and let billed-ness silently reverse.
 
-**Due on receipt; the RED DOT waits seven days.** Two different facts, the
-`OVERDUE_GRACE_MS` idiom exactly — the invoice is past due the next morning, and
-`INVOICE_DOT_GRACE_DAYS` delays the shouting. And `settled` reads the LEDGER as well as
-Stripe: a resident who pays $800 cash at the desk clears the dot even though Stripe never
-hears, because without that clause the dot burns forever on somebody who is square and
-staff learn it lies.
+**Invoices are NET 3 DAYS** (facility, 2026-08-07) — due at the **end of the third facility
+day**, `INVOICE_NET_DAYS` in `domain/constants.js`, applied by `facilityDueDate()` in
+`lib/facilityTime.js`.
+
+**This replaced "due on receipt", which was not a term so much as a bug.** `dueAt` was set
+to the moment of sending and `overdue` is derived as `dueAt < now`, so **every invoice this
+app ever produced was overdue about a second after it went out**. A separate seven-day
+`INVOICE_DOT_GRACE_DAYS` hid that from the record's red dot but never from the ledger's own
+label, which is where it was finally noticed — a $20 invoice for Whitfield reading overdue
+on arrival. Recorded rather than quietly fixed, because a derived alarm that was wrong for
+a week while every screen looked plausible is exactly the failure this file exists to warn
+about.
+
+Three details, each load-bearing:
+
+- **The end of the day, not 72 hours on.** "Net 3" is a promise about a *day*: a 2:14 PM
+  send and an 11:50 PM send the same evening are due at the end of the same Thursday. That
+  is what makes the date in the ledger, the date on the hosted Stripe page and the instant
+  `overdue` flips all name the same thing.
+- **`due_date` goes to Stripe, never `days_until_due`.** Stripe would otherwise count from
+  *its* finalization moment on *its* clock, and the hosted page could name a different date
+  than the record.
+- **The default lives in `sendInvoice`, not the routes.** Both the per-resident send and the
+  Friday run call it, and a default at each call site is two knobs that will disagree about
+  what "net 3" means. An explicit `dueAt` on the request still wins.
+
+**`INVOICE_DOT_GRACE_DAYS` and `dotDue` are GONE** rather than set to zero. The red dot is
+now exactly `overdue`: three days of terms *is* the grace, and a second grace stacked on top
+would be two knobs for one idea with no way to tell which one a screen was showing. **The
+`OVERDUE_GRACE_MS` idiom still stands where it was born** — sign-outs, where the deadline is
+a promise a resident made and the alarm should lag it. This change removes its only other
+user; it is not abandoned.
+
+And `settled` reads the LEDGER as well as Stripe: a resident who pays $800 cash at the desk
+clears the dot even though Stripe never hears, because without that clause the dot burns
+forever on somebody who is square and staff learn it lies.
 
 **`occurredAt` is a DATE wearing a DateTime, and it is anchored at facility NOON**
 (fixed 2026-08-07). The schema always said it is "the date the line applies to", but a
@@ -1333,8 +1366,7 @@ not caught it because its assertion used `rejects()`, which only proves *somethi
   received. Needs Stripe's customer credit balance *and* a facility decision about what
   happens if they pay the full amount anyway. Both send surfaces warn in the meantime.
 - **Resident-facing balances**, which is open question 7's remaining half.
-- **A default payment term other than on-receipt.** `dueAt` is already a parameter on the
-  send, so this is a facility policy nobody has been asked for rather than a code change.
+*(The default payment term was the last item here. Answered 2026-08-07: **net 3 days**.)*
 
 ### 12. Notifications
 **Built.** A bell in the app header on every page, showing situations rather than messages:
@@ -1970,7 +2002,7 @@ Two verification suites, both run against a live database:
   Includes the cohort-mismatch 409 and a tech's 403 on bed assignment — the pair the
   census board's free-tile placement rests on, and the intake and expected-out dates
   coming back on the day they were typed rather than the day before
-- `node scripts/verify-ledger.js` — **57 assertions** on derived balances, invoicing, the
+- `node scripts/verify-ledger.js` — **62 assertions** on derived balances, invoicing, the
   append-only guards, dollar-to-cent parsing, and processor-reference idempotency.
   Includes the invoice **snapshot proved three ways**, a duplicate webhook returning
   **200 with one PAYMENT**, overdue flipping on a cash payment **with no write to the
@@ -1986,7 +2018,13 @@ Two verification suites, both run against a live database:
   while its lines do *not* return to pending; a **DRAFT is in neither figure** and is
   reported on its own; a payment with nothing invoiced reads as a **credit**; and it
   **nets against the next invoice**. Plus the keyless send **refused with nothing billed** —
-  which is also why the arc drives `draftInvoice` directly rather than the route
+  which is also why the arc drives `draftInvoice` directly rather than the route.
+  **Five pin the net-3 term**, led by the regression that motivated it: an invoice sent
+  today is **not overdue**; the due date is the end of the **third facility day** and two
+  sends on that day share it whatever the hour, both proved on fixed instants so no DST
+  week can flake them; a real invoice stores that date rather than the send moment; and
+  **no `dotDue` rides on the wire**, which would otherwise let the client key on something
+  the server stopped computing
 - `node scripts/verify-census.js` — 12 assertions on the census read: derived occupancy,
   the figures row, the three tile states, and the staff-only gate
 - `node scripts/verify-realtime.js` — 14 assertions on the invalidation socket: the
@@ -2298,7 +2336,9 @@ Resolve these as they come up; update this file when they do.
 7. ~~Billing/rent — in scope?~~ **In scope, and broader than rent:** laundry, trips and
    program fees all land on the same balance, and payment comes through Stripe (built
    2026-08-06). **"Behind" is now answered structurally**: an OPEN invoice, past its due
-   date, on a stay that still owes — with the record's red dot waiting seven days past that.
+   date, on a stay that still owes — and the record's red dot is that same moment. The
+   **payment term is net 3 days** (2026-08-07), which answers the last part of this that
+   was open.
    Still open: **who may waive a fee**, and whether residents see their own balance before
    the resident app exists — though the RLS policies written for invoices already permit
    exactly that read, so it is a UI decision rather than a schema one.

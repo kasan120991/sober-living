@@ -50,6 +50,26 @@ export function facilityToday(now = new Date()) {
 }
 
 /**
+ * The END of the Nth facility day from now — what a payment term means.
+ *
+ * "Net 3" is a promise about a DAY, not about a moment: an invoice sent at
+ * 2:14 PM and one sent at 11:50 PM the same evening are both due at the end of
+ * the same Thursday. Returning 23:59 on that day is what makes the date in the
+ * ledger, the date on the hosted Stripe page and the instant `overdue` flips
+ * all name the same thing.
+ *
+ * The arithmetic is done on the DATE KEY, never by adding `n * 86_400_000` to
+ * an instant — across a DST boundary that lands on the wrong day. Same rule and
+ * same reason as `addDays` in services/schedule/expand.js.
+ */
+export function facilityDueDate(now = new Date(), days = 0) {
+  const key = facilityToday(now)
+  const d = new Date(`${key}T00:00:00.000Z`)
+  d.setUTCDate(d.getUTCDate() + days)
+  return facilityWallClockToUtc(d.toISOString().slice(0, 10), '23:59')
+}
+
+/**
  * The instant to STORE for a field that is a calendar date wearing a DateTime.
  *
  * Several columns mean a day rather than a moment — `LedgerEntry.occurredAt`,

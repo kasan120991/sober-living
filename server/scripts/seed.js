@@ -11,7 +11,8 @@ import { resetFacilityData } from './lib/reset.js'
 import { prisma } from '../src/db/client.js'
 import { runAsSystem } from '../src/lib/dbContext.js'
 import { hashPassword } from '../src/auth/passwords.js'
-import { facilityToday } from '../src/lib/facilityTime.js'
+import { facilityDueDate, facilityToday } from '../src/lib/facilityTime.js'
+import { INVOICE_NET_DAYS } from '../src/domain/constants.js'
 import { addDays, dateKeyToUtc } from '../src/services/schedule/expand.js'
 
 const DEV_PASSWORD = 'soberlife-dev-1234'
@@ -263,7 +264,11 @@ async function main() {
       data: {
         stayId,
         totalCents: total,
-        dueAt: issued, // Due on receipt, so the issue date is the due date.
+        // Net 3, the same term the app applies — the end of the third facility
+        // day after it went out. The unpaid months are weeks old either way, so
+        // the overdue fixtures still demo; what this keeps honest is that a
+        // seeded invoice and a real one carry the same kind of due date.
+        dueAt: facilityDueDate(issued, INVOICE_NET_DAYS),
         createdAt: issued,
         sentById: manager.id,
         lines: { create: entries.map((e) => ({ ledgerEntryId: e.id })) },
@@ -976,7 +981,7 @@ async function main() {
     ${await prisma.apartmentCheck.count()} apartment checks (men's CHECKED with 1 not found, women's OVERDUE, 1 missed hour, 1 amended)
     ${await prisma.drugScreen.count()} drug screens (1 negative, 1 awaiting the resident's decision, 1 declined, 1 at the lab, 1 lab-cleared after paying)
     ${await prisma.ledgerEntry.count()} ledger entries (rent, laundry, a trip, a damage, one credit)
-    ${await prisma.invoice.count()} invoices — rent billed monthly, most paid, 3 unpaid months past the dot's grace
+    ${await prisma.invoice.count()} invoices — rent billed monthly (net 3), most paid, 3 unpaid months long overdue
     balances are invoiced-and-due: 2 residents owe, the rest are square; fees stay pending
     ${await prisma.scheduleEvent.count()} scheduled events (5 weekly, 1 one-off; 2 of them both cohorts), ${await prisma.scheduleOccurrence.count()} occurrences
     ${await prisma.scheduleAttendance.count()} attendance marks on 2 taken rolls (one of them shared) — earlier days left un-taken on purpose

@@ -142,9 +142,9 @@ export function sectionDots(resident) {
   if (resident?.current?.service?.behind) dots.service = SECTION_DOT.WARNING
   if (resident?.current?.checks?.notAccounted) dots.checks = SECTION_DOT.CRITICAL
   // Balance-overdue, which module 1 said would JOIN red once invoicing gave a
-  // charge a due date. It has (2026-08-06). Note `dotDue`, not `overdue`: an
-  // invoice is past due the day after it is sent, and the dot waits a week —
-  // grace delays the alarm, not the arithmetic.
-  if (resident?.current?.invoices?.dotDue) dots.ledger = SECTION_DOT.CRITICAL
+  // charge a due date. It has (2026-08-06). It reads `overdue` directly since
+  // 2026-08-07: invoices are net 3 days, so being past due is already three
+  // days of grace, and the separate `dotDue` field it used to key on is gone.
+  if (resident?.current?.invoices?.overdue) dots.ledger = SECTION_DOT.CRITICAL
   return dots
 }

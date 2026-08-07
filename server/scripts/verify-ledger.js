@@ -517,10 +517,48 @@ async function main() {
   console.log('\n\x1b[1mOverdue is derived\x1b[0m')
 
   const castilloRecord = (await manager(`/residents/${castillo.residentId ?? castillo.id}`)).body
-  castilloRecord.current?.invoices?.overdue === true &&
-  castilloRecord.current?.invoices?.dotDue === true
-    ? ok('the seeded three-week-old invoice reads overdue, and past the 7-day dot grace')
+  castilloRecord.current?.invoices?.overdue === true
+    ? ok('a seeded unpaid month reads overdue, and lights the record’s red dot')
     : bad('overdue derived', JSON.stringify(castilloRecord.current?.invoices))
+  castilloRecord.current?.invoices?.dotDue === undefined
+    ? ok('and there is no separate dotDue on the wire — the term IS the grace')
+    : bad('dotDue gone', JSON.stringify(castilloRecord.current?.invoices?.dotDue))
+
+  // ── The payment term ─────────────────────────────────────────────────────
+  // The regression this section exists for: `dueAt` used to be the moment of
+  // sending, and `overdue` is `dueAt < now`, so every invoice went overdue
+  // about a second after it was sent. Asserted in BOTH directions, because
+  // "a fresh invoice is not overdue" passes on its own if somebody sets the
+  // term to a year, and "an old one is overdue" passed under the old bug too.
+  console.log('\n\x1b[1mInvoices are net 3 days\x1b[0m')
+
+  const { facilityDueDate, facilityToday } = await import('../src/lib/facilityTime.js')
+  const { INVOICE_NET_DAYS } = await import('../src/domain/constants.js')
+
+  const fresh = await billLocally(find('Whitfield').stayId, {
+    dueAt: facilityDueDate(new Date(), INVOICE_NET_DAYS),
+  })
+  const freshRecord = (await manager(`/residents/${find('Whitfield').id}`)).body
+  freshRecord.current?.invoices?.overdue === false
+    ? ok('an invoice sent today is NOT overdue — the bug that started this')
+    : bad('fresh not overdue', JSON.stringify(freshRecord.current?.invoices))
+
+  // Its stored due date is three days out, not the moment of sending — proved
+  // on FIXED instants so no DST week can make this flake. 6pm UTC on the 9th is
+  // 2pm on the 9th in New York; 2:30am UTC on the 10th is 10:30pm on the 9th.
+  // Both are the same facility day, so both are due at the end of the 12th.
+  const midDay = facilityDueDate(new Date('2026-08-09T18:00:00Z'), INVOICE_NET_DAYS)
+  const lateEve = facilityDueDate(new Date('2026-08-10T02:30:00Z'), INVOICE_NET_DAYS)
+  facilityToday(midDay) === '2026-08-12'
+    ? ok('the term lands on the END of the 3rd facility day, not 72 hours later')
+    : bad('due date', facilityToday(midDay))
+  lateEve.getTime() === midDay.getTime()
+    ? ok('and two sends on the same facility day share a due date, whatever the hour')
+    : bad('same day same due', `${lateEve.toISOString()} vs ${midDay.toISOString()}`)
+  // The stored value came through draftInvoice, so the whole path is covered.
+  facilityToday(new Date(fresh.dueAt)) !== facilityToday(new Date())
+    ? ok('a real invoice stores that due date rather than the send moment')
+    : bad('stored due date', fresh.dueAt)
 
   // Squaring the balance settles it WITHOUT touching the invoice — the clause
   // that stops the dot burning forever on somebody who paid cash at the desk.
@@ -573,7 +611,7 @@ async function main() {
   // not. `new Date('2026-08-06')` is UTC midnight, which is the 5th in New
   // York — so both directions are asserted, or a regression to the naive
   // parse would still pass the first one.
-  const { facilityDayInstant, facilityToday } = await import('../src/lib/facilityTime.js')
+  const { facilityDayInstant } = await import('../src/lib/facilityTime.js')
   facilityToday(facilityDayInstant('2026-08-06')) === '2026-08-06' &&
   facilityToday(new Date('2026-08-06')) === '2026-08-05'
     ? ok('a hand-typed ledger date is read on the facility clock, not as UTC midnight')

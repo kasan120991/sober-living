@@ -3,13 +3,14 @@ import { HttpError } from '../middleware/authorize.js'
 import { isUniqueViolationOn } from '../lib/http.js'
 import {
   INVOICE_CURRENCY,
-  INVOICE_DOT_GRACE_DAYS,
+  INVOICE_NET_DAYS,
   INVOICE_STATUS,
   LEDGER_ENTRY_TYPE,
   LEDGER_SIGN,
   STAY_STATUS,
   STRIPE_LINE_LABEL,
 } from '../domain/constants.js'
+import { facilityDueDate } from '../lib/facilityTime.js'
 import { stripe, stripeEmailsInvoices, stripeEnabled } from '../lib/stripe.js'
 import { balanceOfStay, balancesByStay, draftByStay } from './ledger.js'
 
@@ -70,13 +71,11 @@ export function invoiceStatus(invoice, balanceCents, now = new Date()) {
     invoice.paidAt != null || invoice.voidedAt != null || balanceCents <= 0
   const overdue = invoice.finalizedAt != null && !settled && invoice.dueAt < now
   const daysPastDue = overdue ? Math.floor((now - invoice.dueAt) / DAY_MS) : 0
-  return {
-    settled,
-    overdue,
-    daysPastDue,
-    // The alarm, not the arithmetic.
-    dotDue: overdue && daysPastDue >= INVOICE_DOT_GRACE_DAYS,
-  }
+  // There is deliberately no `dotDue` any more. It was `overdue` plus a 7-day
+  // grace, which existed only because invoices were due on receipt and were
+  // therefore overdue on arrival. The term carries the grace now, so the record's
+  // red dot is exactly `overdue` — one fact, one name, nothing to drift.
+  return { settled, overdue, daysPastDue }
 }
 
 /** The PENDING lines of a stay: charges and credits with no invoice line. */
@@ -138,10 +137,11 @@ export async function stayInvoiceSummary(stayId) {
     // warn on it, because the invoice will still demand the full amount: the
     // credit lives in our ledger and Stripe has never heard of it.
     creditCents: balanceCents < 0 ? -balanceCents : 0,
+    // The rail's red dot reads THIS. It is a boolean rather than a count — the
+    // rail is a status board, and two overdue invoices are not twice as red as
+    // one. It was `dotDue` until 2026-08-07, when the payment term took over
+    // the job that field's grace period was doing.
     overdue: overdue.length > 0,
-    // The dot is the LOUDEST of them, not a count — the rail is a status
-    // board, and two overdue invoices are not twice as red as one.
-    dotDue: shaped.some((i) => i.dotDue),
     oldestDueAt: overdue.length ? overdue[overdue.length - 1].dueAt : null,
     overdueCents: overdue.reduce((t, i) => t + i.totalCents, 0),
   }
@@ -177,7 +177,6 @@ export async function overdueByStay(stayIds) {
         dueAt: inv.dueAt,
         totalCents: inv.totalCents,
         daysPastDue: s.daysPastDue,
-        dotDue: s.dotDue,
       })
     }
   }
@@ -319,7 +318,11 @@ export async function pushToStripe(invoiceId, entries) {
     {
       customer: customerId,
       collection_method: 'send_invoice',
-      days_until_due: 0, // Due on receipt (facility policy).
+      // OUR due date, as an explicit instant — never `days_until_due`, which
+      // makes Stripe count from ITS finalization moment. Ours is the end of a
+      // facility day; Stripe's would be a different clock and could name a
+      // different date on the hosted page than the ledger shows.
+      due_date: Math.floor(invoice.dueAt.getTime() / 1000),
       // Explicit even though it is the default: without it a stray pending
       // invoice item — from a dashboard experiment, from a crashed run — is
       // swept into OUR invoice and totalCents silently stops matching Stripe.
@@ -425,11 +428,23 @@ export function canHostInvoice(resident) {
   return Boolean(resident?.email?.trim())
 }
 
-/** Draft, then push. The whole act, in the order that makes a crash survivable. */
-export async function sendInvoice(stayId, { dueAt }, actorId) {
+/**
+ * Draft, then push. The whole act, in the order that makes a crash survivable.
+ *
+ * The payment term is defaulted HERE rather than at the route, because both the
+ * per-resident send and the Friday run call this — a default at each call site
+ * is two knobs that will eventually disagree about what "net 3" means. An
+ * explicit `dueAt` still wins, so a manager can agree different terms on one
+ * invoice.
+ */
+export async function sendInvoice(stayId, { dueAt } = {}, actorId) {
   // The preflight refuses a keyless server, so by here Stripe is configured.
   await preflight(stayId)
-  const { invoice, entries } = await draftInvoice(stayId, { dueAt }, actorId)
+  const { invoice, entries } = await draftInvoice(
+    stayId,
+    { dueAt: dueAt ?? facilityDueDate(new Date(), INVOICE_NET_DAYS) },
+    actorId,
+  )
   return pushToStripe(invoice.id, entries)
 }
 

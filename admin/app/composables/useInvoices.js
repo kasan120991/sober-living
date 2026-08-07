@@ -8,7 +8,7 @@
 export function useInvoices() {
   const api = useApi()
 
-  /** `{ invoices, balanceCents, pendingCents, draftCents, overdue, dotDue, stayId }`. */
+  /** `{ invoices, balanceCents, pendingCents, draftCents, overdue, stayId }`. */
   const listInvoices = (residentId) => api(`/residents/${residentId}/invoices`)
 
   /** Sweep this resident's PENDING lines into one invoice and send it. */

@@ -1,6 +1,6 @@
 /**
  * Invoice vocabulary — COPIED from server/src/domain/constants.js, per the
- * convention. `overdue` and `dotDue` are deliberately absent: they are derived
+ * convention. `overdue` is deliberately absent: it is derived
  * on the server and arrive on the payload, because two implementations of
  * "is this person overdue" is how two screens come to disagree about somebody's
  * money.
