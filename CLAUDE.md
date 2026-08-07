@@ -897,8 +897,27 @@ row only; there is deliberately no "reveal all".
 accepted knowingly: what the reveal protects is the **specific** result, which is the
 damaging part over a shoulder. Do not add a "Positives" filter chip.
 
-**On the resident record**, the Drug screens section is read-only, outcome-free until
-revealed, and carries **no dot** — decision 7 reaching the record page.
+**On the resident record** the section is read-only and carries **no dot** — decision 7
+reaching the record page — and it is **a counts band over a month-grouped history**
+(variant B, chosen 2026-08-06 from three rendered variants; a standing hero and a
+card-per-screen were the others). The Schedule section's attendance idiom applied to
+screens, so the record's two history-shaped sections read the same way.
+
+**Results are VISIBLE INLINE here, and that is a deliberate exception to the reveal.**
+`/screens` lists many people at once and keeps its fetch-on-reveal boundary; a record page
+is a deliberate navigation to ONE named person somebody already chose — which is precisely
+module 1's argument for techs seeing the Clinical group at all. The cost, stated: the audit
+unit becomes *"opened this resident's screens"* rather than *"looked at these three
+results"*. On a page about one person that is the right grain; on the queue it would not be.
+
+**Counts, never a percentage** — a resident may have two screens, and "50%" implies a
+measurement where "1 of 2" carries its own sample size. The band hides entirely when
+nothing is recorded, the `attendanceSummary()` rule: a 0-of-0 bar reads as a failing grade
+rather than as an absence of information. **An OVERTURNED screen is its own bucket and its
+own muted segment** — counting it positive would contradict the lab being authoritative,
+and counting it silently negative would hide that a cup once read positive, which is a
+fact the facility may have to explain. There is an assertion that the buckets sum to the
+total, so no screen can be counted twice or dropped.
 
 **`GET /staff`** was added for the witness picker: staff-only, returning active staff names
 and roles, excluding RESIDENT so a resident's linked account can never appear as a pickable
@@ -1787,7 +1806,7 @@ Two verification suites, both run against a live database:
   the hero riding on page one only; malformed date and cursor each a 400; and a
   discharged resident getting the no-active-stay payload while their record still opens.
   Posts checks — reseed after.
-- `node scripts/verify-screens.js` — 63 assertions on drug screening: the staff gate; the
+- `node scripts/verify-screens.js` — 66 assertions on drug screening: the staff gate; the
   queue carrying **no outcome fields and no outcome values at all**, so the reveal is a
   boundary rather than a curtain; a positive without substances, a negative with them, and
   a specimen with no seal number each refused; a REFUSAL landing NOT_OFFERED because there

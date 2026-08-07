@@ -418,9 +418,28 @@ async function main() {
   section.body.hasActiveStay === true && section.body.screens.length > 0
     ? ok(`an active resident's section lists their screens (${section.body.screens.length})`)
     : bad('record section', JSON.stringify(section.body).slice(0, 120))
-  !/"result"|"labResult"/.test(JSON.stringify(section.body))
-    ? ok('and carries no outcomes either — the same reveal boundary')
-    : bad('section leaks outcomes', 'found a result field')
+
+  // The record section DOES carry outcomes, deliberately unlike the queue
+  // (2026-08-06): it is one named person somebody navigated to on purpose,
+  // which is module 1's own argument for techs seeing Clinical at all.
+  section.body.screens.every((s) => s.outcome && 'contradicted' in s.outcome)
+    ? ok('and every row carries its outcome — a record page is one person, chosen on purpose')
+    : bad('section outcomes', JSON.stringify(section.body.screens[0]).slice(0, 160))
+
+  const sum = section.body.summary
+  sum && sum.total === section.body.screens.length
+    ? ok(`the summary counts every screen on the stay (${sum.total})`)
+    : bad('summary total', JSON.stringify(sum))
+  sum.negative + sum.positive + sum.dilute + sum.refusal + sum.notRead + sum.overturned === sum.total
+    ? ok('and its buckets add up to that total — no screen counted twice or dropped')
+    : bad('buckets add up', JSON.stringify(sum))
+  // The screen whose cup read positive and whose lab cleared it is its OWN
+  // bucket: counting it positive would contradict the lab being
+  // authoritative, and counting it negative would hide that a cup read
+  // positive at all.
+  sum.overturned === 1 && sum.positive === 0
+    ? ok('an overturned screen is its own bucket — neither positive nor silently negative')
+    : bad('overturned bucket', JSON.stringify(sum))
   const goneSection = await tech(`/residents/${ramsey.id}/screens`)
   goneSection.body.hasActiveStay === false && goneSection.body.screens.length === 0
     ? ok('a discharged resident gets the no-active-stay payload, not an error')

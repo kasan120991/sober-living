@@ -475,16 +475,52 @@ export async function houseScreens() {
 }
 
 /**
+ * How a stay's screens have gone, in COUNTS — never a percentage.
+ *
+ * The `attendanceSummary()` habit: a resident may have two screens, and "50%"
+ * would imply a measurement where "1 of 2" carries its own sample size.
+ *
+ * A CONTRADICTED screen is its own bucket rather than being filed under
+ * either half. Counting it as positive would contradict this module's central
+ * rule — the lab is authoritative — and counting it silently as negative would
+ * hide that a cup once read positive, which is a fact the facility may need to
+ * explain. It is neither, and it says so.
+ */
+function screenSummary(screens) {
+  const s = { total: screens.length, negative: 0, positive: 0, dilute: 0, refusal: 0, notRead: 0, overturned: 0 }
+  for (const row of screens) {
+    const o = screenOutcome(row)
+    if (o.contradicted) {
+      s.overturned += 1
+      continue
+    }
+    const effective = o.effectiveResult
+    if (effective === SCREEN_RESULT.NEGATIVE) s.negative += 1
+    else if (effective === SCREEN_RESULT.POSITIVE) s.positive += 1
+    else if (effective === SCREEN_RESULT.DILUTE) s.dilute += 1
+    else if (effective === SCREEN_RESULT.REFUSAL) s.refusal += 1
+    else s.notRead += 1
+  }
+  return s
+}
+
+/**
  * One resident's screens, for the record section. Active stay only — the
- * Service/Ledger/Schedule/Checks precedent — and outcomes are omitted here
- * too, for the same reason as the queue.
+ * Service/Ledger/Schedule/Checks precedent.
+ *
+ * UNLIKE the queue, this DOES carry outcomes (decided 2026-08-06). A record
+ * page is a deliberate navigation to one named person somebody already chose,
+ * which is the very argument module 1 makes for techs seeing the Clinical
+ * group at all; the queue lists many people at once and keeps its
+ * fetch-on-reveal boundary. The audit unit here becomes "opened this
+ * resident's screens", which is the right grain for a page about one person.
  */
 export async function residentScreens(residentId) {
   const stay = await prisma.stay.findFirst({
     where: { residentId, status: STAY_STATUS.ACTIVE },
-    select: { id: true },
+    select: { id: true, intakeAt: true },
   })
-  if (!stay) return { hasActiveStay: false, stayId: null, screens: [] }
+  if (!stay) return { hasActiveStay: false, stayId: null, since: null, summary: null, screens: [] }
 
   const screens = await prisma.drugScreen.findMany({
     where: { stayId: stay.id, ...CURRENT_ONLY },
@@ -492,5 +528,14 @@ export async function residentScreens(residentId) {
     take: 100,
     include: WITH_PEOPLE,
   })
-  return { hasActiveStay: true, stayId: stay.id, screens: screens.map(shapeRow) }
+  return {
+    hasActiveStay: true,
+    stayId: stay.id,
+    since: stay.intakeAt,
+    // Null rather than a zero-filled object when nothing is recorded: a
+    // 0-of-0 bar reads as a failing grade rather than as an absence of
+    // information, so the client hides the band entirely.
+    summary: screens.length ? screenSummary(screens) : null,
+    screens: screens.map((s) => ({ ...shapeRow(s), note: s.note, outcome: screenOutcome(s) })),
+  }
 }
