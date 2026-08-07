@@ -120,7 +120,7 @@ const recent = computed(() => data.value?.recent ?? [])
                email, and the line under the button says exactly who. -->
           <p class="text-muted-foreground mt-1 text-[12.5px]">
             <span v-if="figures.creditCents > 0" class="text-success">
-              {{ money(figures.creditCents) }} in credit besides
+              {{ money(figures.creditCents) }} in credits
             </span>
             <span v-else>Not owed by anyone until it is invoiced</span>
           </p>
