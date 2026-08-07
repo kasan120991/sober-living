@@ -26,6 +26,7 @@ import checksRouter from './routes/checks.js'
 import screensRouter from './routes/screens.js'
 import staffRouter from './routes/staff.js'
 import invoicesRouter from './routes/invoices.js'
+import billingRouter from './routes/billing.js'
 import stripeWebhookRouter from './routes/stripeWebhook.js'
 
 export function createApp() {
@@ -106,6 +107,8 @@ export function createApp() {
   app.use('/screens', screensRouter)
   app.use('/staff', staffRouter)
   app.use('/invoices', invoicesRouter)
+  // Managers and admins only — the gate lives on the router itself.
+  app.use('/billing', billingRouter)
 
   app.use(notFound)
   app.use(errorHandler)

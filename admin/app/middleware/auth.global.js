@@ -26,4 +26,15 @@ export default defineNuxtRouteMiddleware(async (to) => {
   }
 
   if (isLogin) return navigateTo('/')
+
+  // A page may name the roles that can OPEN it, via `definePageMeta({ roles })`.
+  // Presentation, like everything else here — the API refuses the data
+  // regardless, and that refusal is the protection.
+  //
+  // It exists because /billing is the first page whose READ is manager-only.
+  // Every earlier manager-gated page (/apartments, /staff) has an all-staff GET
+  // behind it and only gates the writes, so a tech typing the URL got a page
+  // that simply rendered. Typing /billing without this got a 500 from the
+  // refused fetch — a crash where a redirect belongs.
+  if (to.meta.roles && !to.meta.roles.includes(user.value.role)) return navigateTo('/')
 })

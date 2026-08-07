@@ -1,4 +1,5 @@
 import {
+  Banknote,
   Building2,
   CalendarDays,
   ClipboardCheck,
@@ -64,6 +65,16 @@ const GROUPS = [
       { label: 'Travel Passes', icon: Plane, to: '/passes', roles: ALL_STAFF },
       { label: 'Community Service', icon: HandHeart, to: '/service', roles: ALL_STAFF },
     ],
+  },
+  {
+    // One item today, and a group anyway. `Facility` is documented as
+    // configuration "visited rarely" and billing is weekly; the secondary
+    // group is for things nobody opens on shift. This is also where reporting
+    // will land. MANAGERS — and the API refuses a tech regardless, which is
+    // the gate that actually holds.
+    id: 'money',
+    label: 'Money',
+    items: [{ label: 'Billing', icon: Banknote, to: '/billing', roles: MANAGERS }],
   },
   {
     id: 'facility',

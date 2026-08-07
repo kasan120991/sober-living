@@ -1650,6 +1650,72 @@ trend (needs replaying `bed_assignments` history per day — a report, not a pag
 a true attendance rate (whether EXCUSED counts is facility policy nobody has set; the
 board's counts stay counts).
 
+### 15. Billing
+**Built (2026-08-07).** `/billing`, **managers and admins only** — the first page in the app
+whose *read* is manager-gated, and the reason a new client-side guard exists (below).
+
+Billing had no home. The act that actually bills the facility was a **Quick action in a
+dropdown on the dashboard**, and the rest was scattered — outstanding balances on the
+dashboard, invoices per-resident on the record, nothing anywhere answering "who is past due"
+across residents. That mattered more once a balance became invoiced-and-due: pending money
+sits outside the balance, so an unpressed button means nobody shows as owing it.
+
+**RUN-FIRST** (chosen from three rendered framings; a collections-first chase list and a
+filterable invoice ledger were the others). This app has no cron: the facility is billed when
+a human presses a button, so what is ready to bill is the first band and the act is the point
+of the page. Bands: figures → **Ready to bill** with the send → **Past due** → recent
+invoices. The Quick action moved here; the dashboard's balances panel stays and links across.
+
+- **`GET /billing` is one composed read**, the `/census`, `/service`, `/dashboard` pattern,
+  built entirely from derivations that already exist — `billableStays`, `overdueInvoices`,
+  `balancesByStay`, `pendingByStay`, `draftByStay`. A band cannot disagree with the resident
+  record it came from.
+- **`billableStays()` was NOT changed, deliberately.** It is the list the weekly run loops
+  over, so admitting net≤0 stays would make it attempt sends that must fail. Stays that nets
+  to a credit come back as a separate `skipped` array; stays with **no email** are already in
+  `ready` carrying `canInvoice: false`, and the screen groups them from that flag. Two sources
+  for "will not send" would be two lists to keep in step.
+- **`overdueInvoices()` returns EVERY overdue invoice, not one per stay** — the difference
+  from `overdueByStay()`, which keeps the oldest because the dashboard and the rail's dot each
+  need a single answer. A chase list needs them all: Castillo carries two, and the second is
+  $650 nobody was being shown. Both derive through the same `invoiceStatus()`.
+- **The past-due figure is a SPLIT of outstanding, never a sum of invoice totals.** Summing
+  the documents produced "$1,625 outstanding, $1,950 past due" — impossible on its face,
+  because a part-paid $650 invoice leaves less than $650 owed. It is the balance of stays
+  carrying an overdue invoice, the dashboard card's own rule, and `verify-billing.js` asserts
+  both the agreement and that it cannot exceed outstanding.
+- **`GET /invoices/billable` was tightened to managers** with it. All-staff was an oversight
+  rather than a decision — only manager UI ever called it. **The per-resident ledger read
+  stays all-staff and is untouched**: a tech asked "what do I owe" at the door still answers
+  it without finding a manager. That is one resident; this is the facility's books.
+- **`AppWeeklyRunDialog` gained `confirmOnly`** rather than being copied — the screen *is* the
+  preview, and a confirm that repeats it is noise. The `AppEventForm` layout-prop precedent.
+  Its second state still earns its keep: partial success is the expected outcome of a per-stay
+  run, and that report has nowhere else to go.
+
+**The Friday nag is built** — module 11's "still to build", and the honest counterweight to
+having no cron. Derived, no new table: it fires when money is pending anywhere **and** no
+invoice has been created since the most recent Friday on the facility calendar. Deliberately
+*not* "there are pending charges", which is true every day. It carries a **count of residents,
+never an amount** — the screen's own pending figure is the facility net (which includes
+somebody sitting on a credit), and a second money figure under the same word is how a row and
+the card above it come to look like they disagree.
+
+It appears on `/billing` and as a row in the **dashboard's Needs-attention panel**, and
+**deliberately not in the bell**: the bell is glanced at on a shared phone by techs, who
+cannot open this screen at all, and an item nobody looking at it can act on is noise. The
+panel is already not identical to the bell — overdue sign-outs and community service were
+both removed from it — so a dashboard-only row has precedent. `verify-billing.js` asserts the
+bell stays clean.
+
+**A new client guard, and why it did not exist before.** `definePageMeta({ roles })`, read by
+`middleware/auth.global.js`, redirects a role that may not open a page. Every earlier
+manager-gated page (`/apartments`, `/staff`) has an **all-staff GET** behind it and gates only
+the writes, so a tech typing the URL simply got a page. `/billing` is the first whose read is
+refused, and without the guard a tech typing it got a **500 from the rejected fetch** — a
+crash where a redirect belongs. Presentation only, as ever: the API refusing the data is the
+protection, and the suite asserts that separately.
+
 ### Likely later
 Incident reports, rent/fee ledger, staff shifts and handoff notes, curfew tracking,
 resident chores, visitor log, waitlist, reporting/exports for licensing and referral
@@ -2156,6 +2222,16 @@ Two verification suites, both run against a live database:
   log and verify but not set a target, and a **NULL amendment reason refused by the
   database** — the assertion that would have caught issue #1, which a CHECK passing on
   NULL let through until 2026-08-06
+- `node scripts/verify-billing.js` — **18 assertions** on the billing screen's one read:
+  a **tech refused** `/billing` *and* `/invoices/billable` while still reading one
+  resident's ledger (the gate that matters, since hiding the nav link is not one); every
+  band equal to its source, with `skipped` provably disjoint from `ready` so the run cannot
+  bill what the screen disclaims; **past due carrying a resident twice**, oldest first, and
+  agreeing with that resident's own record; the past-due figure equal to the dashboard's
+  split and **never exceeding outstanding**; and the Friday nag in **both directions** —
+  firing with money pending and no invoice since Friday, and CLEARING the moment one is
+  created, since "it fired" passes even if it always fires. Also asserts the **bell stays
+  clean**. Sends an invoice locally — reseed after.
 - `node scripts/verify-dashboard.js` — 22 assertions on the landing page's one read:
   staff-gated, capacity per cohort with no combined total, `upcoming` in band form over
   a one-day window with nothing shared also in a lane, every queue equal to its source

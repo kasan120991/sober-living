@@ -23,14 +23,27 @@ const managers = requireRole(STAFF_ROLE.ADMIN, STAFF_ROLE.HOUSE_MANAGER)
 const admins = requireRole(STAFF_ROLE.ADMIN)
 
 const sendBody = z.object({
-  // Due on receipt is the facility's rule, so this is optional and defaults to
-  // now. It stays overridable because a manager occasionally agrees terms.
+  // Net 3 days is the facility's term, applied by the service, so this is
+  // optional. It stays overridable because a manager occasionally agrees
+  // different terms on one invoice.
   dueAt: z.string().datetime().optional(),
 })
 const voidBody = z.object({ reason: z.string().trim().min(1).max(300) })
 
-/** Who has something worth billing — what the Friday button acts on. */
-router.get('/billable', handler(async (_req, res) => res.json({ stays: await billableStays() })))
+/**
+ * Who has something worth billing — what the Friday button acts on.
+ *
+ * MANAGERS, tightened 2026-08-07 when the billing screen was built. It had been
+ * all-staff, which was an oversight rather than a decision: only manager UI has
+ * ever called it, and a facility-wide money read that a tech could fetch sat
+ * oddly beside a screen they cannot open. The per-resident ledger read is the
+ * one deliberately left all-staff.
+ */
+router.get(
+  '/billable',
+  managers,
+  handler(async (_req, res) => res.json({ stays: await billableStays() })),
+)
 
 router.post(
   '/weekly-run',

@@ -3,6 +3,7 @@ import { LEDGER_ENTRY_TYPE, STAY_STATUS } from '../domain/constants.js'
 import { overdueApartmentChecks, unaccountedResidents } from './checks.js'
 import { balancesByStay } from './ledger.js'
 import { overdueByStay } from './invoices.js'
+import { fridayNag } from './billing.js'
 import { urgentOpenWhere } from './maintenance.js'
 import { cohortCapacity, unhousedWithOptions } from './residents.js'
 import { scheduleWindow } from './schedule/read.js'
@@ -92,8 +93,17 @@ async function outstandingBalances() {
 }
 
 export async function dashboard() {
-  const [signOuts, unhoused, capacity, schedule, urgent, balances, checksOverdue, notAccounted] =
-    await Promise.all([
+  const [
+    signOuts,
+    unhoused,
+    capacity,
+    schedule,
+    urgent,
+    balances,
+    checksOverdue,
+    notAccounted,
+    nag,
+  ] = await Promise.all([
     listSignOuts(),
     unhousedWithOptions(),
     cohortCapacity(),
@@ -111,6 +121,13 @@ export async function dashboard() {
     // one knob, so this panel and the bell cannot disagree.
     overdueApartmentChecks(),
     unaccountedResidents(),
+    // The Friday nag. DASHBOARD ONLY, and deliberately not the bell: the bell
+    // is glanced at on a shared phone by techs, who cannot open /billing at
+    // all, and an item nobody looking at it can act on is noise. This panel is
+    // already not identical to the bell — overdue sign-outs and community
+    // service were both removed from it — so a row that is only here has
+    // precedent. Recorded so it is not "fixed" later.
+    fridayNag(),
   ])
 
   return {
@@ -134,6 +151,9 @@ export async function dashboard() {
         reportedAt: r.reportedAt,
         apartment: r.apartment,
       })),
+      // Null unless a billing day has gone past unbilled — the row is absent
+      // rather than false, so the panel's "absence means fine" rule holds.
+      billingDue: nag.due ? { waiting: nag.waiting, since: nag.since } : null,
     },
 
     balances,

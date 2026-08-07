@@ -151,7 +151,24 @@ const attention = computed(() => {
           to: '/schedule',
         }]
       : []
+  // The Friday nag leads: a billing day that went past unbilled is money
+  // nobody is being shown as owing, and it is one press to fix. Managers only,
+  // because /billing is — an item a tech cannot act on is noise on the one
+  // panel that greets every unlock.
+  const billingRows =
+    a.billingDue && canManage.value
+      ? [{
+          key: 'billing:friday',
+          kind: 'Billing',
+          title: 'Not billed since Friday',
+          chip: null,
+          meta: `${a.billingDue.waiting} ${a.billingDue.waiting === 1 ? 'resident has' : 'residents have'} charges waiting`,
+          to: '/billing',
+        }]
+      : []
+
   return [
+    ...billingRows,
     ...a.unhoused.map((r) => ({
       key: `unhoused:${r.id}`,
       kind: 'Bed',
@@ -180,7 +197,12 @@ const attention = computed(() => {
 const attentionCount = computed(() => {
   const a = data.value?.attention
   if (!a) return 0
-  return a.unhoused.length + a.needsRoll.length + a.urgentMaintenance.length
+  return (
+    a.unhoused.length +
+    a.needsRoll.length +
+    a.urgentMaintenance.length +
+    (a.billingDue && canManage.value ? 1 : 0)
+  )
 })
 
 // ── Quick actions ───────────────────────────────────────────────────────────
@@ -192,7 +214,6 @@ const signOutOpen = ref(false)
 const serviceOpen = ref(false)
 const intakeOpen = ref(false)
 const paymentOpen = ref(false)
-const weeklyOpen = ref(false)
 
 const quietDay = computed(
   () => !attention.value.length && !signedOut.value.length && !balances.value.owing.length,
@@ -223,11 +244,14 @@ const quietDay = computed(
             <DropdownMenuItem @click="paymentOpen = true">
               <CreditCard class="size-4" /> Record payment
             </DropdownMenuItem>
-            <!-- The Friday run. A button rather than a cron: this app has no
-                 scheduler and is proud of it, and a bulk irreversible money
-                 action wants a person behind it anyway. -->
-            <DropdownMenuItem @click="weeklyOpen = true">
-              <ReceiptText class="size-4" /> Generate weekly invoices
+            <!-- The Friday run MOVED to /billing (2026-08-07), where what it
+                 will bill is the first thing on the screen. A bulk irreversible
+                 money action pressed from a dropdown, with its preview inside
+                 the confirm, was the wrong way round. -->
+            <DropdownMenuItem as-child>
+              <NuxtLink to="/billing">
+                <ReceiptText class="size-4" /> Billing
+              </NuxtLink>
             </DropdownMenuItem>
           </template>
         </DropdownMenuContent>
@@ -506,6 +530,5 @@ const quietDay = computed(
       default-type="PAYMENT"
       @posted="load"
     />
-    <AppWeeklyRunDialog v-if="canManage" v-model:open="weeklyOpen" @ran="load" />
   </AppPage>
 </template>

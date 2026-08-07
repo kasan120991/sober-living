@@ -193,6 +193,56 @@ export async function overdueByStay(stayIds) {
   return out
 }
 
+/**
+ * EVERY overdue invoice across the facility, oldest first — the billing
+ * screen's chase list.
+ *
+ * Deliberately not `overdueByStay`, which keeps only the oldest per stay
+ * because the dashboard and the rail's dot each need a single answer. A chase
+ * list needs them all: a resident carrying two past-due invoices has a second
+ * one that is real money, and showing one of them is showing less than is owed.
+ *
+ * It derives through the same `invoiceStatus()` as everything else, so this
+ * screen cannot disagree with the record's red dot about who is late.
+ */
+export async function overdueInvoices() {
+  const now = new Date()
+  const open = await prisma.invoice.findMany({
+    where: { status: INVOICE_STATUS.OPEN, dueAt: { lt: now } },
+    orderBy: { dueAt: 'asc' },
+    include: {
+      stay: {
+        select: {
+          id: true,
+          resident: { select: { id: true, firstName: true, lastName: true } },
+        },
+      },
+    },
+  })
+  if (!open.length) return []
+
+  const balances = await balancesByStay(open.map((i) => i.stayId))
+  return open
+    .map((inv) => {
+      const s = invoiceStatus(inv, balances.get(inv.stayId) ?? 0, now)
+      // `settled` reads the ledger too, so a resident who paid cash at the desk
+      // drops off this list without anybody touching the invoice.
+      if (!s.overdue) return null
+      return {
+        invoiceId: inv.id,
+        stayId: inv.stayId,
+        residentId: inv.stay.resident.id,
+        residentName: `${inv.stay.resident.firstName} ${inv.stay.resident.lastName}`,
+        number: inv.number,
+        totalCents: inv.totalCents,
+        dueAt: inv.dueAt,
+        hostedUrl: inv.hostedUrl,
+        daysPastDue: s.daysPastDue,
+      }
+    })
+    .filter(Boolean)
+}
+
 /** Every invoice on a stay, newest first. */
 export async function listInvoices(stayId) {
   const summary = await stayInvoiceSummary(stayId)

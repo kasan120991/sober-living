@@ -74,7 +74,7 @@ async function submit() {
       <DialogHeader>
         <DialogTitle>Send invoice — {{ residentName }}</DialogTitle>
         <DialogDescription>
-          Every pending charge and credit on this stay, swept into one invoice. Due on receipt —
+          Every pending charge and credit on this stay, swept into one invoice, due in 3 days —
           and billing them is what makes them owed.
         </DialogDescription>
       </DialogHeader>

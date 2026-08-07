@@ -15,6 +15,14 @@ import { money } from '~/utils/money.js'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
+  /**
+   * Suppress the preview list. The billing screen already shows exactly what
+   * will send, and a confirm that repeats it is noise — one component, two
+   * shells, the `AppEventForm` layout-prop precedent. The dialog still fetches:
+   * it needs the counts for its own button, and re-reading at the moment of
+   * confirming is what keeps the promise honest if something changed.
+   */
+  confirmOnly: { type: Boolean, default: false },
 })
 const emit = defineEmits(['update:open', 'ran'])
 
@@ -85,7 +93,7 @@ async function submit() {
       <DialogHeader>
         <DialogTitle>Generate weekly invoices</DialogTitle>
         <DialogDescription>
-          One invoice per active stay with pending charges. Due on receipt.
+          One invoice per active stay with pending charges. Net 3 days.
         </DialogDescription>
       </DialogHeader>
 
@@ -126,7 +134,7 @@ async function submit() {
       </template>
 
       <template v-else>
-        <div class="flex max-h-56 flex-col overflow-y-auto">
+        <div v-if="!confirmOnly" class="flex max-h-56 flex-col overflow-y-auto">
           <div
             v-for="s in stays"
             :key="s.stayId"
