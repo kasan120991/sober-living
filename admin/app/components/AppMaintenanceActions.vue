@@ -20,6 +20,7 @@ const emit = defineEmits([
   'reopen-request',
   'edit-request',
   'assign-request',
+  'view-request',
 ])
 
 const { user } = useAuth()
@@ -114,6 +115,7 @@ async function run(fn, message) {
       <DropdownMenuItem v-if="isOpen(request)" @select="emit('edit-request', request)">
         Edit…
       </DropdownMenuItem>
+      <DropdownMenuItem @select="emit('view-request', request)">Open…</DropdownMenuItem>
 
       <DropdownMenuSeparator v-if="isOpen(request) && canManage" />
 

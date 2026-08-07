@@ -1235,18 +1235,28 @@ inset on an overdue row, which is the page's *only* inset, and the figures line,
 overdue count is the one number in destructive. If the house outgrows a screenful, the
 fallback is the bands variant and the figures carry over unchanged.
 
-- **Four figure cards head the page** — Open / Overdue / In progress / Closed this month,
-  `billing.vue`'s card shape including its rule that the alarming card takes the
-  destructive inset **only when it is non-zero**. That inset and the one on an overdue
-  *row* both mean "past its target", so they agree rather than competing, which is what
-  lets this page carry more than one. Nothing is hidden at zero: these are labelled
-  figures rather than chips, and "no repairs are late" is an answer worth showing.
-  `closedThisMonth` counts **requests**, not closure events — one closed, reopened and
-  closed again inside a month is one thing dealt with — and uses the **facility** month,
-  since a request closed at 9pm ET on the 1st is this month's.
-  *(They were missing from the first build: the chosen mock had them and the page shipped
-  with a text summary in the description slot instead. The description line stays too —
-  `billing.vue` carries both.)*
+- **A ROW OPENS.** Clicking the title opens `AppMaintenanceDetailDialog`, and this is the
+  most important thing on the page: the table has nowhere to put the **description**,
+  which it never showed at all, or the **trail**, which it reduces to "3 entries" — and
+  with every action behind a ghost ellipsis, "Edit…" was unfindable. A queue you cannot
+  open is a list you can only stare at.
+  - **View and edit are ONE modal in two modes**, never two stacked dialogs — CLAUDE.md's
+    roll-sheet rule. It also means there is exactly one edit form for a request rather
+    than a second that can drift from it. `AppMaintenanceEditDialog` existed for about an
+    hour and was folded in here.
+  - Anything needing a **note** (resolve, cancel, reopen) or its own **picker** (assign)
+    is **emitted**, so the parent closes the detail before opening that one. Same rule:
+    never stack.
+  - The parent **re-points `active` at the refetched row** after a save. The modal stays
+    open, and `load()` replaces the objects wholesale — without the re-sync it sits there
+    showing the title you just changed away from.
+- **No figure cards.** They were built from the variant C mock and dropped again the same
+  day, on request: the description line already states open / overdue / in progress, and
+  four cards restating it pushed the queue below the fold. `figures.closedThisMonth`
+  stays on the wire — it counts **requests**, not closure events (one closed, reopened
+  and closed again inside a month is one thing dealt with), on the **facility** month,
+  since a request closed at 9pm ET on the 1st is this month's. A filter chip reaches the
+  same rows.
 - **Each row carries a visible primary action** before the ellipsis, because everything
   behind a ghost ellipsis made the page read as though it had none. It is **role-aware**,
   since a button that always 403s is worse than no button: *Start work* on unowned open

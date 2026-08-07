@@ -19,7 +19,7 @@ import {
  * Both surfaces share the same row menu and the same dialogs, so the two can
  * never disagree about what an action does.
  */
-defineProps({
+const props = defineProps({
   requests: { type: Array, default: () => [] },
   showApartment: { type: Boolean, default: false },
 })
@@ -30,7 +30,8 @@ const active = ref(null)
 const closeOpen = ref(false)
 const closeMode = ref('RESOLVED')
 const reopenOpen = ref(false)
-const editOpen = ref(false)
+const detailOpen = ref(false)
+const detailEditing = ref(false)
 const assignOpen = ref(false)
 
 function openClose({ request, status }) {
@@ -42,10 +43,25 @@ function openReopen(request) {
   active.value = request
   reopenOpen.value = true
 }
-function openEdit(request) {
+function openDetail(request, editing = false) {
   active.value = request
-  editOpen.value = true
+  detailEditing.value = editing
+  detailOpen.value = true
 }
+const openEdit = (request) => openDetail(request, true)
+
+// The detail modal stays open after a save and holds the object it was given,
+// which the parent's refetch replaces wholesale — so re-point it at whatever
+// came back, or it sits there showing what you just changed away from.
+watch(
+  () => props.requests,
+  (rows) => {
+    if (!active.value) return
+    const fresh = rows.find((x) => x.id === active.value.id)
+    if (fresh) active.value = fresh
+  },
+)
+
 function openAssign(request) {
   active.value = request
   assignOpen.value = true
@@ -78,7 +94,13 @@ function openAssign(request) {
             >
               Urgent
             </Badge>
-            <span class="text-sm font-medium">{{ r.title }}</span>
+            <button
+              type="button"
+              class="text-start text-sm font-medium underline-offset-2 hover:underline"
+              @click="openDetail(r)"
+            >
+              {{ r.title }}
+            </button>
             <Badge
               v-if="requestStateDisplay(r).tone !== 'none'"
               variant="outline"
@@ -118,6 +140,7 @@ function openAssign(request) {
           @reopen-request="openReopen"
           @edit-request="openEdit"
           @assign-request="openAssign"
+          @view-request="openDetail"
         />
       </div>
     </div>
@@ -136,6 +159,14 @@ function openAssign(request) {
     :request-title="active?.title"
     @done="emit('changed')"
   />
-  <AppMaintenanceEditDialog v-model:open="editOpen" :request="active" @done="emit('changed')" />
+  <AppMaintenanceDetailDialog
+    v-model:open="detailOpen"
+    :request="active"
+    :start-in-edit="detailEditing"
+    @done="emit('changed')"
+    @close-request="openClose"
+    @reopen-request="openReopen"
+    @assign-request="openAssign"
+  />
   <AppMaintenanceAssignDialog v-model:open="assignOpen" :request="active" @done="emit('changed')" />
 </template>
