@@ -25,6 +25,23 @@ export function parseBody(schema, body) {
 }
 
 /** Postgres/Prisma error codes we translate into meaningful HTTP responses. */
+/**
+ * Whether a Prisma error is a unique violation on a particular column.
+ *
+ * Prisma 7 with the driver adapter STOPPED populating `meta.target` — the
+ * constraint's name now lives in
+ * `meta.driverAdapterError.cause.originalMessage`. Code reading `meta.target`
+ * silently stopped matching, which is how `postEntry`'s "that payment has
+ * already been recorded" 409 quietly became a 500. Both shapes are checked
+ * here so one place knows about the change.
+ */
+export function isUniqueViolationOn(err, column) {
+  if (err?.code !== PRISMA.UNIQUE_VIOLATION) return false
+  const target = String(err?.meta?.target ?? '')
+  const original = String(err?.meta?.driverAdapterError?.cause?.originalMessage ?? '')
+  return target.includes(column) || original.includes(column)
+}
+
 export const PRISMA = {
   UNIQUE_VIOLATION: 'P2002',
   FK_VIOLATION: 'P2003',

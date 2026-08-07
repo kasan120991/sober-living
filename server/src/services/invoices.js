@@ -1,6 +1,6 @@
 import { prisma, runInTransaction } from '../db/client.js'
 import { HttpError } from '../middleware/authorize.js'
-import { PRISMA } from '../lib/http.js'
+import { isUniqueViolationOn } from '../lib/http.js'
 import {
   INVOICE_CURRENCY,
   INVOICE_DOT_GRACE_DAYS,
@@ -251,7 +251,7 @@ export async function ensureStripeCustomer(residentId) {
     return customer.id
   } catch (err) {
     // Another request won the race. Its Customer is the real one.
-    if (err?.code === PRISMA.UNIQUE_VIOLATION) {
+    if (isUniqueViolationOn(err, 'stripeCustomerId')) {
       const fresh = await prisma.resident.findUnique({
         where: { id: resident.id },
         select: { stripeCustomerId: true },
@@ -316,14 +316,21 @@ export async function pushToStripe(invoiceId, entries) {
     )
   }
 
-  const finalized = await stripe.invoices.finalizeInvoice(draft.id, {
-    idempotencyKey: `inv:${invoice.id}:final`,
-  })
+  // Note the EMPTY params object: these SDK methods are (id, params, options),
+  // so passing the idempotency key second sends it to Stripe as a body
+  // parameter and the call is rejected outright.
+  const finalized = await stripe.invoices.finalizeInvoice(
+    draft.id,
+    {},
+    { idempotencyKey: `inv:${invoice.id}:final` },
+  )
 
   if (stripeEmailsInvoices()) {
-    await stripe.invoices.sendInvoice(finalized.id, {
-      idempotencyKey: `inv:${invoice.id}:send`,
-    })
+    await stripe.invoices.sendInvoice(
+      finalized.id,
+      {},
+      { idempotencyKey: `inv:${invoice.id}:send` },
+    )
   }
 
   return prisma.invoice.update({
@@ -371,9 +378,11 @@ export async function voidInvoice(invoiceId, reason) {
     throw new HttpError(409, 'This invoice is already void.')
   }
   if (invoice.stripeInvoiceId && stripeEnabled()) {
-    await stripe.invoices.voidInvoice(invoice.stripeInvoiceId, {
-      idempotencyKey: `inv:${invoice.id}:void`,
-    })
+    await stripe.invoices.voidInvoice(
+      invoice.stripeInvoiceId,
+      {},
+      { idempotencyKey: `inv:${invoice.id}:void` },
+    )
   }
   return prisma.invoice.update({
     where: { id: invoiceId },

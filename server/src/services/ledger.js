@@ -1,4 +1,5 @@
 import { prisma } from '../db/client.js'
+import { isUniqueViolationOn } from '../lib/http.js'
 import { HttpError } from '../middleware/authorize.js'
 import { LEDGER_ENTRY_TYPE, LEDGER_SIGN, STAY_STATUS } from '../domain/constants.js'
 
@@ -181,7 +182,10 @@ export async function postEntry(input, actorId) {
     // A duplicate processor reference is the at-least-once webhook arriving
     // twice, not an error the caller can fix. Say so plainly; a handler should
     // treat it as "already recorded".
-    if (err?.code === 'P2002' && String(err?.meta?.target ?? '').includes('externalRef')) {
+    // isUniqueViolationOn, not a hand-rolled meta.target read: Prisma 7's
+    // driver adapter stopped populating that field, and this check had been
+    // silently failing — the 409 below never fired and callers saw a 500.
+    if (isUniqueViolationOn(err, 'externalRef')) {
       throw new HttpError(409, 'That payment has already been recorded.')
     }
     throw err

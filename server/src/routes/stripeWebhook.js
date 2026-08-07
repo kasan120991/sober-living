@@ -146,7 +146,7 @@ export async function handleStripeEvent(event) {
   try {
     await prisma.stripeEvent.create({ data: { id: event.id, type: event.type } })
   } catch (err) {
-    if (err?.code === PRISMA.UNIQUE_VIOLATION) return // Already handled.
+    if (err?.code === PRISMA.UNIQUE_VIOLATION) return // Seen; nothing to redo.
     throw err
   }
 
