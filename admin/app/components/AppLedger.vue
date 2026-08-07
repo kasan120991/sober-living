@@ -7,12 +7,27 @@
 //
 // Nothing here edits or deletes: the database refuses both. A mistake is
 // corrected by posting an entry that points at the one it fixes.
+//
+// ── A BAND OVER A GROUPED HISTORY, THEN THE INVOICES (chosen 2026-08-07 from
+// three rendered variants; a bank-style statement and an invoice-first list
+// were the others). The section serves two questions in this order: "what does
+// this person owe and what do I do about it" — the band — and "why" — the
+// history. That is the same hero-over-trail shape as Apartment checks and the
+// same queue-over-progress shape as /service, so the rail reads consistently.
+//
+// The two rejected variants each failed on the domain rather than on looks.
+// The statement kept the cleanest chronology but demoted the invoice to a chip
+// at the end of a row, just as an invoice became the thing that MAKES money
+// owed. Invoice-first was the most faithful to that rule, but payments are not
+// invoice lines in this model, so it split the story into pending / invoices /
+// payments and left somebody asking "why $975" to net three blocks in their
+// head — which is exactly the breakdown this section exists to provide.
+//
 // Dates here go through facilityDateOf, NEVER isoDate. Every date this section
 // shows is an INSTANT underneath — `occurredAt` defaults to the moment the
-// entry was typed, and `dueAt` to the moment the invoice was sent. isoDate
-// slices UTC, so a charge posted at 9pm ET was dated tomorrow and an invoice
-// sent that evening claimed to be due a day later than it is. Same rule, and
-// the same bug, as the dashboard's `lastPaymentAt`.
+// entry was typed, and `dueAt` is an invoice's term. isoDate slices UTC, so a
+// charge posted at 9pm ET was dated tomorrow. Same rule, and the same bug, as
+// the dashboard's `lastPaymentAt`.
 import { ExternalLink, Plus, Send } from '@lucide/vue'
 import { facilityDateOf } from '~/utils/facilityTime.js'
 import { money, inCredit, categoryLabel } from '~/utils/money.js'
@@ -44,7 +59,6 @@ const pendingCents = ref(0)
 // rather than silently disappearing from both.
 const draftCents = ref(0)
 const invoices = ref([])
-const overdue = ref(null)
 // Loading, not money. Named for what it is now that `pendingCents` exists.
 const loading = ref(true)
 
@@ -56,7 +70,7 @@ const canManage = computed(
 )
 
 async function load() {
-  loading.value = true
+  loading.value = !entries.value.length
   const [data, inv] = await Promise.all([
     listLedger(props.residentId),
     listInvoices(props.residentId),
@@ -66,13 +80,110 @@ async function load() {
   pendingCents.value = data.pendingCents
   draftCents.value = data.draftCents
   invoices.value = inv.invoices
-  overdue.value = inv.invoices.find((i) => i.overdue) ?? null
   loading.value = false
 }
 await load()
+// Every other rail section subscribes and this one did not — so a Stripe
+// webhook posting a payment refreshed every screen EXCEPT the one where the
+// money actually moved. Refreshes never re-blank what they update.
+onRealtimeChanged(load)
 
-// The dialog is a sibling component now, not a nested one with its own trigger,
-// so the row menu on the roster can open the same implementation.
+// ── Derived ────────────────────────────────────────────────────────────────
+
+/** Charges and credits with no invoice. Payments are never billable. */
+const pendingEntries = computed(() =>
+  entries.value.filter((e) => !e.billed && e.type !== 'PAYMENT'),
+)
+// OLDEST first — the one that has been ignored longest, the same order
+// `overdueByStay` uses for the dashboard. The invoice list itself is
+// newest-first, which would otherwise put the least urgent one in front.
+const overdueInvoices = computed(() =>
+  invoices.value.filter((i) => i.overdue).sort((a, b) => b.daysPastDue - a.daysPastDue),
+)
+/** An invoice whose Stripe half never finished — billed, but never sent. */
+const drafts = computed(() => invoices.value.filter((i) => i.status === 'DRAFT'))
+
+/**
+ * Overdue-ness per invoice, keyed by id, so a row can carry it.
+ *
+ * The entry's own `invoice` projection deliberately does NOT include `overdue`
+ * — that is derived on the server from a clock — so the row reads it from the
+ * invoice list the same payload carried. One derivation, so a row and the
+ * block above it cannot disagree about who is late.
+ */
+const statusById = computed(
+  () => new Map(invoices.value.map((i) => [i.id, invoiceStatusDisplay(i)])),
+)
+
+/** The lines an invoice swept, for its disclosure. */
+const linesByInvoice = computed(() => {
+  const out = new Map()
+  for (const e of entries.value) {
+    if (!e.invoice) continue
+    if (!out.has(e.invoice.id)) out.set(e.invoice.id, [])
+    out.get(e.invoice.id).push(e)
+  }
+  return out
+})
+
+const MONTH = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'long', year: 'numeric' })
+// "Jul 5" — the rows sit under a month header, so repeating the year and month
+// on every one of them is noise the group already carries. Deliberately not
+// `humanDate({ short: true })`, which prepends a weekday nobody is reading here.
+const DAY = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric' })
+const dayLabel = (instant) => DAY.format(new Date(`${facilityDateOf(instant)}T00:00:00.000Z`))
+
+/**
+ * Order-preserving month grouping over the newest-first list, with what each
+ * month charged and took — the Screens section's idiom.
+ *
+ * The summary is deliberately TWO figures rather than one net subtotal. A net
+ * would mix billed and pending money and state a number that is neither the
+ * balance nor pending, which is the confusion this whole section was rebuilt
+ * to remove.
+ */
+const byMonth = computed(() => {
+  const out = []
+  for (const e of entries.value) {
+    const key = MONTH.format(new Date(`${facilityDateOf(e.occurredAt)}T00:00:00.000Z`))
+    if (out.at(-1)?.key !== key) out.push({ key, entries: [], charged: 0, paid: 0, credited: 0 })
+    const g = out.at(-1)
+    g.entries.push(e)
+    if (e.type === 'CHARGE') g.charged += e.amountCents
+    else if (e.type === 'PAYMENT') g.paid += e.amountCents
+    else g.credited += e.amountCents
+  }
+  return out
+})
+
+const monthSummary = (g) =>
+  [
+    g.charged ? `${money(g.charged)} charged` : null,
+    g.paid ? `${money(g.paid)} paid` : null,
+    g.credited ? `${money(g.credited)} credited` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+
+/** What the owed box says underneath its figure. */
+const owedSub = computed(() => {
+  if (overdueInvoices.value.length) return null // The invoice links say it.
+  if (balanceCents.value > 0) return 'Invoiced, not yet due'
+  if (inCredit(balanceCents.value)) return 'Paid ahead of what has been invoiced'
+  return 'Nothing outstanding'
+})
+
+const pendingSub = computed(() => {
+  const n = pendingEntries.value.length
+  if (!n) return 'Nothing waiting'
+  if (inCredit(pendingCents.value)) return `${n} ${n === 1 ? 'line' : 'lines'}, net a credit`
+  return `${n} ${n === 1 ? 'line' : 'lines'}, not yet invoiced`
+})
+
+// ── Actions ────────────────────────────────────────────────────────────────
+
+// The dialogs are siblings, not nested with their own triggers, so the roster's
+// row menu can open the same implementation.
 const entryOpen = ref(false)
 const sendOpen = ref(false)
 
@@ -101,195 +212,311 @@ async function resume(invoice) {
 </script>
 
 <template>
-  <section>
-    <div class="mb-2 flex items-center justify-between gap-3">
-      <div class="flex items-baseline gap-3">
-        <h2 class="font-heading text-[15px] font-semibold tracking-tight">Ledger</h2>
-        <!-- Two figures, not one, and the split is the point: the balance is
-             what has been INVOICED and not paid, pending is what has not been
-             billed yet. The beds-free card's treatment — a bare total would
-             hide which of the two a number belongs to. -->
-        <span
-          class="text-[13.5px] tabular-nums"
-          :class="
-            balanceCents === 0
-              ? 'text-muted-foreground'
-              : inCredit(balanceCents)
-                ? 'text-success'
-                : 'text-foreground font-medium'
-          "
-        >
-          {{ money(balanceCents) }}
-          <span class="text-muted-foreground font-normal">
-            {{ inCredit(balanceCents) ? 'in credit' : balanceCents === 0 ? 'balance' : 'owed' }}
-          </span>
-        </span>
-        <!-- Hidden at zero, the census-tile rule: absence of a figure means
-             nothing is waiting, which keeps a quiet record quiet. -->
-        <span v-if="pendingCents !== 0" class="text-muted-foreground text-[13.5px] tabular-nums">
-          {{ money(pendingCents) }} pending
-        </span>
-      </div>
+  <section class="flex min-w-0 flex-col gap-4">
+    <!-- ── Header ─────────────────────────────────────────────────────────── -->
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <h2 class="font-heading text-[15px] font-semibold tracking-tight">Ledger</h2>
 
-      <div class="flex items-center gap-2">
-        <!-- Hidden for techs (the server refuses regardless, and a control
-             that can never succeed teaches nothing); DISABLED with a reason
-             when there is nothing to bill. Different cases, different
-             treatments. -->
+      <div v-if="canManage" class="flex items-center gap-2">
+        <!-- The button names the FIGURE it will bill, the weekly run's rule: a
+             control that says what will happen is a promise, and a bare label
+             is not. DISABLED when the sweep would refuse — a net of zero or a
+             credit creates nothing and leaves the lines to roll onward. -->
         <Button
-          v-if="canManage"
           size="sm"
           variant="outline"
           :disabled="pendingCents <= 0"
-          :title="pendingCents <= 0 ? 'Nothing pending on this stay' : undefined"
+          :title="
+            pendingCents < 0
+              ? 'Pending nets to a credit — a sweep must come out positive'
+              : pendingCents === 0
+                ? 'Nothing pending on this stay'
+                : undefined
+          "
           @click="sendOpen = true"
         >
-          <Send class="size-4" /> Send invoice
+          <Send class="size-4" />
+          Send invoice<span v-if="pendingCents > 0"> · {{ money(pendingCents) }}</span>
         </Button>
-        <Button v-if="canManage" size="sm" variant="outline" @click="entryOpen = true">
+        <Button size="sm" variant="outline" @click="entryOpen = true">
           <Plus class="size-4" /> Add entry
         </Button>
       </div>
     </div>
 
-    <!-- Overdue is the loudest thing this section can say, so it says it once,
-         at the top, rather than only as a chip on a row far down the table. -->
-    <div
-      v-if="overdue"
-      class="border-destructive bg-card mb-3 rounded-md border px-3 py-2 text-[13px] shadow-[inset_3px_0_0_var(--destructive)]"
-    >
-      <span class="text-destructive font-semibold">
-        Overdue {{ overdue.daysPastDue }}d
-      </span>
-      <span class="text-muted-foreground">
-        · invoice {{ overdue.number ?? '—' }} for {{ money(overdue.totalCents) }} was due
-        {{ facilityDateOf(overdue.dueAt) }}
-      </span>
-      <a
-        v-if="overdue.hostedUrl"
-        :href="overdue.hostedUrl"
-        target="_blank"
-        rel="noopener"
-        class="ms-1 underline underline-offset-2"
-      >
-        Open
-      </a>
-    </div>
-
     <p v-if="loading" class="text-muted-foreground text-sm">Loading…</p>
 
-    <div v-else class="overflow-hidden rounded-md border">
-      <div class="overflow-x-auto">
-        <table class="w-full border-collapse text-[13.5px]">
-          <thead>
-            <tr>
-              <th
-                v-for="h in ['Date', 'Description', 'Type', 'Amount']"
-                :key="h"
-                class="bg-card text-muted-foreground border-b px-3 py-2 text-left text-[10.5px] font-semibold tracking-[0.1em] whitespace-nowrap uppercase"
-                :class="h === 'Amount' && 'text-right'"
-              >
-                {{ h }}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="e in entries" :key="e.id" class="bg-card">
-              <td class="h-12 border-b px-3 tabular-nums whitespace-nowrap">
-                {{ facilityDateOf(e.occurredAt) }}
-              </td>
-              <td class="h-12 max-w-[38ch] truncate border-b px-3">
-                {{ e.description }}
-                <span v-if="e.category" class="text-muted-foreground">
-                  · {{ categoryLabel(e.category) }}
-                </span>
-                <span v-if="e.corrects" class="text-warning">· correction</span>
-                <!-- PENDING is marked, not billed. Once invoicing is routine
-                     most lines are billed, and marking the majority is
-                     wallpaper — the polish-pass lesson. Pending is the state
-                     somebody can act on, and now also the one saying this line
-                     is not yet part of what the resident owes. -->
-                <span v-if="!e.billed && e.type !== 'PAYMENT'" class="text-muted-foreground">
-                  · pending
-                </span>
-                <a
-                  v-else-if="e.invoice?.hostedUrl"
-                  :href="e.invoice.hostedUrl"
-                  target="_blank"
-                  rel="noopener"
-                  class="text-muted-foreground underline underline-offset-2"
-                >
-                  · {{ e.invoice.number ?? 'invoice' }}
-                </a>
-              </td>
-              <td class="h-12 border-b px-3 whitespace-nowrap">
-                <Badge variant="outline" class="tracking-wider text-[10px] uppercase">
-                  {{ e.type.toLowerCase() }}
-                </Badge>
-              </td>
-              <td class="h-12 border-b px-3 text-right tabular-nums whitespace-nowrap">
-                <span :class="e.type === 'CHARGE' ? 'text-foreground' : 'text-success'">
-                  {{ e.type === 'CHARGE' ? '' : '−' }}{{ money(e.amountCents) }}
-                </span>
-              </td>
-            </tr>
-
-            <tr v-if="!entries.length">
-              <td colspan="4" class="bg-card text-muted-foreground px-3 py-8 text-center text-sm">
-                Nothing billed yet.
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-    <!-- ── Invoices ────────────────────────────────────────────────────── -->
-    <div v-if="!loading && invoices.length" class="mt-5">
-      <h3 class="text-muted-foreground mb-2 text-[10.5px] font-semibold tracking-[0.1em] uppercase">
-        Invoices
-      </h3>
-      <div class="flex flex-col">
+    <template v-else>
+      <!-- ── The band ─────────────────────────────────────────────────────── -->
+      <!-- Two figures, and the split is the point: the balance is what has been
+           INVOICED and not paid, pending is what has not been billed yet.
+           Neither box is hidden at zero — a missing box reads as a loading
+           state, and staff need to see that the answer IS zero. -->
+      <div class="grid gap-2.5 sm:grid-cols-[1.35fr_1fr]">
+        <!-- The pane's ONE inset, and it carries the overdue invoices itself.
+             A separate banner beneath a destructive box was two insets on one
+             surface, which is what stops an inset meaning anything. -->
         <div
-          v-for="i in invoices"
-          :key="i.id"
-          class="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b px-1 py-2 text-[13px] last:border-b-0"
+          class="rounded-md border p-3.5"
+          :class="
+            overdueInvoices.length
+              ? 'border-destructive bg-card shadow-[inset_3px_0_0_var(--destructive)]'
+              : 'bg-card'
+          "
         >
-          <span class="font-medium tabular-nums">{{ i.number ?? 'Not sent' }}</span>
-          <span class="text-muted-foreground tabular-nums">
-            {{ money(i.totalCents) }} · due {{ facilityDateOf(i.dueAt) }}
-          </span>
-          <Badge
-            variant="outline"
-            class="border-transparent text-[10px]"
-            :class="toneClass(invoiceStatusDisplay(i).tone)"
+          <p
+            class="text-[11px] font-semibold tracking-wider uppercase"
+            :class="overdueInvoices.length ? 'text-destructive' : 'text-muted-foreground'"
           >
-            {{ invoiceStatusDisplay(i).label }}
-          </Badge>
-          <a
-            v-if="i.hostedUrl"
-            :href="i.hostedUrl"
-            target="_blank"
-            rel="noopener"
-            class="text-muted-foreground ms-auto inline-flex items-center gap-1 underline underline-offset-2"
+            {{ inCredit(balanceCents) ? 'In credit' : 'Owed' }}
+            <span v-if="overdueInvoices.length">
+              · {{ overdueInvoices.length }} past due
+            </span>
+          </p>
+          <p
+            class="mt-0.5 text-[23px] font-semibold tracking-tight tabular-nums"
+            :class="
+              overdueInvoices.length
+                ? 'text-destructive'
+                : balanceCents === 0
+                  ? 'text-muted-foreground'
+                  : inCredit(balanceCents)
+                    ? 'text-success'
+                    : 'text-foreground'
+            "
           >
-            Open <ExternalLink class="size-3" />
-          </a>
-          <!-- A DRAFT is an invoice whose Stripe half never finished. The
-               recovery path already existed on the server and was reachable
-               only by curl, which is how one sat unnoticed for 40 minutes. -->
-          <Button
-            v-else-if="canManage && i.status === 'DRAFT'"
-            size="sm"
-            variant="outline"
-            class="ms-auto"
-            :disabled="resuming === i.id"
-            @click="resume(i)"
+            {{ money(balanceCents) }}
+          </p>
+
+          <!-- Every overdue invoice, not just the oldest. A resident with two
+               is a resident with a second one nobody is being shown. -->
+          <p v-if="overdueInvoices.length" class="text-muted-foreground mt-1 text-[12.5px]">
+            <!-- Each number and its age are one unit; the gap between them has
+                 to be a real character, since Vue collapses leading whitespace
+                 in a text node and they otherwise render run together. -->
+            <span v-for="(i, idx) in overdueInvoices" :key="i.id">
+              <span v-if="idx" aria-hidden="true"> · </span>
+              <a
+                v-if="i.hostedUrl"
+                :href="i.hostedUrl"
+                target="_blank"
+                rel="noopener"
+                class="underline underline-offset-2"
+              >{{ i.number ?? 'invoice' }}</a>
+              <span v-else>{{ i.number ?? 'invoice' }}</span>
+              <span class="tabular-nums">&nbsp;{{ i.daysPastDue }}d</span>
+            </span>
+          </p>
+          <p v-else class="text-muted-foreground mt-1 text-[12.5px]">{{ owedSub }}</p>
+        </div>
+
+        <div class="bg-card rounded-md border p-3.5">
+          <p class="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
+            Pending
+          </p>
+          <p
+            class="mt-0.5 text-[23px] font-semibold tracking-tight tabular-nums"
+            :class="
+              pendingCents === 0
+                ? 'text-muted-foreground'
+                : inCredit(pendingCents)
+                  ? 'text-success'
+                  : 'text-foreground'
+            "
           >
-            <Send class="size-4" /> {{ resuming === i.id ? 'Sending…' : 'Send' }}
-          </Button>
+            {{ money(pendingCents) }}
+          </p>
+          <p class="text-muted-foreground mt-1 text-[12.5px]">{{ pendingSub }}</p>
         </div>
       </div>
-    </div>
+
+      <!-- A DRAFT is money in NEITHER figure above: its lines are bound so they
+           are not pending, and it was never issued so it is not owed. Without
+           this line it simply vanishes from the section. -->
+      <div
+        v-if="draftCents > 0"
+        class="border-warning bg-card flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border px-3 py-2 text-[13px]"
+      >
+        <span class="text-warning font-semibold">
+          {{ drafts.length }} {{ drafts.length === 1 ? 'invoice' : 'invoices' }} not sent
+        </span>
+        <span class="text-muted-foreground">
+          · {{ money(draftCents) }} is billed but never went out
+        </span>
+        <Button
+          v-if="canManage && drafts.length"
+          size="sm"
+          variant="outline"
+          class="ms-auto"
+          :disabled="resuming === drafts[0].id"
+          @click="resume(drafts[0])"
+        >
+          <Send class="size-4" /> {{ resuming === drafts[0].id ? 'Sending…' : 'Send' }}
+        </Button>
+      </div>
+
+      <!-- ── History ──────────────────────────────────────────────────────── -->
+      <section v-if="entries.length" class="flex flex-col gap-1">
+        <h3 class="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
+          History
+        </h3>
+
+        <div v-for="g in byMonth" :key="g.key" class="mt-1.5">
+          <div class="flex items-baseline justify-between gap-3 border-b px-1 py-1">
+            <span class="text-[12px] font-bold tracking-wider uppercase">{{ g.key }}</span>
+            <span class="text-muted-foreground text-[12px] tabular-nums">
+              {{ monthSummary(g) }}
+            </span>
+          </div>
+
+          <table class="w-full border-collapse text-[13.5px]">
+            <tbody>
+              <tr v-for="e in g.entries" :key="e.id">
+                <td
+                  class="text-muted-foreground w-[5.2em] border-b px-1 py-2 align-baseline tabular-nums whitespace-nowrap"
+                >
+                  {{ dayLabel(e.occurredAt) }}
+                </td>
+                <td class="border-b px-1 py-2 align-baseline">
+                  {{ e.description }}
+                  <span v-if="e.category" class="text-muted-foreground">
+                    · {{ categoryLabel(e.category) }}
+                  </span>
+                  <span v-if="e.corrects" class="text-warning">· correction</span>
+
+                  <!-- PENDING is marked; billed is not. Once invoicing is
+                       routine most lines are billed, and marking the majority
+                       is wallpaper — the polish-pass lesson. Pending is the
+                       state somebody can act on, and the one saying this line
+                       is not yet part of what the resident owes. -->
+                  <Badge
+                    v-if="!e.billed && e.type !== 'PAYMENT'"
+                    variant="outline"
+                    class="ms-1 text-[10px]"
+                  >
+                    pending
+                  </Badge>
+                  <template v-else-if="e.invoice">
+                    <Badge
+                      v-if="statusById.get(e.invoice.id)?.tone === 'destructive'"
+                      variant="outline"
+                      class="ms-1 border-transparent text-[10px]"
+                      :class="toneClass('destructive')"
+                    >
+                      {{ statusById.get(e.invoice.id).label }}
+                    </Badge>
+                    <a
+                      v-if="e.invoice.hostedUrl"
+                      :href="e.invoice.hostedUrl"
+                      target="_blank"
+                      rel="noopener"
+                      class="text-muted-foreground ms-1 underline underline-offset-2 whitespace-nowrap"
+                    >
+                      {{ e.invoice.number ?? 'invoice' }}
+                    </a>
+                  </template>
+                </td>
+                <td
+                  class="w-[7em] border-b px-1 py-2 text-right align-baseline tabular-nums whitespace-nowrap"
+                >
+                  <span :class="e.type === 'CHARGE' ? 'text-foreground' : 'text-success'">
+                    {{ e.type === 'CHARGE' ? '' : '−' }}{{ money(e.amountCents) }}
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <p v-else class="text-muted-foreground py-6 text-center text-sm">
+        No entries yet. Rent and fees appear here as they are posted.
+      </p>
+
+      <!-- ── Invoices ─────────────────────────────────────────────────────── -->
+      <!-- Native <details> rather than a vendored Collapsible: shadcn's is not
+           in ui/, and `shadcn-vue add` rewrites main.css with the Google Fonts
+           imports this project forbids. A disclosure is a browser primitive —
+           this is not the hand-rolled component the convention warns about. -->
+      <section v-if="invoices.length" class="flex flex-col gap-1">
+        <h3 class="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
+          Invoices
+        </h3>
+
+        <details v-for="i in invoices" :key="i.id" class="group mt-1 rounded-md border">
+          <summary
+            class="flex cursor-pointer flex-wrap items-baseline gap-x-2.5 gap-y-1 px-3 py-2.5 text-[13.5px] max-md:min-h-11 [&::-webkit-details-marker]:hidden"
+          >
+            <span class="text-muted-foreground text-[10px] group-open:rotate-90">▶</span>
+            <span class="font-medium tabular-nums">{{ i.number ?? 'Not sent' }}</span>
+            <span class="text-muted-foreground tabular-nums">
+              {{ money(i.totalCents) }} · due {{ facilityDateOf(i.dueAt) }}
+            </span>
+            <Badge
+              variant="outline"
+              class="border-transparent text-[10px]"
+              :class="toneClass(invoiceStatusDisplay(i).tone)"
+            >
+              {{ invoiceStatusDisplay(i).label }}
+            </Badge>
+            <a
+              v-if="i.hostedUrl"
+              :href="i.hostedUrl"
+              target="_blank"
+              rel="noopener"
+              class="text-muted-foreground ms-auto inline-flex items-center gap-1 underline underline-offset-2"
+              @click.stop
+            >
+              Open <ExternalLink class="size-3" />
+            </a>
+            <Button
+              v-else-if="canManage && i.status === 'DRAFT'"
+              size="sm"
+              variant="outline"
+              class="ms-auto"
+              :disabled="resuming === i.id"
+              @click.stop.prevent="resume(i)"
+            >
+              <Send class="size-4" /> {{ resuming === i.id ? 'Sending…' : 'Send' }}
+            </Button>
+          </summary>
+
+          <!-- The lines it swept — the one question the flat table could never
+               answer without reading every row. -->
+          <div class="px-3 pb-2.5 ps-7">
+            <table class="w-full border-collapse text-[13px]">
+              <tbody>
+                <tr v-for="e in linesByInvoice.get(i.id) ?? []" :key="e.id">
+                  <td
+                    class="text-muted-foreground w-[5.2em] border-b px-1 py-1.5 align-baseline tabular-nums whitespace-nowrap"
+                  >
+                    {{ dayLabel(e.occurredAt) }}
+                  </td>
+                  <td class="border-b px-1 py-1.5 align-baseline">
+                    {{ e.description }}
+                    <span v-if="e.category" class="text-muted-foreground">
+                      · {{ categoryLabel(e.category) }}
+                    </span>
+                  </td>
+                  <td
+                    class="w-[7em] border-b px-1 py-1.5 text-right align-baseline tabular-nums whitespace-nowrap"
+                  >
+                    <span :class="e.type === 'CREDIT' && 'text-success'">
+                      {{ e.type === 'CREDIT' ? '−' : '' }}{{ money(e.amountCents) }}
+                    </span>
+                  </td>
+                </tr>
+                <tr v-if="!(linesByInvoice.get(i.id) ?? []).length">
+                  <td colspan="3" class="text-muted-foreground px-1 py-2 text-[12.5px]">
+                    Its lines belong to an earlier stay, so they are not on this ledger.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+      </section>
+    </template>
 
     <AppLedgerEntryDialog
       v-model:open="entryOpen"

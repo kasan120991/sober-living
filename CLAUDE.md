@@ -1354,6 +1354,52 @@ not caught it because its assertion used `rejects()`, which only proves *somethi
 `isUniqueViolationOn()` in `lib/http.js` reads both shapes, and the suite now asserts the
 **status**, not just the throw.
 
+**The record's Ledger section is a BAND over a month-grouped history, then the invoices**
+(chosen 2026-08-07 from three rendered variants; a bank-style statement and an
+invoice-first list were the others). It answers two questions in that order — "what does
+this person owe and what do I do about it", then "why" — which is the same hero-over-trail
+shape as apartment checks and the same queue-over-progress shape as `/service`, so the rail
+reads consistently.
+
+Both rejected variants failed on the domain rather than on looks, and both are worth
+knowing before somebody re-proposes them. The **statement** kept the cleanest chronology but
+demoted the invoice to a chip at the end of a row, just as an invoice became the thing that
+*makes* money owed; its per-month net subtotals also stated a figure that is neither the
+balance nor pending. **Invoice-first** was the most faithful to that rule, but payments are
+not invoice lines in this model, so it split the story into pending / invoices / payments
+and left somebody asking "why $975" to net three blocks in their head — which is precisely
+the breakdown this section exists to provide.
+
+- **ONE inset on the pane, and it is the owed block**, which carries the overdue invoice
+  numbers and their ages itself. The earlier draft had a destructive box *and* a
+  destructive banner under it; two insets on one surface is what stops an inset meaning
+  anything, the 2026-08-06 polish-pass rule.
+- **Every overdue invoice is named, oldest first** — not just the oldest. Castillo carries
+  two, and the old banner showed one, so $650 was simply not on the screen. Oldest first
+  matches `overdueByStay`'s own order; the invoice list is newest-first and would otherwise
+  lead with the least urgent.
+- **Neither figure is hidden at zero.** A missing box reads as a loading state, and staff
+  need to see that the answer *is* zero — the one place this section departs from the
+  census tile's absence-means-fine rule, because these are labelled figures rather than
+  chips.
+- **Pending is marked; billed is not.** Once invoicing is routine most lines are billed and
+  marking the majority is wallpaper. The Type column is gone for the same reason: the
+  amount's sign and colour already say charge from payment.
+- **The invoices use native `<details>`**, not a vendored Collapsible — shadcn's is not in
+  `ui/`, and `shadcn-vue add` rewrites `main.css` with the Google Fonts imports this file
+  forbids. A disclosure is a browser primitive, not the hand-rolled component the
+  convention warns about. Expanding one shows **the lines it swept**, the single question
+  the flat table could never answer without reading every row.
+- **Send names its figure** ("Send invoice · $105.00") and disables with a reason when the
+  sweep would refuse — Ferrer's pending nets to a *credit*, and a sweep must come out
+  positive.
+
+Two bugs fixed with it: `AppLedger` never called **`onRealtimeChanged(load)`** though every
+other rail section does, so a Stripe webhook posting a payment refreshed every screen except
+the one where the money moved; and **`draftCents` was fetched and rendered nowhere**, so an
+unsent invoice's money was invisible in both figures — the exact hole that field exists to
+close. It now gets a warning line with a Send action.
+
 **Still to build:**
 
 - **The Friday nag** — a Needs-attention row once a Friday has passed with lines pending.
