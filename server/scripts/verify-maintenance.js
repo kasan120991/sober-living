@@ -452,6 +452,113 @@ async function main() {
   })
   techReopen.status === 403 ? ok('a tech may not reopen') : bad('tech reopens', techReopen.status)
 
+  // ── Editing what a request says ──────────────────────────────────────────
+  console.log('\n\x1b[1mEditing a request\x1b[0m')
+
+  const editable = await aged('NORMAL', 3 * HOUR)
+
+  const edited = await tech(`/maintenance/${editable.id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title: 'Corrected title', description: 'Added later.' }),
+  })
+  edited.status === 200 && edited.body.title === 'Corrected title'
+    ? ok('a tech may correct an open request — filing is all-staff, so is fixing it')
+    : bad('tech edits', JSON.stringify(edited.body)?.slice(0, 120))
+
+  const empty = await tech(`/maintenance/${editable.id}`, { method: 'PATCH', body: '{}' })
+  empty.status === 400
+    ? ok('an empty patch is a 400, not a cheerful 200')
+    : bad('empty patch', empty.status)
+
+  const noSuchApt = await tech(`/maintenance/${editable.id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ apartmentId: 'nope' }),
+  })
+  noSuchApt.status === 404 ? ok('moving to a missing apartment is a 404') : bad('bad apt', noSuchApt.status)
+
+  // Moving apartments, asserted as a PAIR. "It appears in the new place"
+  // passes while the request is still counted in the old one, which is the
+  // failure that would matter — an apartment's open count is what the
+  // apartment list and the detail page both read.
+  const otherApt = await runAsSystem(async () =>
+    prisma.apartment.findFirst({ where: { id: { not: seed.aptId } } }),
+  )
+  await tech(`/maintenance/${editable.id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ apartmentId: otherApt.id }),
+  })
+  const fromDetail = async (aptId) =>
+    (await manager(`/apartments/${aptId}`)).body.maintenanceRequests.map((r) => r.id)
+  const inNew = (await fromDetail(otherApt.id)).includes(editable.id)
+  const goneFromOld = !(await fromDetail(seed.aptId)).includes(editable.id)
+  inNew && goneFromOld
+    ? ok('a moved request lands on the new apartment AND leaves the old one')
+    : bad('apartment move', `in new: ${inNew}, gone from old: ${goneFromOld}`)
+
+  // The freeze, in both directions — "it was refused" passes if the route is
+  // simply broken, so the title is read back afterwards.
+  const frozen = await aged('NORMAL', 3 * HOUR)
+  await manager(`/maintenance/${frozen.id}/close`, {
+    method: 'POST',
+    body: JSON.stringify({ status: 'RESOLVED', note: 'Done.' }),
+  })
+  const afterClose = await tech(`/maintenance/${frozen.id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title: 'sneaky rename' }),
+  })
+  const stillNamed = await runAsSystem(async () =>
+    prisma.maintenanceRequest.findUnique({ where: { id: frozen.id }, select: { title: true } }),
+  )
+  afterClose.status === 409 && stillNamed.title !== 'sneaky rename'
+    ? ok('a CLOSED request refuses an edit (409) and its title is unchanged')
+    : bad('closed freeze', `${afterClose.status}, title now ${stillNamed.title}`)
+
+  // ── Ownership is reachable ───────────────────────────────────────────────
+  console.log('\n\x1b[1mVendor and work order\x1b[0m')
+
+  // The regression this whole item exists to prevent: these columns shipped
+  // with nothing in the UI able to set them, so the only writer was the seed.
+  const jobbed = await aged('NORMAL', 3 * HOUR)
+  const assigned = await tech(`/maintenance/${jobbed.id}/start`, {
+    method: 'POST',
+    body: JSON.stringify({ vendorName: 'Ridgeway Glazing', workOrderRef: '118' }),
+  })
+  assigned.body.vendorName === 'Ridgeway Glazing' && assigned.body.workOrderRef === '118'
+    ? ok('a vendor and a work order can be recorded through the API')
+    : bad('vendor stored', JSON.stringify(assigned.body)?.slice(0, 120))
+
+  const reassigned = await tech(`/maintenance/${jobbed.id}/start`, {
+    method: 'POST',
+    body: JSON.stringify({ vendorName: 'Kellerman Plumbing', workOrderRef: 'KP-9' }),
+  })
+  reassigned.body.vendorName === 'Kellerman Plumbing' && reassigned.body.workOrderRef === 'KP-9'
+    ? ok('and changed again when the job moves to another vendor')
+    : bad('vendor changed', JSON.stringify(reassigned.body)?.slice(0, 120))
+
+  // ── Closed this month ────────────────────────────────────────────────────
+  console.log('\n\x1b[1mThe closed-this-month figure\x1b[0m')
+
+  const before = (await manager('/maintenance/house')).body.figures.closedThisMonth
+  const thisMonth = await aged('NORMAL', 2 * HOUR)
+  await manager(`/maintenance/${thisMonth.id}/close`, {
+    method: 'POST',
+    body: JSON.stringify({ status: 'RESOLVED', note: 'Closed just now.' }),
+  })
+  const after = (await manager('/maintenance/house')).body.figures.closedThisMonth
+  after === before + 1
+    ? ok('closing a request now moves closedThisMonth by exactly one')
+    : bad('closedThisMonth rises', `${before} → ${after}`)
+
+  // The seed's two closures are 64 and 12 days back, so on any day of any
+  // month at least one of them is NOT this month — proving the figure is a
+  // window rather than a count of everything closed.
+  const closedTotal = await runAsSystem(async () =>
+    prisma.maintenanceRequest.count({ where: { status: { in: ['RESOLVED', 'CANCELLED'] } } }),
+  )
+  after < closedTotal
+    ? ok('and it is a WINDOW — older closures are not counted')
+    : bad('closedThisMonth window', `${after} counted of ${closedTotal} closed`)
+
   // ── One order ────────────────────────────────────────────────────────────
   console.log('\n\x1b[1mOne order, shared\x1b[0m')
 

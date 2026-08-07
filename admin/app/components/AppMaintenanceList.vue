@@ -30,6 +30,8 @@ const active = ref(null)
 const closeOpen = ref(false)
 const closeMode = ref('RESOLVED')
 const reopenOpen = ref(false)
+const editOpen = ref(false)
+const assignOpen = ref(false)
 
 function openClose({ request, status }) {
   active.value = request
@@ -39,6 +41,14 @@ function openClose({ request, status }) {
 function openReopen(request) {
   active.value = request
   reopenOpen.value = true
+}
+function openEdit(request) {
+  active.value = request
+  editOpen.value = true
+}
+function openAssign(request) {
+  active.value = request
+  assignOpen.value = true
 }
 </script>
 
@@ -106,6 +116,8 @@ function openReopen(request) {
           @changed="emit('changed')"
           @close-request="openClose"
           @reopen-request="openReopen"
+          @edit-request="openEdit"
+          @assign-request="openAssign"
         />
       </div>
     </div>
@@ -124,4 +136,6 @@ function openReopen(request) {
     :request-title="active?.title"
     @done="emit('changed')"
   />
+  <AppMaintenanceEditDialog v-model:open="editOpen" :request="active" @done="emit('changed')" />
+  <AppMaintenanceAssignDialog v-model:open="assignOpen" :request="active" @done="emit('changed')" />
 </template>

@@ -14,7 +14,13 @@ import { isOpen, priorityDisplay } from '~/utils/maintenance.js'
 const props = defineProps({
   request: { type: Object, required: true },
 })
-const emit = defineEmits(['changed', 'close-request', 'reopen-request'])
+const emit = defineEmits([
+  'changed',
+  'close-request',
+  'reopen-request',
+  'edit-request',
+  'assign-request',
+])
 
 const { user } = useAuth()
 const { startWork, setPriority } = useMaintenance()
@@ -29,6 +35,35 @@ const canManage = computed(() =>
 // way — this is presentation.
 const RANK = { LOW: 0, NORMAL: 1, URGENT: 2 }
 const maySet = (p) => canManage.value || RANK[p] > RANK[props.request.priority]
+
+/**
+ * The one action most likely to be next, surfaced as a real button so the row
+ * reads as actionable — everything behind an ellipsis made the page look like
+ * it had no actions at all.
+ *
+ * ROLE-AWARE, because a button that always 403s is worse than no button: a tech
+ * sees Start work on unowned open work and nothing on a row only a manager can
+ * move. The ellipsis still carries the full set, including this one.
+ */
+const primary = computed(() => {
+  const r = props.request
+  if (isOpen(r)) {
+    const owned = r.assignedTo || r.vendorName
+    if (!owned) return { label: 'Start work', run: () => startWork(r.id), toast: 'You are on it' }
+    if (canManage.value) return { label: 'Resolve', emit: 'close-request' }
+    return null
+  }
+  if (canManage.value) return { label: 'Reopen', emit: 'reopen-request' }
+  return null
+})
+
+function firePrimary() {
+  const p = primary.value
+  if (!p) return
+  if (p.emit === 'close-request') return emit('close-request', { request: props.request, status: 'RESOLVED' })
+  if (p.emit === 'reopen-request') return emit('reopen-request', props.request)
+  return run(p.run, p.toast)
+}
 
 const busy = ref(false)
 async function run(fn, message) {
@@ -46,6 +81,17 @@ async function run(fn, message) {
 </script>
 
 <template>
+  <div class="flex items-center justify-end gap-1">
+    <Button
+      v-if="primary"
+      size="sm"
+      variant="outline"
+      :disabled="busy"
+      @click="firePrimary()"
+    >
+      {{ primary.label }}
+    </Button>
+
   <DropdownMenu>
     <DropdownMenuTrigger as-child>
       <Button size="icon" variant="ghost" :disabled="busy" aria-label="Actions">
@@ -59,6 +105,17 @@ async function run(fn, message) {
       >
         {{ request.status === 'IN_PROGRESS' ? 'Take it over' : 'Start work' }}
       </DropdownMenuItem>
+
+      <!-- Assign and Edit are absent on a closed request: the server refuses
+           both with a 409, and a menu should not offer what will fail. -->
+      <DropdownMenuItem v-if="isOpen(request)" @select="emit('assign-request', request)">
+        Assign…
+      </DropdownMenuItem>
+      <DropdownMenuItem v-if="isOpen(request)" @select="emit('edit-request', request)">
+        Edit…
+      </DropdownMenuItem>
+
+      <DropdownMenuSeparator v-if="isOpen(request) && canManage" />
 
       <DropdownMenuItem
         v-if="isOpen(request) && canManage"
@@ -95,4 +152,5 @@ async function run(fn, message) {
       </template>
     </DropdownMenuContent>
   </DropdownMenu>
+  </div>
 </template>

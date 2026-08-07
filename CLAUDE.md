@@ -1235,6 +1235,23 @@ inset on an overdue row, which is the page's *only* inset, and the figures line,
 overdue count is the one number in destructive. If the house outgrows a screenful, the
 fallback is the bands variant and the figures carry over unchanged.
 
+- **Four figure cards head the page** — Open / Overdue / In progress / Closed this month,
+  `billing.vue`'s card shape including its rule that the alarming card takes the
+  destructive inset **only when it is non-zero**. That inset and the one on an overdue
+  *row* both mean "past its target", so they agree rather than competing, which is what
+  lets this page carry more than one. Nothing is hidden at zero: these are labelled
+  figures rather than chips, and "no repairs are late" is an answer worth showing.
+  `closedThisMonth` counts **requests**, not closure events — one closed, reopened and
+  closed again inside a month is one thing dealt with — and uses the **facility** month,
+  since a request closed at 9pm ET on the 1st is this month's.
+  *(They were missing from the first build: the chosen mock had them and the page shipped
+  with a text summary in the description slot instead. The description line stays too —
+  `billing.vue` carries both.)*
+- **Each row carries a visible primary action** before the ellipsis, because everything
+  behind a ghost ellipsis made the page read as though it had none. It is **role-aware**,
+  since a button that always 403s is worse than no button: *Start work* on unowned open
+  work, *Resolve* for a manager on an owned one, *Reopen* for a manager on a closed one,
+  and nothing where a tech has no move. The ellipsis still carries the full set.
 - **The age column reads against its own target** — "10 days / 7d". A bare age would make
   a 10-day NORMAL and a 10-day LOW look identical when one is late and the other has three
   weeks left. A one-day target prints "24h", not "1d": the facility says urgent is a
@@ -1252,6 +1269,38 @@ fallback is the bands variant and the figures carry over unchanged.
   house-wide queue had no way to file a request at all. It takes `v-model:open` and no
   trigger, per the two-screens rule, and grows an apartment picker only when no
   `apartmentId` is bound (the `AppLedgerEntryDialog` pattern).
+
+**Correcting a request is ALL-STAFF, and only while it is open** (facility, 2026-08-07).
+`PATCH /maintenance/:id` carries `title`, `description` and `apartmentId` — identity and
+placement, deliberately not status or priority, which have their own routes because they
+have their own rules. The tech who typed "smoke alrm" in a hallway fixes it without
+finding a manager: filing is all-staff, and so is correcting what you filed. Once the
+request is **closed it freezes** with a 409 pointing at Reopen, because a closed request
+plus its trail is what an auditor reads — the sign-out shape, fixable in error but only
+while nothing has been recorded against it.
+
+- The service is `editRequest()`, **not** `updateRequest()`: that name meant "drive a
+  status transition" until this morning, and a reader who half-remembers it would misread
+  the guard.
+- **An empty patch is a 400**, the `verify-schedule.js` precedent — including when every
+  field sent already matches, which is the honest reading of "nothing changed".
+- **Moving `apartmentId` is a CORRECTION, not an edit**: it takes the request out of one
+  unit's history and puts it in another's, which is exactly why it is available only while
+  the request is open. A request filed against the wrong unit and already closed is
+  corrected by filing it properly against the right one.
+
+**There is no assign route, deliberately.** "Assign…" calls `POST /:id/start`, which
+already takes `{ assignedToId, vendorName, workOrderRef }`, already defaults the assignee
+to the actor, and already sits behind `maintenance_in_progress_needs_owner`. A second
+endpoint would be a second place for the ownership rule to live.
+
+**The gap this closed, recorded because it is the exact failure this file exists to warn
+about:** `vendorName` and `workOrderRef` shipped on 2026-08-06 with **nothing in the UI
+able to set them**. `startWork` accepted them and `useMaintenance.startWork` forwarded
+them, but the row menu called `startWork(id)` with no body — so the columns whose whole
+justification was getting "work order 118" out of a description could be written only by
+the seed. Every screen looked plausible. `verify-maintenance.js` now asserts a vendor can
+be recorded **and changed**.
 
 Two smaller repairs made with it, both the sort that hide for months:
 
@@ -2290,7 +2339,7 @@ Two verification suites, both run against a live database:
   maintenance, including the admin/manager field split, the rules the database
   cannot enforce, and the remove/restore arc. Its six maintenance assertions cover
   the apartment-detail path and stay; the module's own arc is the suite below
-- `node scripts/verify-maintenance.js` — **55 assertions** on the repair lifecycle.
+- `node scripts/verify-maintenance.js` — **64 assertions** on the repair lifecycle.
   The target rule is proved **with no database** at 23h/25h URGENT, 6d/8d NORMAL and
   29d/31d LOW, plus a closed request staying CLOSED however old — without which every
   resolved request in the facility's history would light up. The **union is proved in
@@ -2309,7 +2358,15 @@ Two verification suites, both run against a live database:
   guarantee. Append-only is asserted at **both layers separately** (privilege for the app
   role, trigger for a superuser), the raise/lower priority split is proved in all four
   combinations, `?status=FOO` is a **400 not a 500**, and the list and the apartment page
-  are asserted to return the **same order**. Posts requests and closes them — reseed after
+  are asserted to return the **same order**. **Nine cover the edit surface**: a tech
+  correcting an open request; an empty patch as a 400; a missing apartment as a 404; a
+  moved request landing on the new apartment **and leaving the old** (the pair, because
+  "it appears in the new place" passes while it is still counted in the old); a closed
+  request refusing an edit **with its title read back unchanged**, since "it was refused"
+  passes if the route is merely broken; a vendor and work order **recorded and then
+  changed**, which is the regression that motivated the whole item; and
+  `closedThisMonth` moving by exactly one on a close **and** staying a window rather than
+  a count of everything ever closed. Posts requests and closes them — reseed after
 - `node scripts/verify-residents.js` — 47 assertions on the roster, intake,
   bed moves, discharge, the SSN read restriction, the notification bell, and search.
   Includes the cohort-mismatch 409 and a tech's 403 on bed assignment — the pair the

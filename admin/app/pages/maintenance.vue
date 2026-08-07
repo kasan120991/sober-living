@@ -99,6 +99,8 @@ const active = ref(null)
 const closeOpen = ref(false)
 const closeMode = ref('RESOLVED')
 const reopenOpen = ref(false)
+const editOpen = ref(false)
+const assignOpen = ref(false)
 
 function openClose({ request, status }) {
   active.value = request
@@ -108,6 +110,14 @@ function openClose({ request, status }) {
 function openReopen(request) {
   active.value = request
   reopenOpen.value = true
+}
+function openEdit(request) {
+  active.value = request
+  editOpen.value = true
+}
+function openAssign(request) {
+  active.value = request
+  assignOpen.value = true
 }
 
 const COLUMNS = [
@@ -146,6 +156,71 @@ const COLUMNS = [
     <p v-if="pending" class="text-muted-foreground text-sm">Loading…</p>
 
     <div v-else class="flex min-w-0 flex-col gap-4">
+      <!-- ── Figures ───────────────────────────────────────────────────────
+           billing.vue's card shape, and its rule that the alarming card takes
+           the inset only when it is non-zero. That inset and the one on an
+           overdue ROW both mean "past its target", so they agree rather than
+           competing — which is what lets this page keep more than one.
+
+           Nothing is hidden at zero: these are labelled figures, not chips, and
+           "no repairs are late" is an answer worth showing. The census's
+           absence-means-fine rule is for chips. -->
+      <div class="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+        <div class="bg-card rounded-md border p-3.5">
+          <p class="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
+            Open
+          </p>
+          <p class="mt-0.5 text-[23px] font-semibold tracking-tight tabular-nums">
+            {{ figures.open ?? 0 }}
+          </p>
+          <p class="text-muted-foreground mt-1 text-[12.5px]">
+            {{ figures.urgent ? `${figures.urgent} urgent` : 'None urgent' }}
+          </p>
+        </div>
+
+        <div
+          class="rounded-md border p-3.5"
+          :class="
+            figures.overdue > 0
+              ? 'border-destructive bg-card shadow-[inset_3px_0_0_var(--destructive)]'
+              : 'bg-card'
+          "
+        >
+          <p
+            class="text-[11px] font-semibold tracking-wider uppercase"
+            :class="figures.overdue > 0 ? 'text-destructive' : 'text-muted-foreground'"
+          >
+            Overdue
+          </p>
+          <p class="mt-0.5 text-[23px] font-semibold tracking-tight tabular-nums">
+            {{ figures.overdue ?? 0 }}
+          </p>
+          <p class="text-muted-foreground mt-1 text-[12.5px]">
+            {{ figures.overdue > 0 ? 'Past their own target' : 'Everything inside target' }}
+          </p>
+        </div>
+
+        <div class="bg-card rounded-md border p-3.5">
+          <p class="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
+            In progress
+          </p>
+          <p class="mt-0.5 text-[23px] font-semibold tracking-tight tabular-nums">
+            {{ figures.inProgress ?? 0 }}
+          </p>
+          <p class="text-muted-foreground mt-1 text-[12.5px]">Somebody owns these</p>
+        </div>
+
+        <div class="bg-card rounded-md border p-3.5">
+          <p class="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
+            Closed this month
+          </p>
+          <p class="mt-0.5 text-[23px] font-semibold tracking-tight tabular-nums">
+            {{ figures.closedThisMonth ?? 0 }}
+          </p>
+          <p class="text-muted-foreground mt-1 text-[12.5px]">On the facility calendar</p>
+        </div>
+      </div>
+
       <div class="flex flex-wrap items-center gap-2">
         <Button
           v-for="f in FILTERS"
@@ -255,6 +330,8 @@ const COLUMNS = [
                     @changed="load"
                     @close-request="openClose"
                     @reopen-request="openReopen"
+                    @edit-request="openEdit"
+                    @assign-request="openAssign"
                   />
                 </td>
               </tr>
@@ -286,5 +363,7 @@ const COLUMNS = [
       :request-title="active?.title"
       @done="load"
     />
+    <AppMaintenanceEditDialog v-model:open="editOpen" :request="active" @done="load" />
+    <AppMaintenanceAssignDialog v-model:open="assignOpen" :request="active" @done="load" />
   </AppPage>
 </template>
