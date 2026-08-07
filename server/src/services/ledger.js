@@ -1,4 +1,4 @@
-import { prisma } from '../db/client.js'
+import { prisma, runInTransaction } from '../db/client.js'
 import { isUniqueViolationOn } from '../lib/http.js'
 import { facilityDayInstant } from '../lib/facilityTime.js'
 import { HttpError } from '../middleware/authorize.js'
@@ -105,26 +105,63 @@ export async function balancesByStay(stayIds) {
  * @param {string[]} stayIds
  * @returns {Promise<Map<string, number>>} stayId → pending cents
  */
+export const PENDING_WHERE = {
+  type: { in: [LEDGER_ENTRY_TYPE.CHARGE, LEDGER_ENTRY_TYPE.CREDIT] },
+  invoiceLine: { is: null },
+}
+
+/**
+ * Which of these unbilled rows have been REMOVED — the one place that decides.
+ *
+ * A pending charge cannot be deleted: `ledger_entries` refuses DELETE by
+ * trigger and by revoked privilege, and that is not negotiable. Removing one is
+ * therefore a reversing CREDIT with `correctsId`, and BOTH rows live forever.
+ * What "removed" buys is that neither is billable — the pair never reaches an
+ * invoice, so a charge posted against the wrong resident is not something they
+ * are asked to look at and query.
+ *
+ * The test is deliberately exact: same stay, opposite type, SAME amount, and
+ * both still unbilled. A partial credit is an ordinary adjustment and must stay
+ * billable, or waiving half a charge would silently waive all of it. And
+ * because `rows` only ever contains unbilled entries, a reversal of an already
+ * invoiced charge cannot match — which is right, since that money has been
+ * demanded and the correction belongs on the next invoice.
+ *
+ * @param {{id: string, type: string, amountCents: number, correctsId: string|null}[]} rows
+ * @returns {Set<string>} ids of every row in a removed pair, reversal included
+ */
+export function removedIds(rows) {
+  const byId = new Map(rows.map((r) => [r.id, r]))
+  const out = new Set()
+  for (const r of rows) {
+    if (!r.correctsId) continue
+    const target = byId.get(r.correctsId)
+    if (!target) continue
+    if (target.type === r.type) continue
+    if (target.amountCents !== r.amountCents) continue
+    out.add(target.id)
+    out.add(r.id)
+  }
+  return out
+}
+
 export async function pendingByStay(stayIds) {
   const ids = stayIds.filter(Boolean)
   if (!ids.length) return new Map()
 
-  const sums = await prisma.ledgerEntry.groupBy({
-    by: ['stayId', 'type'],
-    where: {
-      stayId: { in: ids },
-      type: { in: [LEDGER_ENTRY_TYPE.CHARGE, LEDGER_ENTRY_TYPE.CREDIT] },
-      invoiceLine: { is: null },
-    },
-    _sum: { amountCents: true },
+  // findMany rather than groupBy: whether a row is removed depends on ANOTHER
+  // row, which no aggregate can express. The set is small by construction —
+  // these are only the lines nobody has invoiced yet.
+  const rows = await prisma.ledgerEntry.findMany({
+    where: { stayId: { in: ids }, ...PENDING_WHERE },
+    select: { id: true, stayId: true, type: true, amountCents: true, correctsId: true },
   })
+  const gone = removedIds(rows)
 
   const byStay = new Map(ids.map((id) => [id, 0]))
-  for (const row of sums) {
-    byStay.set(
-      row.stayId,
-      byStay.get(row.stayId) + LEDGER_SIGN[row.type] * (row._sum.amountCents ?? 0),
-    )
+  for (const r of rows) {
+    if (gone.has(r.id)) continue
+    byStay.set(r.stayId, byStay.get(r.stayId) + LEDGER_SIGN[r.type] * r.amountCents)
   }
   return byStay
 }
@@ -194,11 +231,21 @@ export async function listEntries(stayId) {
     },
   })
 
+  // Removal is decided over the UNBILLED rows only, by the same helper the
+  // figures use — so a row cannot render as removed while still counting
+  // toward pending, or the other way round.
+  const unbilled = entries.filter((e) => !e.invoiceLine && e.type !== LEDGER_ENTRY_TYPE.PAYMENT)
+  const gone = removedIds(unbilled)
+  const reversalOf = new Map(
+    unbilled.filter((e) => gone.has(e.id) && e.correctsId).map((e) => [e.correctsId, e]),
+  )
+
   const rows = entries.map((e) => {
     // "Pending" is the ABSENCE of an invoice line — a read, never a column on
     // this table, which refuses updates. Payments are never billable, so they
     // are never pending either.
     const billed = Boolean(e.invoiceLine)
+    const reversal = reversalOf.get(e.id) ?? null
     return {
       id: e.id,
       type: e.type,
@@ -212,6 +259,17 @@ export async function listEntries(stayId) {
       recordedAt: e.createdAt,
       billed,
       invoice: e.invoiceLine?.invoice ?? null,
+      // The pair, told apart: the original renders struck through with the
+      // reason, and the reversal is hidden — it is the SAME fact stated twice
+      // and two rows would read as two events. Both remain on the wire, and
+      // both remain in the table forever; this only decides how they draw.
+      removed: Boolean(reversal),
+      removedBy: reversal && {
+        at: reversal.createdAt,
+        description: reversal.description,
+        byName: reversal.recordedBy?.fullName ?? null,
+      },
+      isReversal: gone.has(e.id) && Boolean(e.correctsId) && !reversal,
     }
   })
 
@@ -311,6 +369,78 @@ export async function postEntry(input, actorId) {
     }
     throw err
   }
+}
+
+/**
+ * Remove a PENDING charge — by reversing it, because nothing here deletes.
+ *
+ * `ledger_entries` refuses DELETE by trigger and by revoked privilege, and that
+ * is the guarantee the whole module rests on. So a removal is an ordinary
+ * append: a CREDIT for the same amount pointing at the charge with
+ * `correctsId`. Both rows are permanent and an auditor can see exactly what was
+ * raised, when it was reversed and why.
+ *
+ * What removal earns is that the PAIR is not billable — `removedIds()` drops
+ * both from pending, so neither reaches an invoice. A charge posted against the
+ * wrong resident is not something they are then asked to look at and query.
+ *
+ * The service composes the entry rather than the caller: the amount, the type,
+ * the date and whose ledger it lands on are all determined by the charge being
+ * reversed, and the only thing a human supplies is the reason. That is module
+ * 5's rule for when a service may post to the ledger directly.
+ */
+export async function removePendingCharge(stayId, entryId, reason, actorId) {
+  const trimmed = (reason ?? '').trim()
+  if (!trimmed) throw new HttpError(400, 'A removal needs a reason.')
+
+  return runInTransaction(async () => {
+    // Re-read INSIDE the transaction. Between a manager opening the dialog and
+    // pressing Remove, the Friday run may have swept this very charge onto an
+    // invoice — at which point it is money that has been demanded, and the
+    // correction belongs on the next invoice rather than here.
+    const entry = await prisma.ledgerEntry.findUnique({
+      where: { id: entryId },
+      select: {
+        id: true,
+        stayId: true,
+        type: true,
+        amountCents: true,
+        description: true,
+        occurredAt: true,
+        invoiceLine: { select: { id: true } },
+        correctedBy: { select: { id: true, type: true, amountCents: true } },
+      },
+    })
+    if (!entry || entry.stayId !== stayId) throw new HttpError(404, 'Entry not found on this stay.')
+    if (entry.type !== LEDGER_ENTRY_TYPE.CHARGE) {
+      throw new HttpError(409, 'Only a charge can be removed.')
+    }
+    if (entry.invoiceLine) {
+      throw new HttpError(
+        409,
+        'That charge has been invoiced, so it can no longer be removed. Post a credit against it instead.',
+      )
+    }
+    const already = entry.correctedBy.some(
+      (c) => c.type !== entry.type && c.amountCents === entry.amountCents,
+    )
+    if (already) throw new HttpError(409, 'That charge has already been removed.')
+
+    return postEntry(
+      {
+        stayId,
+        type: LEDGER_ENTRY_TYPE.CREDIT,
+        amountCents: entry.amountCents,
+        description: `Removed: ${trimmed}`,
+        // The original's date, not today's — the reversal applies to the day
+        // the charge did. Same rule as an apartment check's amendment carrying
+        // `checkedAt` verbatim: it corrects what was recorded, never when.
+        occurredAt: entry.occurredAt,
+        correctsId: entry.id,
+      },
+      actorId,
+    )
+  })
 }
 
 /** The active stay for a resident, which is what the ledger UI operates on. */

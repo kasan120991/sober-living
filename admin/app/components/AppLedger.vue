@@ -28,7 +28,7 @@
 // entry was typed, and `dueAt` is an invoice's term. isoDate slices UTC, so a
 // charge posted at 9pm ET was dated tomorrow. Same rule, and the same bug, as
 // the dashboard's `lastPaymentAt`.
-import { ExternalLink, Plus, Send } from '@lucide/vue'
+import { Ellipsis, ExternalLink, Plus, Send, Trash2 } from '@lucide/vue'
 import { facilityDateOf } from '~/utils/facilityTime.js'
 import { money, inCredit, categoryLabel } from '~/utils/money.js'
 import { invoiceStatusDisplay } from '~/utils/invoices.js'
@@ -90,9 +90,14 @@ onRealtimeChanged(load)
 
 // ── Derived ────────────────────────────────────────────────────────────────
 
-/** Charges and credits with no invoice. Payments are never billable. */
+/**
+ * Charges and credits with no invoice. Payments are never billable, and a
+ * REMOVED pair is not pending either — it is excluded from `pendingCents` on
+ * the server, so counting it here would make the figure and its own caption
+ * disagree ("$20.00 · 3 lines").
+ */
 const pendingEntries = computed(() =>
-  entries.value.filter((e) => !e.billed && e.type !== 'PAYMENT'),
+  entries.value.filter((e) => !e.billed && e.type !== 'PAYMENT' && !e.removed && !e.isReversal),
 )
 // OLDEST first — the one that has been ignored longest, the same order
 // `overdueByStay` uses for the dashboard. The invoice list itself is
@@ -144,11 +149,18 @@ const dayLabel = (instant) => DAY.format(new Date(`${facilityDateOf(instant)}T00
  */
 const byMonth = computed(() => {
   const out = []
-  for (const e of entries.value) {
+  // The reversal half of a removed pair is dropped: it is the SAME fact as the
+  // struck-through row above it, and two rows would read as two events. Both
+  // are still on the wire and both are still in the table forever.
+  for (const e of entries.value.filter((x) => !x.isReversal)) {
     const key = MONTH.format(new Date(`${facilityDateOf(e.occurredAt)}T00:00:00.000Z`))
     if (out.at(-1)?.key !== key) out.push({ key, entries: [], charged: 0, paid: 0, credited: 0 })
     const g = out.at(-1)
     g.entries.push(e)
+    // A removed charge still SHOWS, struck through, but must not be counted:
+    // a month header reading "$735.00 charged" that includes money nobody is
+    // owed would be the section stating a figure it does not mean.
+    if (e.removed) continue
     if (e.type === 'CHARGE') g.charged += e.amountCents
     else if (e.type === 'PAYMENT') g.paid += e.amountCents
     else g.credited += e.amountCents
@@ -186,6 +198,13 @@ const pendingSub = computed(() => {
 // row menu can open the same implementation.
 const entryOpen = ref(false)
 const sendOpen = ref(false)
+// ONE dialog for the whole table, driven by a row ref — the AppBedTable rule.
+const removeOpen = ref(false)
+const removing = ref(null)
+function askRemove(entry) {
+  removing.value = entry
+  removeOpen.value = true
+}
 
 async function onPosted() {
   await load()
@@ -377,12 +396,20 @@ async function resume(invoice) {
                 >
                   {{ dayLabel(e.occurredAt) }}
                 </td>
-                <td class="border-b px-1 py-2 align-baseline">
+                <td class="border-b px-1 py-2 align-baseline" :class="e.removed && 'text-muted-foreground'">
                   {{ e.description }}
                   <span v-if="e.category" class="text-muted-foreground">
                     · {{ categoryLabel(e.category) }}
                   </span>
-                  <span v-if="e.corrects" class="text-warning">· correction</span>
+                  <span v-if="e.corrects && !e.removed" class="text-warning">· correction</span>
+
+                  <!-- A removed charge keeps its row and its reason. It cannot
+                       leave: the table refuses DELETE by trigger and by revoked
+                       privilege, which is the guarantee the module rests on. -->
+                  <span v-if="e.removed" class="text-muted-foreground">
+                    · removed<template v-if="e.removedBy">
+                      · {{ e.removedBy.description.replace(/^Removed:\s*/, '') }}</template>
+                  </span>
 
                   <!-- PENDING is marked; billed is not. Once invoicing is
                        routine most lines are billed, and marking the majority
@@ -390,7 +417,7 @@ async function resume(invoice) {
                        state somebody can act on, and the one saying this line
                        is not yet part of what the resident owes. -->
                   <Badge
-                    v-if="!e.billed && e.type !== 'PAYMENT'"
+                    v-if="!e.billed && e.type !== 'PAYMENT' && !e.removed"
                     variant="outline"
                     class="ms-1 text-[10px]"
                   >
@@ -419,9 +446,42 @@ async function resume(invoice) {
                 <td
                   class="w-[7em] border-b px-1 py-2 text-right align-baseline tabular-nums whitespace-nowrap"
                 >
-                  <span :class="e.type === 'CHARGE' ? 'text-foreground' : 'text-success'">
+                  <span
+                    :class="
+                      e.removed
+                        ? 'text-muted-foreground line-through'
+                        : e.type === 'CHARGE'
+                          ? 'text-foreground'
+                          : 'text-success'
+                    "
+                  >
                     {{ e.type === 'CHARGE' ? '' : '−' }}{{ money(e.amountCents) }}
                   </span>
+                </td>
+
+                <!-- Row actions follow AppBedTable: a trailing column, a ghost
+                     ellipsis, and ONE dialog for the whole table driven by a
+                     row ref — never a dialog per row. The cell is always
+                     rendered so the column does not appear and disappear
+                     between rows and shift the amounts sideways. -->
+                <td class="w-9 border-b px-0 py-2 align-baseline">
+                  <DropdownMenu v-if="canManage && !e.billed && e.type === 'CHARGE' && !e.removed">
+                    <DropdownMenuTrigger as-child>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        class="size-7 p-0"
+                        :aria-label="`Actions for ${e.description}`"
+                      >
+                        <Ellipsis class="size-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem class="text-destructive" @select="askRemove(e)">
+                        <Trash2 class="size-4" /> Remove charge
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </td>
               </tr>
             </tbody>
@@ -518,6 +578,12 @@ async function resume(invoice) {
       </section>
     </template>
 
+    <AppLedgerRemoveDialog
+      v-model:open="removeOpen"
+      :resident-id="residentId"
+      :entry="removing"
+      @removed="onPosted"
+    />
     <AppLedgerEntryDialog
       v-model:open="entryOpen"
       :resident-id="residentId"

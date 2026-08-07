@@ -438,6 +438,89 @@ async function main() {
     ? ok('a resident with no email cannot be invoiced through Stripe — refused before anything is billed')
     : bad('canHostInvoice', 'the email rule does not hold')
 
+  // ── Removing a pending charge ────────────────────────────────────────────
+  // Nothing is deleted, ever. A removal is a reversing CREDIT and BOTH rows
+  // stay; what it earns is that the pair stops being billable. The assertions
+  // go in both directions because "pending dropped" passes just as well if the
+  // charge were actually gone, which is the outcome this must NOT have.
+  console.log('\n\x1b[1mRemoving a pending charge\x1b[0m')
+
+  const marisol = find('Ferrer')
+  const beforeRemove = (await manager(`/residents/${marisol.id}/ledger`)).body
+  const target = beforeRemove.entries.find((e) => !e.billed && e.type === 'CHARGE')
+  const rowsBefore = beforeRemove.entries.length
+
+  const noReason = await manager(`/residents/${marisol.id}/ledger/${target.id}/remove`, {
+    method: 'POST',
+    body: {},
+  })
+  noReason.status === 400
+    ? ok('a removal without a reason is refused — the pair is permanent evidence')
+    : bad('reason required', noReason.status)
+
+  const removed = await manager(`/residents/${marisol.id}/ledger/${target.id}/remove`, {
+    method: 'POST',
+    body: { reason: 'posted against the wrong resident' },
+  })
+  const afterRemove = (await manager(`/residents/${marisol.id}/ledger`)).body
+  removed.status === 201 &&
+  afterRemove.pendingCents === beforeRemove.pendingCents - target.amountCents
+    ? ok('removing a pending charge drops it out of pending, to the cent')
+    : bad(
+        'pending drops',
+        `${beforeRemove.pendingCents} → ${afterRemove.pendingCents} (charge ${target.amountCents})`,
+      )
+  afterRemove.balanceCents === beforeRemove.balanceCents
+    ? ok('and the balance does not move — it was never owed, only pending')
+    : bad('balance still', `${beforeRemove.balanceCents} → ${afterRemove.balanceCents}`)
+
+  // The whole point of the append-only guarantee: MORE rows, not fewer.
+  const kept = afterRemove.entries.find((e) => e.id === target.id)
+  afterRemove.entries.length === rowsBefore + 1 && kept
+    ? ok('both rows survive — the charge is still there, and so is its reversal')
+    : bad('rows kept', `${rowsBefore} → ${afterRemove.entries.length}, original ${!!kept}`)
+  kept?.removed === true && kept?.removedBy?.description?.includes('wrong resident')
+    ? ok('the original carries its removal and the reason a manager typed')
+    : bad('removal marked', JSON.stringify(kept?.removedBy))
+  afterRemove.entries.some((e) => e.isReversal)
+    ? ok('and the reversal is flagged, so the section can draw the pair as one line')
+    : bad('reversal flagged', 'no entry carries isReversal')
+
+  // The reason removal exists: neither half may reach the resident's invoice.
+  const billable = (await manager('/invoices/billable')).body.stays
+  const marisolRow = billable.find((s) => s.stayId === marisol.stayId)
+  const stillPending = afterRemove.entries.filter(
+    (e) => !e.billed && e.type !== 'PAYMENT' && !e.removed && !e.isReversal,
+  )
+  !marisolRow || marisolRow.lineCount === stillPending.length
+    ? ok('the Friday run counts neither half — a removed charge never reaches Stripe')
+    : bad('sweep excludes', `${marisolRow.lineCount} lines vs ${stillPending.length} live`)
+
+  const twice = await manager(`/residents/${marisol.id}/ledger/${target.id}/remove`, {
+    method: 'POST',
+    body: { reason: 'again' },
+  })
+  twice.status === 409
+    ? ok('removing the same charge twice is refused')
+    : bad('double remove', twice.status)
+
+  const billedEntry = afterRemove.entries.find((e) => e.billed && e.type === 'CHARGE')
+  const invoiced = await manager(`/residents/${marisol.id}/ledger/${billedEntry.id}/remove`, {
+    method: 'POST',
+    body: { reason: 'too late' },
+  })
+  invoiced.status === 409
+    ? ok('an INVOICED charge cannot be removed — that money has been demanded')
+    : bad('billed refused', invoiced.status)
+
+  const techRemove = await tech(`/residents/${marisol.id}/ledger/${target.id}/remove`, {
+    method: 'POST',
+    body: { reason: 'nope' },
+  })
+  techRemove.status === 403
+    ? ok('a tech cannot remove a charge — they read a balance, never change one')
+    : bad('tech refused', techRemove.status)
+
   // ── Void, draft, and money paid in advance ───────────────────────────────
   console.log('\n\x1b[1mThe edges of the new rule\x1b[0m')
 

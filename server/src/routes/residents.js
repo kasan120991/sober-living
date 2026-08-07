@@ -20,7 +20,12 @@ import {
   updateContact,
   updateResident,
 } from '../services/residents.js'
-import { activeStayIdFor, listEntries, postEntry } from '../services/ledger.js'
+import {
+  activeStayIdFor,
+  listEntries,
+  postEntry,
+  removePendingCharge,
+} from '../services/ledger.js'
 import { residentChecks } from '../services/checks.js'
 import { residentScreens } from '../services/screens.js'
 import { residentInvoiceRoutes } from './invoices.js'
@@ -131,6 +136,11 @@ const dollarsToCents = z
     }
     return cents
   })
+
+// Required, and required for the same reason every amendment in this app needs
+// one: the pair is permanent evidence, and "why" is the only part of it a
+// reader cannot reconstruct from the rows themselves.
+const removeBody = z.object({ reason: z.string().trim().min(1).max(300) })
 
 const ledgerBody = z.object({
   type: z.enum(Object.values(LEDGER_ENTRY_TYPE)),
@@ -370,6 +380,27 @@ router.post(
       req.session.userId,
     )
     res.status(201).json(entry)
+  }),
+)
+
+// Removing a PENDING charge. Its own route rather than a hand-built CREDIT
+// through the one above, because every term of the reversal — the amount, the
+// type, the date, whose ledger it lands on — is determined by the charge being
+// reversed. Only the reason comes from a human, which is exactly the line
+// module 5 drew for when a service may post to the ledger itself.
+//
+// Managers, like every other write here: a tech reads a balance, never changes
+// one. Nothing is deleted — see `removePendingCharge`.
+router.post(
+  '/:id/ledger/:entryId/remove',
+  managers,
+  handler(async (req, res) => {
+    const { reason } = parseBody(removeBody, req.body)
+    const stayId = await activeStayIdFor(req.params.id)
+    if (!stayId) throw new HttpError(409, 'This resident has no active stay.')
+    res
+      .status(201)
+      .json(await removePendingCharge(stayId, req.params.entryId, reason, req.session.userId))
   }),
 )
 

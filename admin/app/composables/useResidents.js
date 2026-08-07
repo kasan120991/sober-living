@@ -37,6 +37,14 @@ export function useResidents() {
    *  12.10, and a ledger that is off by cents cannot be reconciled. */
   const postLedgerEntry = (id, body) => api(`/residents/${id}/ledger`, { method: 'POST', body })
 
+  /**
+   * Remove a PENDING charge. Nothing is deleted — the server posts a reversing
+   * credit and both rows stay forever; what changes is that neither is
+   * billable. Refused once the charge has been invoiced.
+   */
+  const removeLedgerEntry = (id, entryId, reason) =>
+    api(`/residents/${id}/ledger/${entryId}/remove`, { method: 'POST', body: { reason } })
+
   const addContact = (id, body) => api(`/residents/${id}/contacts`, { method: 'POST', body })
   const removeContact = (contactId) =>
     api(`/residents/contacts/${contactId}`, { method: 'DELETE' })
@@ -53,6 +61,7 @@ export function useResidents() {
     listPrograms,
     listLedger,
     postLedgerEntry,
+    removeLedgerEntry,
     addContact,
     removeContact,
   }

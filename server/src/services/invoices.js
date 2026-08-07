@@ -12,7 +12,7 @@ import {
 } from '../domain/constants.js'
 import { facilityDueDate } from '../lib/facilityTime.js'
 import { stripe, stripeEmailsInvoices, stripeEnabled } from '../lib/stripe.js'
-import { balanceOfStay, balancesByStay, draftByStay } from './ledger.js'
+import { balanceOfStay, balancesByStay, draftByStay, removedIds } from './ledger.js'
 
 /**
  * Invoices — module 11's second half, and the thing that finally gives
@@ -78,12 +78,22 @@ export function invoiceStatus(invoice, balanceCents, now = new Date()) {
   return { settled, overdue, daysPastDue }
 }
 
-/** The PENDING lines of a stay: charges and credits with no invoice line. */
+/**
+ * The PENDING lines of a stay: charges and credits with no invoice line, MINUS
+ * any that have been removed.
+ *
+ * This is what the sweep bills, so the exclusion has to happen here and not
+ * only in the figures — otherwise a charge the ledger shows as removed would
+ * still land on the resident's next invoice, which is the whole thing removal
+ * exists to prevent. `removedIds()` is the one place that decides.
+ */
 export async function pendingFor(stayId) {
-  return prisma.ledgerEntry.findMany({
+  const rows = await prisma.ledgerEntry.findMany({
     where: { stayId, type: { in: BILLABLE }, invoiceLine: { is: null } },
     orderBy: [{ occurredAt: 'asc' }, { createdAt: 'asc' }],
   })
+  const gone = removedIds(rows)
+  return rows.filter((r) => !gone.has(r.id))
 }
 
 /** Charges add, credits subtract. The net is what would be billed. */
@@ -517,14 +527,19 @@ export async function billableStays() {
         type: { in: BILLABLE },
         invoiceLine: { is: null },
       },
-      select: { stayId: true, type: true, amountCents: true },
+      // id and correctsId are here for `removedIds` — a removed pair must not
+      // be counted into the Friday run's figures either, or the preview would
+      // promise money the sweep then declines to bill.
+      select: { id: true, stayId: true, type: true, amountCents: true, correctsId: true },
     }),
     // For the credit warning below — also grouped, for the same reason.
     balancesByStay(stays.map((s) => s.id)),
   ])
+  const gone = removedIds(entries)
 
   const byStay = new Map()
   for (const e of entries) {
+    if (gone.has(e.id)) continue
     const acc = byStay.get(e.stayId) ?? { lineCount: 0, netCents: 0 }
     acc.lineCount += 1
     acc.netCents += LEDGER_SIGN[e.type] * e.amountCents

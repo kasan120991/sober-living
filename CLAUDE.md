@@ -1400,6 +1400,38 @@ the one where the money moved; and **`draftCents` was fetched and rendered nowhe
 unsent invoice's money was invisible in both figures — the exact hole that field exists to
 close. It now gets a warning line with a Send action.
 
+**A pending charge can be REMOVED, and removing is an append** (built 2026-08-07).
+`POST /residents/:id/ledger/:entryId/remove`, managers, reason required.
+
+Nothing is deleted and nothing ever will be: `ledger_entries` refuses DELETE by trigger and
+by revoked privilege, which is the guarantee the whole module rests on. A removal is an
+ordinary reversing **CREDIT** with `correctsId` and the charge's own amount, so both rows
+live forever and an auditor sees what was raised, when it was reversed and why. What removal
+earns is that the **pair stops being billable** — a charge posted against the wrong resident
+is not something they are later asked to look at and query.
+
+- **`removedIds()` in `services/ledger.js` is the ONE place that decides**, and it has to be,
+  because pending is computed in **three**: `pendingByStay` (the figures), `pendingFor` (what
+  the sweep bills) and `billableStays` (the Friday preview). Miss one and a charge the ledger
+  draws as removed still lands on an invoice.
+- **The test is exact: same stay, opposite type, SAME amount, both still unbilled.** A partial
+  credit is an ordinary adjustment and stays billable — otherwise waiving half a charge would
+  silently waive all of it. And since the candidate set is only unbilled rows, a reversal of
+  an already-invoiced charge cannot match, which is why **an invoiced charge is refused with
+  a 409**: that money has been demanded, and the correction belongs on the next invoice.
+- **`pendingByStay` had to stop being a `groupBy`.** Whether a row is removed depends on
+  *another row*, which no aggregate can express. It is a `findMany` over the unbilled set,
+  which is small by construction.
+- **The reversal carries the ORIGINAL's `occurredAt`**, not today's — the apartment-check
+  amendment rule, and it also keeps the pair in one month group.
+- **The service composes the entry, not the caller.** Amount, type, date and whose ledger it
+  lands on are all determined by the charge being reversed; only the reason comes from a
+  human. That is module 5's line for when a service may post to the ledger directly.
+- **The section draws the pair as ONE struck-through line** with its reason, and hides the
+  reversal: it is the same fact stated twice and two rows would read as two events. The
+  removed charge is also excluded from its month's `charged` total, or the header would
+  state a figure it does not mean.
+
 **Still to build:**
 
 - **The Friday nag** — a Needs-attention row once a Friday has passed with lines pending.
@@ -2048,7 +2080,7 @@ Two verification suites, both run against a live database:
   Includes the cohort-mismatch 409 and a tech's 403 on bed assignment — the pair the
   census board's free-tile placement rests on, and the intake and expected-out dates
   coming back on the day they were typed rather than the day before
-- `node scripts/verify-ledger.js` — **62 assertions** on derived balances, invoicing, the
+- `node scripts/verify-ledger.js` — **72 assertions** on derived balances, invoicing, the
   append-only guards, dollar-to-cent parsing, and processor-reference idempotency.
   Includes the invoice **snapshot proved three ways**, a duplicate webhook returning
   **200 with one PAYMENT**, overdue flipping on a cash payment **with no write to the
@@ -2070,7 +2102,11 @@ Two verification suites, both run against a live database:
   sends on that day share it whatever the hour, both proved on fixed instants so no DST
   week can flake them; a real invoice stores that date rather than the send moment; and
   **no `dotDue` rides on the wire**, which would otherwise let the client key on something
-  the server stopped computing
+  the server stopped computing. **Ten cover removing a pending charge**, and the important
+  ones are the negatives: **both rows SURVIVE** (the row count goes *up*, which is the
+  append-only guarantee — "pending dropped" alone would pass if the charge had really been
+  deleted), the **balance does not move**, the **Friday run counts neither half**, and a
+  reason, a second removal, an **invoiced** charge and a **tech** are each refused
 - `node scripts/verify-census.js` — 12 assertions on the census read: derived occupancy,
   the figures row, the three tile states, and the staff-only gate
 - `node scripts/verify-realtime.js` — 14 assertions on the invalidation socket: the
