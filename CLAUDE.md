@@ -51,6 +51,10 @@ Use these terms in code, schema, and UI. Do not invent synonyms.
 | **Intake / Discharge** | Entering and leaving the program. Discharge has a type (successful, AMA, administrative). |
 | **Ledger** | A stay's fee history — rent, laundry, trips, program fees, damages, and the payments and credits against them. Append-only. |
 | **Balance** | What a resident owes, always `SUM(charges) − SUM(payments + credits)`. **Derived, never stored.** Negative means they are in credit. |
+| **Invoice** | A dated demand for payment, sent through Stripe. Holds a **total** — a snapshot of what was billed the day it was sent, which must not move when a later correction lands. Voided, never deleted. Distinct from the balance, which is always derived. |
+| **Invoice line** | The join row binding one ledger entry to one invoice. Its own table (`invoice_lines`) precisely so `ledger_entries` keeps its no-update guarantee; unique on the entry, so a charge cannot be billed twice — and a voided invoice's lines are never re-billable. |
+| **Unbilled** | A CHARGE or CREDIT with **no row in `invoice_lines`**. A read, never a stored flag. Payments are never billable. |
+| **Overdue** | An OPEN invoice past its `dueAt` on a stay whose balance is still positive. **Derived**, so cash paid at the desk clears it without touching the invoice. The record's red dot waits a further 7 days (`INVOICE_DOT_GRACE_DAYS`) — grace delays the alarm, not the arithmetic, the `OVERDUE_GRACE_MS` idiom. Note the **status pill's "overdue" means sign-outs** and always has; the two never merged. |
 
 ---
 
@@ -112,8 +116,14 @@ instead of being re-decided per tab.
   the last apartment check could not find them and nothing has accounted for them since —
   derived on `GET /residents/:id` by the same `services/checks.js` helper the bell's
   RESIDENT_NOT_ACCOUNTED item uses, one knob, so the record and the bell cannot disagree.
-  **Balance-overdue joins red with invoicing** (module 11), because a charge has no due
-  date and only an invoice does. A section with nothing wrong shows no dot, the same rule
+  **Balance-overdue HAS joined red** (2026-08-06), now that invoicing gives a charge a due
+  date — `dots.ledger`, derived through `stayInvoiceSummary()` in services/invoices.js, the
+  same helper the dashboard reads. Note it keys on `dotDue`, not `overdue`: an invoice is
+  past due the morning after it is sent, and the dot waits seven days. A resident can carry
+  **two red dots at once** — unaccounted-for and overdue — and the rail renders one per
+  section, which is right; where anything ever needs a single answer, **unaccounted-for
+  outranks overdue**, because one is a person nobody can find and the other is money. A
+  section with nothing wrong shows no dot, the same rule
   the census tiles follow: absence of a chip means fine, which keeps a quiet record quiet.
 - **Techs see the Clinical group** (decided 2026-08-02). This does not contradict the bell
   rule under module 13 — that one is about *ambient* disclosure, a name against a screen
@@ -862,10 +872,15 @@ so a dialog cannot quote a figure the ledger disagrees with.
 **A known, accepted disclosure:** confirmation is only ever offered on a non-negative, so a
 `LAB_FEE` line on a balance — which any staff member may read — implies a non-negative
 screen. The description names no result and no substance, and this is written down rather
-than discovered. **Before invoicing (module 11) sweeps charges to Stripe, this line item
-needs a decision**: "Lab confirmation fee" under category `LAB_FEE`, on an account
-belonging to a sober living facility, is a 42 CFR Part 2 disclosure to Stripe and every
-subprocessor. The existing "opaque ids only" rule covers metadata, not line-item text.
+than discovered. **That disclosure is unchanged and still accepted** — internally, any
+staff member reading a balance can still infer a non-negative from the category.
+
+**The Stripe half was decided 2026-08-06, when invoicing shipped: the line reads "Testing
+fee".** Invoice line text comes from `STRIPE_LINE_LABEL`, a fixed category map, and never
+from the ledger's own description — which is unreviewed free text a manager typed and could
+say anything. "Lab confirmation fee" would have narrowed to *this person had a non-negative
+screen*, and the clearance covers identity, not clinical inference. `verify-ledger.js`
+asserts the whole mapping, so this cannot regress into "just send the description".
 
 **Nothing from this module reaches the bell or the dashboard.** Module 13 demands a
 separate think before anything from module 5 goes near the bell; the think happened on
@@ -1159,13 +1174,103 @@ keeps its no-update guarantee untouched.
   exists, "overdue" could only mean "owes anything", which would light red on nearly every
   resident and become noise. Ship the dot with the invoice, not before.
 
-**Still to build: Stripe.** `LedgerEntry.externalRef` is unique and reserved for the
-processor's own id, which is the piece that is painful to retrofit — webhooks are delivered
-at-least-once and this table cannot be corrected by deleting a row, so without it one
-retried webhook is a permanent duplicate payment. A handler should treat the unique
-violation as "already recorded", not as an error. **Before writing that integration, read
-the Stripe note under Compliance posture** — what may be sent to Stripe is a 42 CFR Part 2
-question, not a technical one.
+**Built 2026-08-06: invoicing and Stripe.** `Invoice` + `invoice_lines` exactly as
+prescribed above, hosted Stripe invoices, and the red dot the section promised.
+
+**The snapshot is now enforced by the DATABASE, not by prose.** `Invoice.totalCents` sits
+OUTSIDE the migration's UPDATE grant, so nothing can move it — not a route, not a script,
+not a psql session. That is the difference between a snapshot and a cache stated as a
+property: a cache is by definition something that gets recomputed, and this one cannot be.
+`verify-ledger.js` proves it three ways — behaviourally (a correction moves the balance and
+leaves the total alone), by privilege, and by trigger against a superuser.
+
+**Charges AND credits are swept; payments never.** A credit adjusts what is billed and
+rides as a negative Stripe line; a payment is money already received, and billing it would
+demand it twice — refused by trigger, not merely by the service. **The net must be
+positive**: a sweep that comes out at zero or in the resident's favour creates nothing and
+leaves the lines to roll onto the next invoice, because Stripe cannot issue a negative
+invoice and a $0 one is a document nobody meant to make.
+
+**The sweep is TWO transactions with a durable draft between them**, and that is not an
+optimisation. `runInTransaction` opens a Prisma interactive transaction; awaiting Stripe
+round-trips inside one pins a pooled connection and trips the timeout, leaving the ledger
+right and Stripe holding an invoice nobody recorded. Committing the local draft FIRST means
+the lines are billed and un-re-billable from that instant, so a crash before Stripe leaves
+a **visible, resumable DRAFT rather than a lost charge** — `POST /invoices/:id/send`
+replays it, and `invoice.finalized` heals it unattended. Every Stripe call carries a
+**deterministic** idempotency key derived from our own invoice id; a random uuid is a nonce,
+not an idempotency key.
+
+**A void is expensive on purpose: its lines never come back.** `invoice_lines` is unique
+and append-only, absolutely, so a voided invoice's charges are not re-billable. The fix is
+the ledger's own — a CREDIT with `correctsId`, then fresh charges. Making "unbilled" mean
+"no row pointing at a *live* invoice" would turn a one-predicate read into a join on status
+and let billed-ness silently reverse.
+
+**Due on receipt; the RED DOT waits seven days.** Two different facts, the
+`OVERDUE_GRACE_MS` idiom exactly — the invoice is past due the next morning, and
+`INVOICE_DOT_GRACE_DAYS` delays the shouting. And `settled` reads the LEDGER as well as
+Stripe: a resident who pays $800 cash at the desk clears the dot even though Stripe never
+hears, because without that clause the dot burns forever on somebody who is square and
+staff learn it lies.
+
+**The weekly run is a BUTTON, not a cron** (facility, 2026-08-06). Every Friday staff press
+*Generate weekly invoices* — a Quick action on the dashboard, managers only — which bills
+every **active** stay whose unbilled lines net positive. Discharged stays are skipped, since
+a final invoice for somebody who has left is a deliberate act. The app keeps its no-cron
+stance; the honest trade is that forgetting is possible.
+
+`AppWeeklyRunDialog` **previews first and runs second**, and never on open. This is the
+app's only bulk money action and it is irreversible in one direction — every line swept is
+billed forever, and voiding does not give them back. It has **two states rather than one**,
+because a run is per-stay and **partial success is the expected outcome, not an edge case**:
+one resident's failure leaves a recoverable draft and must not abort anybody else's invoice.
+A dialog that closed on "done" would report that as success. So the second state is a
+per-stay list with a tick or a reason, and the count of what did not send.
+
+**The button names what will SEND, not what is ready to bill.** Those differ whenever
+somebody has no email, and the button is the promise — "Send 5" that produces 2 teaches
+staff to distrust the count.
+
+**A resident with no email cannot be invoiced, and that is ordinary rather than an error.**
+Intake requires only a name; Stripe's hosted invoicing requires an email on the Customer.
+`canHostInvoice()` is the pure predicate, and it is checked in the **pre-flight, before
+`draftInvoice` commits** — which is the whole point of that ordering. Discovered the hard
+way: the first version let Stripe answer, and Stripe answers *after* the lines are already
+billed, stranding real charges on an invoice that can never send. The dialog refuses for the
+same reason and names the residents up front, so the run does not discover a preventable
+omission as a list of red rows. `billableStays()` carries `canInvoice` — **the boolean, never
+the address**: the preview has to be honest about which stays will fail, and a name beside an
+email is more disclosure than the question needs.
+
+**The webhook resolves four collisions**, each forced by this app's own structure:
+`express.raw` mounted for its path ABOVE the global JSON parser (Stripe signs the exact
+bytes, and body-parser's `req._body` makes the skip structural); mounted ABOVE
+`sessionMiddleware`, so no forged cookie can establish an actor and **the signature is the
+authentication**, checked before any database access; `runAsSystem()` for the DB actor,
+since RLS is fail-closed; and a dormant `stripe@system.soberlife` user for
+`recordedById`, because attributing a card payment to whoever sent the invoice would put
+their name on money they never touched. **A duplicate returns 200** — `externalRef` stops
+the second payment, but a 409 would make Stripe retry that event forever.
+
+**A bug this work uncovered, worth knowing:** `postEntry`'s "that payment has already been
+recorded" 409 had been silently broken since the Prisma 7 driver-adapter migration —
+`meta.target` is no longer populated, and the constraint name now lives in
+`meta.driverAdapterError.cause.originalMessage`. Callers got a 500. `verify-ledger.js` had
+not caught it because its assertion used `rejects()`, which only proves *something* threw.
+`isUniqueViolationOn()` in `lib/http.js` reads both shapes, and the suite now asserts the
+**status**, not just the throw.
+
+**Still to build:**
+
+- **The Friday nag** — a Needs-attention row once a Friday has passed with lines unbilled.
+  It is the honest counterweight to having no cron, and it is deliberately *not* "there are
+  unbilled charges", which is true every day and would be exactly the noisy dot this file
+  warns about twice. Derivable with no new table: the most recent invoice's `createdAt`
+  against the last Friday.
+- **Resident-facing balances**, which is open question 7's remaining half.
+- **A default payment term other than on-receipt.** `dueAt` is already a parameter on the
+  send, so this is a facility policy nobody has been asked for rather than a code change.
 
 ### 12. Notifications
 **Built.** A bell in the app header on every page, showing situations rather than messages:
@@ -1221,6 +1326,22 @@ whoever adds the first data-carrying event — a resident signs out, a Stripe pa
 - Stripe webhooks arrive server-to-server and have to be verified before they become
   events — an unverified webhook is an unauthenticated write to a resident's balance.
 
+**The Stripe webhook is built (module 11), and the empty payload survived it.** A paid
+invoice writes a PAYMENT row and then broadcasts the same `{ at }` as every other write;
+every screen refetches over the authenticated HTTP API and sees what RLS and RBAC allow
+it to see. **No payment detail is pushed** — that would be the data-carrying event this
+section warns about, and it is still unbuilt.
+
+Two orderings in `app.js` are load-bearing and easy to undo:
+
+- **The signature is verified BEFORE any database access and before `runAsSystem`.** The
+  signature *is* the authentication — there is no session on that route. A bad signature
+  is a **400 with zero rows written**, never a retry invitation.
+- The raw-body parser is mounted on `/stripe/webhook` **immediately above** the global
+  `express.json`, and the router **above `sessionMiddleware`**. Body-parser sets
+  `req._body`, so the global parser skips it by construction. `express.json({ verify })`
+  was rejected: it would buffer every request body in the process to serve one route.
+
 ### 13. Global search
 **Built.** A header field with `⌘K`, searching residents and apartments.
 
@@ -1273,13 +1394,35 @@ Decisions with teeth, each chosen explicitly:
 - **An overdue row carries its destination** (the bell rule: whoever acts needs to know
   where to start looking) — decided against the census tile's never-a-destination rule,
   knowingly, because this is a work queue and not a wall board.
-- **"Outstanding", not "overdue" balances: a positive derived balance on an active
-  stay.** A charge has no due date until invoicing (module 11) exists; this card and
-  panel are what inherit the true overdue meaning — and the record rail's red dot —
-  when it does. The card total is computed as the sum of the rows beneath it, in the
-  same read, so the two cannot drift. Largest balance first; `lastPaymentAt` rides
-  along because owing $500 having paid last week is a different situation from owing
-  $500 in silence.
+- **"Outstanding" balances: a positive derived balance on an active stay — and the
+  panel KEEPS that name now that invoicing exists** (2026-08-07). It is still the
+  complete list; overdue is a property of *some rows*, not a different list. The card
+  total is computed as the sum of the rows beneath it, in the same read, so the two
+  cannot drift, and `overdueCents` is the same sum over the overdue rows — the
+  beds-free card's split treatment, because a bare total hides the difference between
+  owing and being late, which is the whole judgement. `lastPaymentAt` rides along
+  because owing $500 having paid last week is a different situation from owing $500 in
+  silence.
+
+  **Two keys sort it: overdue first, then largest.** "Owes the most" and "is past due"
+  are different urgencies and only the second has a date attached. In the seed the same
+  resident happens to be both, so `verify-dashboard.js` asserts the *rule* rather than
+  the resulting order — the one-key assertion that was here before passed by coincidence
+  after the sort changed, which is how a sort assertion rots.
+
+  An overdue row takes the Signed-out panel's destructive **badge** and deliberately
+  **not its inset rule**: the 2026-08-06 polish pass left exactly one inset on this page
+  so that inset means something. Considered and declined, recorded so it is not "fixed".
+
+  `overdueByStay()` is ONE grouped query shared with the resident record, so the panel
+  and the rail's red dot cannot disagree about who is overdue — module 14's no-per-
+  resident-loops rule, and `verify-dashboard.js` asserts the agreement.
+
+  **Instants shown as dates go through `facilityDateOf()`, never `isoDate()`.** Both
+  `lastPaymentAt` and the maintenance `reportedAt` were UTC-sliced, so a payment taken at
+  the desk after 8pm ET rendered as "last payment **Tomorrow**" — a payment that has not
+  happened yet. CLAUDE.md's own rule ("`isoDate()` is fine for dates, wrong for times"),
+  and this is what it looks like when it is broken.
 - **Needs attention is the bell's action items as a panel** — unhoused, rolls due,
   urgent maintenance — in the pill's priority order, each row tagged with its kind.
   **Minus overdue sign-outs** (the Signed out panel is directly beneath; one situation
@@ -1386,16 +1529,49 @@ email address, attached to an account belonging to a sober living facility, disc
 exactly that — to Stripe, to anyone with access to that dashboard, and to any subprocessor
 downstream. It is a disclosure whether or not a card is ever charged.
 
-So, for the Stripe work when it happens:
+**That paragraph has not changed and does not need to. What changed is the PERMISSION.**
+This section used to say "send no resident name, email, phone or date of birth" and
+"whether any of this is permissible without written consent is a question for whoever
+advises the facility." It said that because consent was **unresolved**. On **2026-08-06 the
+facility's advisor cleared name and email**, and module 11 was built on that clearance. The
+rule is rewritten rather than quietly broken, and it is dated so it can be revisited if the
+advice changes.
 
-- **Send no resident name, email, phone or date of birth.** Metadata carries opaque ids
-  only, the same rule the audit log already follows.
-- Prefer the resident paying through a link they open themselves, so the payment method
-  and any identity live with them rather than in our Stripe account.
-- The facility's own legal name on the statement descriptor is a disclosure to whoever
-  reads the resident's bank statement. Check what the facility wants there.
-- Whether any of this is permissible without written consent is a question for whoever
-  advises the facility. Do not settle it from this file.
+**Permitted to Stripe, and nothing beyond it:**
+
+- The resident's **legal name** and **email address**, on a Stripe Customer — one per
+  person, created lazily on their first invoice, never at intake.
+- **Opaque ids in metadata** — `invoiceId`, `stayId`, `residentId`, `ledgerEntryId` — built
+  by `invoiceMetadata()` so the surface is one function rather than a habit.
+- **Amounts**, and **line labels from a fixed category mapping** (`STRIPE_LINE_LABEL`).
+
+**Forbidden, absolutely:**
+
+- **Date of birth, SSN fragment, phone.** Phone is on this list as a DECISION, not an
+  omission: nothing in invoicing needs it, so it does not go.
+- **Anything clinical** — a screen result, a substance, a medication, an apartment or bed,
+  a program or phase.
+- **Any free text a human typed.** This is the rule that keeps the surface bounded: a
+  ledger description is unreviewed prose a manager entered in a hallway and can say
+  anything at all, so **it never crosses**. Line text comes from the category map, and
+  there is deliberately no memo, footer or custom-description field anywhere in the flow.
+  `LAB_FEE` reads **"Testing fee"** — the clearance covers identity, not clinical
+  inference, and "Lab confirmation fee" on a sober living facility's account narrows to
+  *this person had a non-negative screen*. `verify-ledger.js` asserts the whole mapping.
+
+**Still open, deliberately:**
+
+- **Stripe does not email the resident.** `STRIPE_EMAIL_INVOICES` is `false`, because the
+  clearance covers Stripe *holding* an address, not Stripe *sending mail to it* — an
+  unannounced invoice email discloses to their mailbox provider and to whoever else reads
+  that inbox. Staff hand over the hosted URL. One sentence to the advisor settles it; the
+  flag is already there.
+- The facility's own legal name on the **statement descriptor** is a disclosure to whoever
+  reads the resident's bank statement. Still unasked.
+
+**The Stripe MCP server is a developer's tool for the sandbox, not something the server
+calls.** The API talks to Stripe through the SDK with a key from `server/.env`. A Node
+process cannot reach MCP, so do not try.
 
 **Georgia.** The specific licensing or certification body and the retention period are
 still unverified — see open question 1. Until they are, the app's posture is deliberately
@@ -1726,8 +1902,13 @@ Two verification suites, both run against a live database:
   bed moves, discharge, the SSN read restriction, the notification bell, and search.
   Includes the cohort-mismatch 409 and a tech's 403 on bed assignment — the pair the
   census board's free-tile placement rests on
-- `node scripts/verify-ledger.js` — 25 assertions on derived balances, the append-only
-  guards, dollar-to-cent parsing, and processor-reference idempotency
+- `node scripts/verify-ledger.js` — **47 assertions** on derived balances, invoicing, the
+  append-only guards, dollar-to-cent parsing, and processor-reference idempotency.
+  Includes the invoice **snapshot proved three ways**, a duplicate webhook returning
+  **200 with one PAYMENT**, overdue flipping on a cash payment **with no write to the
+  invoice**, `stripeLineLabel` exhaustively over the whole enum, and the rule that a
+  resident with **no email cannot be invoiced through Stripe** — refused before anything
+  is billed, so no draft is stranded
 - `node scripts/verify-census.js` — 12 assertions on the census read: derived occupancy,
   the figures row, the three tile states, and the staff-only gate
 - `node scripts/verify-realtime.js` — 14 assertions on the invalidation socket: the
@@ -1784,7 +1965,11 @@ Two verification suites, both run against a live database:
   with matching overdue flags and destinations, the census's unhoused, the board's roll
   queue, open URGENT maintenance), balances summing to their own card and agreeing with
   the roster, a probe payment moving the total on the next read, and a probe sign-out
-  surfacing and being cleaned up again. Posts a $1 payment — reseed after.
+  surfacing and being cleaned up again. **24 since 2026-08-07** — the two extra pin the
+  balances panel's overdue half: the card's split summing to its own rows, and the
+  resident record agreeing about who is overdue (one grouped query behind both). The
+  sort assertion now asserts the two-key **rule**, because the one-key version kept
+  passing by coincidence after the sort changed. Posts a $1 payment — reseed after.
 - `node scripts/verify-checks.js` — 65 assertions on the hourly round: the staff gate, the
   board derived from the latest check (95 minutes OVERDUE, most-overdue-first, the missed
   bucket derived from absence, the amended marker), a roster that pre-accounts open
@@ -1998,10 +2183,12 @@ Resolve these as they come up; update this file when they do.
    fact nobody has been asked about, and whether a lab-negative refund has a default
    amount — it is case-by-case today.
 7. ~~Billing/rent — in scope?~~ **In scope, and broader than rent:** laundry, trips and
-   program fees all land on the same balance, and payment will come through Stripe. Still
-   open: what counts as "behind" (the roster deliberately does not colour a balance,
-   because that threshold is facility policy), whether residents see their own balance
-   before the resident app exists, and who may waive a fee.
+   program fees all land on the same balance, and payment comes through Stripe (built
+   2026-08-06). **"Behind" is now answered structurally**: an OPEN invoice, past its due
+   date, on a stay that still owes — with the record's red dot waiting seven days past that.
+   Still open: **who may waive a fee**, and whether residents see their own balance before
+   the resident app exists — though the RLS policies written for invoices already permit
+   exactly that read, so it is a UI decision rather than a schema one.
 8. Where does this deploy, and does that host offer managed Postgres? Encryption at rest
    and immutable audit logs both depend on the answer.
 

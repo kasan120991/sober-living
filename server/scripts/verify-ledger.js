@@ -8,6 +8,10 @@
 import { createApp } from '../src/app.js'
 import { prisma } from '../src/db/client.js'
 import { runAsSystem } from '../src/lib/dbContext.js'
+import { postEntry } from '../src/services/ledger.js'
+
+/** Cents to a plain dollar string, for assertion labels only. */
+const money = (c) => `$${(c / 100).toFixed(2)}`
 
 let pass = 0
 let fail = 0
@@ -166,6 +170,31 @@ async function main() {
     }),
   )
 
+  // The assertion above uses rejects(), which only proves SOMETHING threw —
+  // and that is exactly why a real bug hid behind it. Prisma 7's driver
+  // adapter stopped populating `meta.target`, so postEntry's duplicate
+  // detection silently stopped matching and callers got a 500 where CLAUDE.md
+  // promises "that payment has already been recorded". A webhook reading that
+  // as a failure retries forever. So: assert the STATUS, not just the throw.
+  try {
+    await postEntry(
+      {
+        stayId: castillo.stayId,
+        type: 'PAYMENT',
+        amountCents: 5000,
+        description: 'Card payment',
+        occurredAt: new Date(),
+        externalRef: ref,
+      },
+      anyEntry.recordedById,
+    )
+    bad('duplicate is a 409', 'the write was allowed')
+  } catch (err) {
+    err?.status === 409
+      ? ok('and it is a 409 "already recorded", not a 500 — what a webhook must see')
+      : bad('duplicate is a 409', `status ${err?.status}: ${err?.message}`)
+  }
+
   await rejects('a processor reference on a CHARGE is refused', () =>
     prisma.ledgerEntry.create({
       data: {
@@ -217,6 +246,177 @@ async function main() {
   leak[0].n === 0
     ? ok('audit rows carry ids only — no amounts, no descriptions')
     : bad('no detail in audit', leak[0].n)
+
+  // ── Invoicing ────────────────────────────────────────────────────────────
+  console.log('\n\x1b[1mInvoicing: the sweep and the snapshot\x1b[0m')
+
+  const sent = await manager(`/residents/${boone.id}/invoices`, {
+    method: 'POST',
+    body: {},
+  })
+  sent.status === 201
+    ? ok(`a manager sweeps a stay's unbilled lines into one invoice (${money(sent.body.totalCents)})`)
+    : bad('send invoice', `${sent.status} ${JSON.stringify(sent.body)}`)
+
+  const invoiceId = sent.body.id
+  const afterSend = (await manager(`/residents/${boone.id}/ledger`)).body
+  afterSend.unbilledCents === 0
+    ? ok('and nothing is left unbilled on that stay')
+    : bad('all swept', afterSend.unbilledCents)
+  afterSend.entries.some((e) => e.billed && e.invoice?.id === invoiceId)
+    ? ok('the ledger marks those lines billed, and names the invoice')
+    : bad('billed projection', 'no entry carries the invoice')
+
+  const nothingLeft = await manager(`/residents/${boone.id}/invoices`, {
+    method: 'POST',
+    body: {},
+  })
+  nothingLeft.status === 409
+    ? ok(`a second sweep with nothing unbilled is refused — "${nothingLeft.body?.error}"`)
+    : bad('empty sweep', nothingLeft.status)
+
+  // THE SNAPSHOT, proved three ways. CLAUDE.md warns the next reader will
+  // otherwise delete the invoice total as a violation of "the balance is
+  // derived" — it is a different fact, and these say so.
+  const beforeTotal = sent.body.totalCents
+  const beforeBalance = afterSend.balanceCents
+  await manager(`/residents/${boone.id}/ledger`, {
+    method: 'POST',
+    body: {
+      type: 'CREDIT',
+      amount: '30.00',
+      description: 'Adjustment after invoicing',
+    },
+  })
+  const afterCorrection = (await manager(`/residents/${boone.id}/ledger`)).body
+  const invAfter = await runAsSystem(async () =>
+    prisma.invoice.findUnique({ where: { id: invoiceId } }),
+  )
+  invAfter.totalCents === beforeTotal && afterCorrection.balanceCents !== beforeBalance
+    ? ok('a correction moves the BALANCE and leaves the invoice total untouched')
+    : bad('snapshot holds', `${beforeTotal} → ${invAfter.totalCents}`)
+  afterCorrection.unbilledCents === -3000
+    ? ok('and it lands UNBILLED, to flow onto the next invoice')
+    : bad('correction unbilled', afterCorrection.unbilledCents)
+
+  await runAsSystem(async () => {
+    await rejects('the invoice total cannot be updated — a snapshot, not a cache', () =>
+      prisma.invoice.update({ where: { id: invoiceId }, data: { totalCents: 1 } }),
+    )
+    await rejects('an invoice cannot be deleted — it is voided, with a reason', () =>
+      prisma.invoice.delete({ where: { id: invoiceId } }),
+    )
+    const line = await prisma.invoiceLine.findFirst({ where: { invoiceId } })
+    await rejects('an invoice line cannot be deleted — billed once, forever', () =>
+      prisma.invoiceLine.delete({ where: { id: line.id } }),
+    )
+    await rejects('the same ledger entry cannot be billed twice', () =>
+      prisma.invoiceLine.create({
+        data: { invoiceId, ledgerEntryId: line.ledgerEntryId },
+      }),
+    )
+  })
+
+  const owner2 = new (await import('pg')).default.Client({
+    connectionString: process.env.DATABASE_URL,
+  })
+  await owner2.connect()
+  await rejects('a SUPERUSER cannot move the total either — the trigger holds', () =>
+    owner2.query(`UPDATE "invoices" SET "totalCents" = 1 WHERE id = $1`, [invoiceId]),
+  )
+  await rejects('a PAYMENT cannot be billed as a line (trigger)', () =>
+    owner2.query(
+      `INSERT INTO "invoice_lines" ("id","invoiceId","ledgerEntryId")
+       SELECT 'verify-pay-line', $1, "id" FROM "ledger_entries"
+        WHERE "stayId" = $2 AND "type" = 'PAYMENT' LIMIT 1`,
+      [invoiceId, boone.stayId],
+    ),
+  )
+  await owner2.end()
+
+  const noBalanceCol = await runAsSystem(async () =>
+    prisma.$queryRawUnsafe(`
+      SELECT column_name FROM information_schema.columns
+       WHERE table_name = 'invoices' AND column_name ILIKE '%balance%'`),
+  )
+  noBalanceCol.length === 0
+    ? ok('and no balance column crept onto invoices — the total is a different fact')
+    : bad('no balance column', JSON.stringify(noBalanceCol))
+
+  // A resident with no email is ORDINARY — intake requires only a name — but
+  // Stripe's hosted invoicing cannot proceed without one. The rule is pure so
+  // it holds without a key, and so the dialog can refuse for the server's
+  // reason rather than a copy of it.
+  const { canHostInvoice } = await import('../src/services/invoices.js')
+  canHostInvoice({ email: 'a@b.test' }) &&
+  !canHostInvoice({ email: null }) &&
+  !canHostInvoice({ email: '   ' }) &&
+  !canHostInvoice(null)
+    ? ok('a resident with no email cannot be invoiced through Stripe — refused before anything is billed')
+    : bad('canHostInvoice', 'the email rule does not hold')
+
+  // ── Overdue ──────────────────────────────────────────────────────────────
+  console.log('\n\x1b[1mOverdue is derived\x1b[0m')
+
+  const castilloRecord = (await manager(`/residents/${castillo.residentId ?? castillo.id}`)).body
+  castilloRecord.current?.invoices?.overdue === true &&
+  castilloRecord.current?.invoices?.dotDue === true
+    ? ok('the seeded three-week-old invoice reads overdue, and past the 7-day dot grace')
+    : bad('overdue derived', JSON.stringify(castilloRecord.current?.invoices))
+
+  // Squaring the balance settles it WITHOUT touching the invoice — the clause
+  // that stops the dot burning forever on somebody who paid cash at the desk.
+  const owedBefore = castilloRecord.current.balanceCents
+  const invBeforePay = await runAsSystem(async () =>
+    prisma.invoice.findFirst({ where: { stayId: castilloRecord.current.stayId } }),
+  )
+  await manager(`/residents/${castillo.id}/ledger`, {
+    method: 'POST',
+    body: {
+      type: 'PAYMENT',
+      amount: String(owedBefore / 100),
+      description: 'Cash at the desk',
+    },
+  })
+  const afterPay = (await manager(`/residents/${castillo.id}`)).body
+  const invAfterPay = await runAsSystem(async () =>
+    prisma.invoice.findUnique({ where: { id: invBeforePay.id } }),
+  )
+  afterPay.current.invoices.overdue === false
+    ? ok('paying the balance clears overdue — cash at the desk counts, not only Stripe')
+    : bad('cash clears overdue', JSON.stringify(afterPay.current.invoices))
+  invAfterPay.status === invBeforePay.status && invAfterPay.paidAt === invBeforePay.paidAt
+    ? ok('and NOTHING was written to the invoice to do it — that is what derived means')
+    : bad('no invoice write', `${invBeforePay.status} → ${invAfterPay.status}`)
+
+  // ── What may reach Stripe ────────────────────────────────────────────────
+  console.log('\n\x1b[1mWhat may reach Stripe\x1b[0m')
+
+  const { stripeLineLabel, invoiceMetadata } = await import('../src/services/invoices.js')
+  const { LEDGER_CATEGORY, STRIPE_LINE_LABEL } = await import('../src/domain/constants.js')
+  const allowed = new Set(Object.values(STRIPE_LINE_LABEL))
+  const labels = Object.values(LEDGER_CATEGORY).map((c) =>
+    stripeLineLabel({ type: 'CHARGE', category: c, description: 'Rent, after the relapse' }),
+  )
+  labels.every((l) => allowed.has(l))
+    ? ok('every category maps to a fixed label — never the description a human typed')
+    : bad('labels fixed', JSON.stringify(labels))
+  !labels.some((l) => /relapse|lab|screen|test result|positive/i.test(l))
+    ? ok('and no label leaks a clinical inference — LAB_FEE reads "Testing fee"')
+    : bad('label leaks', JSON.stringify(labels))
+  const meta = invoiceMetadata({ invoiceId: 'a', stayId: 'b', residentId: 'c' })
+  Object.keys(meta).length === 3 && !JSON.stringify(meta).includes('@')
+    ? ok('metadata is opaque ids only')
+    : bad('metadata opaque', JSON.stringify(meta))
+
+  const sysLogin = await fetch(`${base}/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: 'stripe@system.soberlife', password: PW }),
+  })
+  sysLogin.status >= 400
+    ? ok('the Stripe system account cannot log in')
+    : bad('system user login', sysLogin.status)
 
   console.log(`\n\x1b[1mResult: ${pass} passed, ${fail} failed\x1b[0m\n`)
   server.close()

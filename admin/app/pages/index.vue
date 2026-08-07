@@ -19,12 +19,12 @@ import {
   ChevronDown,
   CircleDollarSign,
   CreditCard,
+  ReceiptText,
   DoorOpen,
   HandHeart,
   Plus,
   UserPlus,
 } from '@lucide/vue'
-import { isoDate } from '~/composables/useResidents.js'
 import {
   facilityDateNow,
   facilityTimeNow,
@@ -168,7 +168,8 @@ const attention = computed(() => {
       kind: 'Repair',
       title: r.title,
       chip: null,
-      meta: `${r.apartment.name} · reported ${humanDate(isoDate(r.reportedAt), { short: true })}`,
+      // facilityDateOf, not isoDate — see the balances panel below.
+      meta: `${r.apartment.name} · reported ${humanDate(facilityDateOf(r.reportedAt), { short: true })}`,
       to: `/apartments/${r.apartment.id}`,
     })),
   ]
@@ -191,6 +192,7 @@ const signOutOpen = ref(false)
 const serviceOpen = ref(false)
 const intakeOpen = ref(false)
 const paymentOpen = ref(false)
+const weeklyOpen = ref(false)
 
 const quietDay = computed(
   () => !attention.value.length && !signedOut.value.length && !balances.value.owing.length,
@@ -220,6 +222,12 @@ const quietDay = computed(
             </DropdownMenuItem>
             <DropdownMenuItem @click="paymentOpen = true">
               <CreditCard class="size-4" /> Record payment
+            </DropdownMenuItem>
+            <!-- The Friday run. A button rather than a cron: this app has no
+                 scheduler and is proud of it, and a bulk irreversible money
+                 action wants a person behind it anyway. -->
+            <DropdownMenuItem @click="weeklyOpen = true">
+              <ReceiptText class="size-4" /> Generate weekly invoices
             </DropdownMenuItem>
           </template>
         </DropdownMenuContent>
@@ -293,11 +301,19 @@ const quietDay = computed(
             <p class="text-2xl leading-tight font-semibold tracking-tight tabular-nums">
               {{ money(balances.totalCents) }}
             </p>
+            <!-- The beds-free card's split treatment: the total, then the part
+                 of it that is past due. A bare total hides the difference
+                 between owing and being late, which is the whole judgement. -->
             <p class="text-muted-foreground text-xs">
               <template v-if="balances.owing.length">
                 outstanding ·
-                <span class="tabular-nums">{{ balances.owing.length }}</span>
-                {{ balances.owing.length === 1 ? 'resident owes' : 'residents owe' }}
+                <span v-if="balances.overdueCents > 0" class="text-destructive font-medium tabular-nums">
+                  {{ money(balances.overdueCents) }} overdue
+                </span>
+                <template v-else>
+                  <span class="tabular-nums">{{ balances.owing.length }}</span>
+                  {{ balances.owing.length === 1 ? 'resident owes' : 'residents owe' }}
+                </template>
               </template>
               <template v-else>outstanding · nobody owes</template>
             </p>
@@ -401,9 +417,12 @@ const quietDay = computed(
             </div>
           </section>
 
-          <!-- Outstanding balances. "Outstanding", not "overdue" — a charge has
-               no due date until invoicing exists; this panel inherits the true
-               overdue meaning (and the red dot) when it does. -->
+          <!-- Outstanding balances. The panel KEEPS its name now that invoicing
+               exists — it is still the complete list, and overdue is a property
+               of some rows, not a different list. Overdue sorts first and takes
+               the Signed-out panel's destructive BADGE, deliberately not its
+               inset rule: the 2026-08-06 polish pass left exactly one inset on
+               this page so that inset means something. Considered, declined. -->
           <section v-if="balances.owing.length" class="bg-card rounded-md border">
             <div class="flex items-baseline gap-2 px-4 pt-3 pb-2">
               <h2 class="text-muted-foreground text-[10.5px] font-semibold tracking-[0.1em] uppercase">
@@ -424,11 +443,22 @@ const quietDay = computed(
               class="hover:bg-muted/50 flex min-h-14 items-center gap-3 border-t px-4 py-2.5"
             >
               <div class="min-w-0 flex-1">
-                <p class="text-sm font-semibold">{{ r.residentName }}</p>
+                <p class="flex items-center gap-2 text-sm font-semibold">
+                  {{ r.residentName }}
+                  <Badge v-if="r.overdue" variant="destructive" class="text-[10px]">
+                    {{ r.overdue.daysPastDue }}d overdue
+                  </Badge>
+                </p>
                 <p class="text-muted-foreground truncate text-xs">
                   {{ r.programName ?? 'No program' }} ·
                   <template v-if="r.lastPaymentAt">
-                    last payment {{ humanDate(isoDate(r.lastPaymentAt), { short: true }) }}
+                    <!-- facilityDateOf, NOT isoDate. isoDate slices UTC, so a
+                         payment taken at the desk after 8pm ET reads as
+                         "Tomorrow" — a last payment that has not happened yet.
+                         Any instant shown as a DATE has to cross the facility
+                         zone first; CLAUDE.md's rule, and this is what it
+                         looks like when it is broken. -->
+                    last payment {{ humanDate(facilityDateOf(r.lastPaymentAt), { short: true }) }}
                   </template>
                   <template v-else>no payments yet</template>
                 </p>
@@ -476,5 +506,6 @@ const quietDay = computed(
       default-type="PAYMENT"
       @posted="load"
     />
+    <AppWeeklyRunDialog v-if="canManage" v-model:open="weeklyOpen" @ran="load" />
   </AppPage>
 </template>

@@ -2,6 +2,7 @@ import { prisma } from '../db/client.js'
 import { LEDGER_ENTRY_TYPE, STAY_STATUS } from '../domain/constants.js'
 import { overdueApartmentChecks, unaccountedResidents } from './checks.js'
 import { balancesByStay } from './ledger.js'
+import { overdueByStay } from './invoices.js'
 import { urgentOpenWhere } from './maintenance.js'
 import { cohortCapacity, unhousedWithOptions } from './residents.js'
 import { scheduleWindow } from './schedule/read.js'
@@ -27,13 +28,14 @@ import { listSignOuts } from './signOuts.js'
 
 /**
  * Who owes money: every active stay with a positive derived balance, largest
- * first. "Outstanding", deliberately not "overdue" — a charge has no due date
- * and only an invoice will (module 11), so until invoicing exists the honest
- * claim is "owes", and this list is what inherits the overdue meaning later.
+ * first. "Outstanding" KEEPS its name now that invoicing exists: it is still
+ * the complete list, and overdue is a property of some rows rather than a
+ * different list. Overdue sorts to the top and carries a badge.
  *
  * The total is the sum of the rows beneath it, computed here so the card and
  * the list cannot drift apart. It is a sum of derived balances, never a stored
  * one — `verify-ledger.js` still asserts no balance column exists anywhere.
+ * `overdueCents` is the same sum over the overdue rows, for the card's split.
  */
 async function outstandingBalances() {
   const stays = await prisma.stay.findMany({
@@ -47,7 +49,7 @@ async function outstandingBalances() {
   if (!stays.length) return { totalCents: 0, owing: [] }
 
   const stayIds = stays.map((s) => s.id)
-  const [balances, lastPayments] = await Promise.all([
+  const [balances, lastPayments, overdue] = await Promise.all([
     balancesByStay(stayIds),
     // "Last payment Jul 18" is what turns a number into a judgement call a
     // manager can make at a glance — owing $500 having paid last week is a
@@ -57,6 +59,10 @@ async function outstandingBalances() {
       where: { stayId: { in: stayIds }, type: LEDGER_ENTRY_TYPE.PAYMENT },
       _max: { occurredAt: true },
     }),
+    // ONE grouped query, shared with the resident record — module 14's "no
+    // per-resident query loops on this read" rule, and the reason the record's
+    // red dot and this panel cannot disagree about who is overdue.
+    overdueByStay(stayIds),
   ])
   const lastPaymentByStay = new Map(lastPayments.map((r) => [r.stayId, r._max.occurredAt]))
 
@@ -67,11 +73,22 @@ async function outstandingBalances() {
       programName: s.program?.name ?? null,
       balanceCents: balances.get(s.id) ?? 0,
       lastPaymentAt: lastPaymentByStay.get(s.id) ?? null,
+      overdue: overdue.get(s.id) ?? null,
     }))
     .filter((r) => r.balanceCents > 0)
-    .sort((a, b) => b.balanceCents - a.balanceCents)
+    // Overdue first, then largest. Two keys rather than one because "owes the
+    // most" and "is past due" are different urgencies, and the second is the
+    // one with a date attached to it.
+    .sort(
+      (a, b) =>
+        Number(Boolean(b.overdue)) - Number(Boolean(a.overdue)) || b.balanceCents - a.balanceCents,
+    )
 
-  return { totalCents: owing.reduce((t, r) => t + r.balanceCents, 0), owing }
+  return {
+    totalCents: owing.reduce((t, r) => t + r.balanceCents, 0),
+    overdueCents: owing.reduce((t, r) => t + (r.overdue ? r.balanceCents : 0), 0),
+    owing,
+  }
 }
 
 export async function dashboard() {

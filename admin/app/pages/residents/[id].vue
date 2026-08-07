@@ -512,7 +512,13 @@ const maskedSsn = computed(() =>
                without a boundary here the pane would sit on the previous section
                until the ledger resolved. -->
           <Suspense v-if="resident.current">
-            <AppLedger :resident-id="resident.id" :can-post="isCurrent" @posted="load" />
+            <AppLedger
+              :resident-id="resident.id"
+              :can-post="isCurrent"
+              :resident-name="`${resident.firstName} ${resident.lastName}`"
+              :resident-email="resident.email ?? ''"
+              @posted="load"
+            />
             <template #fallback>
               <p class="text-muted-foreground text-sm">Loading the ledger…</p>
             </template>

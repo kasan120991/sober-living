@@ -346,8 +346,47 @@ export async function pushToStripe(invoiceId, entries) {
   })
 }
 
+/**
+ * Everything that can be known to fail BEFORE anything is billed.
+ *
+ * This matters more than it looks. Once `draftInvoice` commits, its lines are
+ * billed forever and a void does not give them back — so a failure after that
+ * point strands real charges on an invoice that may never send. Anything
+ * checkable belongs here, in front of the commit.
+ */
+async function preflight(stayId) {
+  if (!stripeEnabled()) return // A local-only invoice needs no email.
+  const stay = await prisma.stay.findUnique({
+    where: { id: stayId },
+    select: { resident: { select: { id: true, email: true } } },
+  })
+  if (!canHostInvoice(stay?.resident)) {
+    throw new HttpError(
+      409,
+      'Stripe needs an email address to host an invoice, and this resident has none on file. Add one to their record and send again.',
+    )
+  }
+}
+
+/**
+ * Can Stripe host an invoice for this resident?
+ *
+ * Stripe's hosted invoicing requires an email on the Customer, and only a NAME
+ * is required at intake — so a resident without one is ORDINARY, not an error
+ * state, and this has to read as a missing fact rather than a fault.
+ *
+ * Pure, so the rule is assertable without a Stripe key, and so the UI can
+ * disable the button for the same reason the server would refuse.
+ *
+ * @param {{ email?: string | null } | null | undefined} resident
+ */
+export function canHostInvoice(resident) {
+  return Boolean(resident?.email?.trim())
+}
+
 /** Draft, then push. The whole act, in the order that makes a crash survivable. */
 export async function sendInvoice(stayId, { dueAt }, actorId) {
+  await preflight(stayId)
   const { invoice, entries } = await draftInvoice(stayId, { dueAt }, actorId)
   if (!stripeEnabled()) return invoice // A local invoice is still a real one.
   return pushToStripe(invoice.id, entries)
@@ -404,7 +443,10 @@ export async function voidInvoice(invoiceId, reason) {
 export async function billableStays() {
   const stays = await prisma.stay.findMany({
     where: { status: STAY_STATUS.ACTIVE },
-    select: { id: true, resident: { select: { id: true, firstName: true, lastName: true } } },
+    select: {
+      id: true,
+      resident: { select: { id: true, firstName: true, lastName: true, email: true } },
+    },
   })
   if (stays.length === 0) return []
 
@@ -437,6 +479,11 @@ export async function billableStays() {
         stayId: stay.id,
         residentId: stay.resident.id,
         residentName: `${stay.resident.firstName} ${stay.resident.lastName}`,
+        // The EMAIL ITSELF never leaves the server — only whether there is one.
+        // The Friday run's preview has to be honest about which stays will
+        // fail, and a name beside an address is more disclosure than the
+        // question needs.
+        canInvoice: canHostInvoice(stay.resident),
         ...acc,
       }
     })

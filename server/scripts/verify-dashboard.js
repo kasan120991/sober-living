@@ -153,10 +153,32 @@ async function main() {
     ? ok('only positive balances make the list')
     : bad('non-positive row', JSON.stringify(d.balances.owing))
 
-  const sorted = [...d.balances.owing].sort((a, b) => b.balanceCents - a.balanceCents)
+  // TWO keys, not one. Overdue outranks size — "owes the most" and "is past
+  // due" are different urgencies and only the second has a date attached. In
+  // the seed the same resident happens to be both, so this asserts the RULE
+  // rather than the resulting order, which would pass by coincidence.
+  const sorted = [...d.balances.owing].sort(
+    (a, b) =>
+      Number(Boolean(b.overdue)) - Number(Boolean(a.overdue)) || b.balanceCents - a.balanceCents,
+  )
   JSON.stringify(sorted) === JSON.stringify(d.balances.owing)
-    ? ok('largest balance first')
+    ? ok('overdue first, then largest balance')
     : bad('owing order', JSON.stringify(d.balances.owing.map((x) => x.balanceCents)))
+
+  const overdueRows = d.balances.owing.filter((x) => x.overdue)
+  const overdueSum = overdueRows.reduce((t, x) => t + x.balanceCents, 0)
+  overdueSum === d.balances.overdueCents
+    ? ok(`the card's overdue split is the sum of its own rows (${overdueRows.length})`)
+    : bad('overdue split', `${overdueSum} vs ${d.balances.overdueCents}`)
+
+  // The panel and the record's red dot read ONE query. If these ever disagree
+  // it is because somebody added a second source of "who is overdue".
+  if (overdueRows.length) {
+    const rec = (await manager(`/residents/${overdueRows[0].residentId}`)).body
+    rec?.current?.invoices?.overdue
+      ? ok('and the resident record agrees — one grouped query behind both')
+      : bad('record agreement', JSON.stringify(rec?.current?.invoices))
+  }
 
   const roster = await tech('/residents')
   const rosterBalance = new Map((roster.body?.residents ?? []).map((x) => [x.id, x.balanceCents]))
