@@ -124,7 +124,11 @@ const balances = computed(() => data.value?.balances ?? { totalCents: 0, owing: 
 // server's order) with an overflow row pointing at the schedule board, while
 // unhoused residents and urgent repairs always all render — both are
 // structurally small, and hiding either is hiding a person or a hazard.
-const ROLLS_SHOWN = 5
+// Three, chosen 2026-08-06 — below the schedule board's own queue of four,
+// because this panel shares a column with two other kinds and the board does
+// not. The badge above still counts every situation, so nothing is hidden,
+// only deferred to the overflow row.
+const ROLLS_SHOWN = 3
 const attention = computed(() => {
   const a = data.value?.attention
   if (!a) return []

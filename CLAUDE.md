@@ -1266,6 +1266,13 @@ Decisions with teeth, each chosen explicitly:
   **Minus overdue sign-outs** (the Signed out panel is directly beneath; one situation
   should not be two rows) and **minus community service** (left out by request — the
   verification queue stays on `/service` and the rail's amber dot).
+  **Rolls are the one kind capped — at THREE (2026-08-06)**, with an overflow row
+  ("30 more rolls due → Schedule") carrying the rest. A house that has never taken a
+  roll owes a fortnight × two cohorts of them, and thirty roll rows bury the one urgent
+  repair. Unhoused residents and urgent repairs always render **in full**: both are
+  structurally small, and hiding either is hiding a person or a hazard. **The badge
+  counts SITUATIONS, not rendered rows** — the capped rolls are still true, and the
+  overflow row is navigation.
 - **The beds-free card shows one figure with the cohort split beside it** ("2 · 1 men,
   1 women") — the bare total alone would hide one side full while the other has room,
   which is the exact failure `cohortCapacity()`'s per-cohort shape exists to prevent.
