@@ -1,5 +1,6 @@
 import { prisma } from '../db/client.js'
 import { isUniqueViolationOn } from '../lib/http.js'
+import { facilityWallClockToUtc } from '../lib/facilityTime.js'
 import { HttpError } from '../middleware/authorize.js'
 import { LEDGER_ENTRY_TYPE, LEDGER_SIGN, STAY_STATUS } from '../domain/constants.js'
 
@@ -115,6 +116,30 @@ export async function listEntries(stayId) {
 }
 
 /**
+ * The instant to store for `occurredAt`, which is a DATE wearing a DateTime.
+ *
+ * A bare 'YYYY-MM-DD' from the form is a FACILITY calendar date, and
+ * `new Date('2026-08-06')` reads it as UTC midnight — which is 8pm on the 5th
+ * in New York. So an entry a manager dated the 6th was stored as, and read
+ * back as, the 5th. It is anchored at facility NOON instead: far enough from
+ * either midnight that the stored instant falls on the intended day whether it
+ * is later read on the facility clock or in UTC, which is what stops this
+ * drifting back the next time somebody reaches for the wrong helper. Noon is
+ * also the convention the seed already uses.
+ *
+ * A real instant (Stripe's `paid_at`) is left exactly as it is — that is a
+ * moment, not a calendar date, and `facilityDateOf` renders it on the right
+ * day already.
+ */
+export function occurredAtInstant(value) {
+  if (!value) return new Date()
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
+    return facilityWallClockToUtc(value.trim(), '12:00')
+  }
+  return new Date(value)
+}
+
+/**
  * Post a line. The only write this module has.
  *
  * @param {object} input
@@ -171,7 +196,7 @@ export async function postEntry(input, actorId) {
         category,
         amountCents,
         description: description.trim(),
-        occurredAt: occurredAt ? new Date(occurredAt) : new Date(),
+        occurredAt: occurredAtInstant(occurredAt),
         correctsId,
         externalRef,
         recordedById: actorId,

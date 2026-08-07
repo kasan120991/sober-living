@@ -409,6 +409,27 @@ async function main() {
     ? ok('metadata is opaque ids only')
     : bad('metadata opaque', JSON.stringify(meta))
 
+  // A date the manager typed is a FACILITY calendar date. Pinned as a pure
+  // check because the failure is invisible for most of the day: it only shows
+  // up in the evening, when UTC has already rolled over and the facility has
+  // not. `new Date('2026-08-06')` is UTC midnight, which is the 5th in New
+  // York — so both directions are asserted, or a regression to the naive
+  // parse would still pass the first one.
+  const { occurredAtInstant } = await import('../src/services/ledger.js')
+  const { facilityToday } = await import('../src/lib/facilityTime.js')
+  facilityToday(occurredAtInstant('2026-08-06')) === '2026-08-06' &&
+  facilityToday(new Date('2026-08-06')) === '2026-08-05'
+    ? ok('a hand-typed ledger date is read on the facility clock, not as UTC midnight')
+    : bad('occurredAt date', facilityToday(occurredAtInstant('2026-08-06')))
+
+  // 11pm ET on the 6th is already the 7th in UTC. A real instant must keep its
+  // own facility day rather than being re-anchored to a calendar date.
+  const lateEvening = new Date('2026-08-07T03:00:00Z')
+  occurredAtInstant(lateEvening).getTime() === lateEvening.getTime() &&
+  facilityToday(occurredAtInstant(lateEvening)) === '2026-08-06'
+    ? ok("a payment's own instant passes through untouched and keeps its facility day")
+    : bad('occurredAt instant', occurredAtInstant(lateEvening).toISOString())
+
   const sysLogin = await fetch(`${base}/auth/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

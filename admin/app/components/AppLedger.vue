@@ -7,8 +7,14 @@
 //
 // Nothing here edits or deletes: the database refuses both. A mistake is
 // corrected by posting an entry that points at the one it fixes.
+// Dates here go through facilityDateOf, NEVER isoDate. Every date this section
+// shows is an INSTANT underneath — `occurredAt` defaults to the moment the
+// entry was typed, and `dueAt` to the moment the invoice was sent. isoDate
+// slices UTC, so a charge posted at 9pm ET was dated tomorrow and an invoice
+// sent that evening claimed to be due a day later than it is. Same rule, and
+// the same bug, as the dashboard's `lastPaymentAt`.
 import { ExternalLink, Plus, Send } from '@lucide/vue'
-import { isoDate } from '~/composables/useResidents.js'
+import { facilityDateOf } from '~/utils/facilityTime.js'
 import { money, inCredit, categoryLabel } from '~/utils/money.js'
 import { invoiceStatusDisplay } from '~/utils/invoices.js'
 import { toneClass } from '~/utils/schedule.js'
@@ -121,7 +127,7 @@ async function onPosted() {
       </span>
       <span class="text-muted-foreground">
         · invoice {{ overdue.number ?? '—' }} for {{ money(overdue.totalCents) }} was due
-        {{ isoDate(overdue.dueAt) }}
+        {{ facilityDateOf(overdue.dueAt) }}
       </span>
       <a
         v-if="overdue.hostedUrl"
@@ -154,7 +160,7 @@ async function onPosted() {
           <tbody>
             <tr v-for="e in entries" :key="e.id" class="bg-card">
               <td class="h-12 border-b px-3 tabular-nums whitespace-nowrap">
-                {{ isoDate(e.occurredAt) }}
+                {{ facilityDateOf(e.occurredAt) }}
               </td>
               <td class="h-12 max-w-[38ch] truncate border-b px-3">
                 {{ e.description }}
@@ -218,7 +224,7 @@ async function onPosted() {
         >
           <span class="font-medium tabular-nums">{{ i.number ?? 'Not sent' }}</span>
           <span class="text-muted-foreground tabular-nums">
-            {{ money(i.totalCents) }} · due {{ isoDate(i.dueAt) }}
+            {{ money(i.totalCents) }} · due {{ facilityDateOf(i.dueAt) }}
           </span>
           <Badge
             variant="outline"

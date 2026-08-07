@@ -1214,6 +1214,28 @@ Stripe: a resident who pays $800 cash at the desk clears the dot even though Str
 hears, because without that clause the dot burns forever on somebody who is square and
 staff learn it lies.
 
+**`occurredAt` is a DATE wearing a DateTime, and it is anchored at facility NOON**
+(fixed 2026-08-07). The schema always said it is "the date the line applies to", but a
+bare `'2026-08-06'` from the form was parsed with `new Date()` — UTC midnight, which is
+8pm on the *5th* in New York. So an entry a manager dated the 6th was stored as, and read
+back as, the 5th. `occurredAtInstant()` in `services/ledger.js` reads it through
+`facilityWallClockToUtc(date, '12:00')` instead; a genuine instant (Stripe's `paid_at`)
+passes through untouched, because that is a moment rather than a calendar date.
+
+Noon is the load-bearing part, not an arbitrary pick: it is far enough from **either**
+midnight that the stored instant lands on the intended day whether it is later read on the
+facility clock or sliced in UTC. That is what stops this drifting back the next time
+somebody reaches for the wrong helper — and it is the convention the seed already used.
+
+The display half moved with it: the ledger section renders every date through
+**`facilityDateOf`, never `isoDate`**, and `AppLedgerEntryDialog`'s date box prefills
+`facilityDateNow()` rather than a UTC slice — after 8pm ET it offered **tomorrow**, and a
+manager pressing Save wrote that date into a table nothing can ever update. The general
+rule this settles, worth knowing before touching any date in this app: **a `@db.Date`
+column takes `isoDate`** (`ServiceEntry.workedOn` is the precedent, and `facilityDateOf`
+would be *wrong* on it); **a DateTime instant takes `facilityDateOf`**. Getting those two
+backwards is the same bug the dashboard's `lastPaymentAt` had.
+
 **The weekly run is a BUTTON, not a cron** (facility, 2026-08-06). Every Friday staff press
 *Generate weekly invoices* — a Quick action on the dashboard, managers only — which bills
 every **active** stay whose unbilled lines net positive. Discharged stays are skipped, since
@@ -1902,13 +1924,14 @@ Two verification suites, both run against a live database:
   bed moves, discharge, the SSN read restriction, the notification bell, and search.
   Includes the cohort-mismatch 409 and a tech's 403 on bed assignment — the pair the
   census board's free-tile placement rests on
-- `node scripts/verify-ledger.js` — **47 assertions** on derived balances, invoicing, the
+- `node scripts/verify-ledger.js` — **49 assertions** on derived balances, invoicing, the
   append-only guards, dollar-to-cent parsing, and processor-reference idempotency.
   Includes the invoice **snapshot proved three ways**, a duplicate webhook returning
   **200 with one PAYMENT**, overdue flipping on a cash payment **with no write to the
   invoice**, `stripeLineLabel` exhaustively over the whole enum, and the rule that a
   resident with **no email cannot be invoiced through Stripe** — refused before anything
-  is billed, so no draft is stranded
+  is billed, so no draft is stranded. Two pin `occurredAt` on the facility clock, in
+  **both** directions, since a regression to the naive parse still passes a one-way check
 - `node scripts/verify-census.js` — 12 assertions on the census read: derived occupancy,
   the figures row, the three tile states, and the staff-only gate
 - `node scripts/verify-realtime.js` — 14 assertions on the invalidation socket: the

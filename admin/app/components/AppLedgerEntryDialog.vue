@@ -9,6 +9,7 @@
 // It fetches nothing. POST /residents/:id/ledger resolves the active stay
 // server-side, so there is no reason to load a ledger to append one line to it.
 import { money, inCredit, LEDGER_TYPES, LEDGER_CATEGORIES } from '~/utils/money.js'
+import { facilityDateNow } from '~/utils/facilityTime.js'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -39,7 +40,10 @@ const blank = () => ({
   category: props.defaultType === 'CHARGE' ? 'RENT' : null,
   amount: '',
   description: '',
-  occurredAt: new Date().toISOString().slice(0, 10),
+  // The facility's today, not UTC's. toISOString() slices the UTC date, so
+  // after 8pm ET this box prefilled TOMORROW — and a manager pressing Save
+  // wrote that date into a table nothing can update afterwards.
+  occurredAt: facilityDateNow(),
 })
 const form = reactive(blank())
 const pickedResidentId = ref('')
