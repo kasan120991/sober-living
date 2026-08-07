@@ -127,6 +127,8 @@ export const AUDITED_MODELS = Object.freeze([
   'ApartmentCheck',
   'ApartmentCheckResident',
   'DrugScreen',
+  'Invoice',
+  'InvoiceLine',
   // Facility configuration
   'Apartment',
   'Bed',
@@ -174,6 +176,11 @@ export const SOFT_DELETE_MODELS = Object.freeze([
   // amendment like both, but keeps a scoped UPDATE grant for the confirmation
   // arc, because the resident's decision and the lab's result are later facts
   // about the same screen rather than edits to it.
+  //
+  // Invoice and InvoiceLine are absent as well. An invoice is VOIDED, never
+  // deleted — a sent demand for money is evidence that it was sent — and an
+  // invoice line is append-only outright: a charge is billed exactly once,
+  // forever, which is what stops a void from quietly re-billing anybody.
 ])
 
 /// Presence on the census board. DERIVED from a sign-out's returnedAt and
@@ -208,6 +215,66 @@ export const CHECK_STATE = Object.freeze({
   /// History only: an elapsed hour bucket with no check.
   MISSED: 'MISSED',
 })
+
+/// An invoice's state, mirroring Stripe's. Matches `InvoiceStatus` in
+/// schema.prisma. There is deliberately no OVERDUE: that is `dueAt` against a
+/// clock, derived on read like PRESENCE and CHECK_STATE.
+export const INVOICE_STATUS = Object.freeze({
+  DRAFT: 'DRAFT',
+  OPEN: 'OPEN',
+  PAID: 'PAID',
+  VOID: 'VOID',
+  UNCOLLECTIBLE: 'UNCOLLECTIBLE',
+})
+
+/**
+ * How long a past-due invoice waits before the resident record's RED DOT
+ * lights (facility policy, 2026-08-06).
+ *
+ * Invoices are due ON RECEIPT, so an unpaid one is past due the next day —
+ * that is the arithmetic, and it is what the invoice itself says. This is the
+ * ALARM, and it is deliberately slower: OVERDUE_GRACE_MS's exact idiom, where
+ * grace delays the shouting without moving the deadline. A dot that lit the
+ * morning after every invoice would light on nearly everyone, which is the
+ * noise module 11 predicted and refused to ship.
+ */
+export const INVOICE_DOT_GRACE_DAYS = 7
+
+/**
+ * What a line on a Stripe invoice is allowed to SAY.
+ *
+ * Derived from the category, NEVER from the ledger's own description. A
+ * description is unreviewed free text a manager typed into a box — it can say
+ * "Rent, after the relapse" — and sending it verbatim would ship arbitrary
+ * prose about somebody in a SUD program to a third party and every
+ * subprocessor downstream.
+ *
+ * LAB_FEE is the sharpest case: "Lab confirmation fee" on a sober living
+ * facility's Stripe account narrows to *this person had a non-negative
+ * screen*. The clearance of 2026-08-06 covers identity, not clinical
+ * inference. "Testing fee" names a real service and implies no outcome.
+ *
+ * A fixed set is also what makes the rule TESTABLE — verify-ledger.js asserts
+ * over the whole enum. "Be careful what you type" is not a rule.
+ */
+export const STRIPE_LINE_LABEL = Object.freeze({
+  RENT: 'Rent',
+  LAUNDRY: 'Laundry',
+  TRIP: 'Activity fee',
+  PROGRAM_FEE: 'Program fee',
+  DAMAGE: 'Property repair',
+  LAB_FEE: 'Testing fee',
+  OTHER: 'Program charge',
+})
+
+/// The account this facility bills in. One place, so nothing hardcodes 'usd'.
+export const INVOICE_CURRENCY = 'usd'
+
+/// The account a Stripe webhook's ledger writes are attributed to. It exists
+/// because `recordedById` is NOT NULL and no human posted the row — and it is
+/// honest: attributing a card payment to whoever sent the invoice would put
+/// their name on money they never touched.
+export const STRIPE_SYSTEM_EMAIL = 'stripe@system.soberlife'
 
 /// The outcome of a drug screen — the cup's, and later the lab's. Matches the
 /// `ScreenResult` enum in schema.prisma.

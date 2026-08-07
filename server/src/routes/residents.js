@@ -3,7 +3,7 @@ import { z } from 'zod'
 
 import { handler, parseBody } from '../lib/http.js'
 import { HttpError, requireAuth, requireRole, requireStaff } from '../middleware/authorize.js'
-import { STAFF_ROLE } from '../domain/constants.js'
+import { LEDGER_CATEGORY, LEDGER_ENTRY_TYPE, STAFF_ROLE } from '../domain/constants.js'
 import {
   addContact,
   availableBeds,
@@ -23,6 +23,7 @@ import {
 import { activeStayIdFor, listEntries, postEntry } from '../services/ledger.js'
 import { residentChecks } from '../services/checks.js'
 import { residentScreens } from '../services/screens.js'
+import { residentInvoiceRoutes } from './invoices.js'
 import { residentSchedule } from '../services/schedule/read.js'
 // Aliased: the ledger exports a listEntries too, and this file imports both.
 import {
@@ -132,8 +133,13 @@ const dollarsToCents = z
   })
 
 const ledgerBody = z.object({
-  type: z.enum(['CHARGE', 'PAYMENT', 'CREDIT']),
-  category: z.enum(['RENT', 'LAUNDRY', 'TRIP', 'PROGRAM_FEE', 'DAMAGE', 'OTHER']).optional().nullable(),
+  type: z.enum(Object.values(LEDGER_ENTRY_TYPE)),
+  // DERIVED from the frozen constant, not written out again. The hand-written
+  // list here silently omitted LAB_FEE when module 5 added it, so the dialog
+  // offered "Lab fee" and the server answered "Invalid category" — nobody could
+  // hand-post or correct one. Deriving it is what the frozen-constant
+  // convention is FOR: the next value cannot drift.
+  category: z.enum(Object.values(LEDGER_CATEGORY)).optional().nullable(),
   amount: dollarsToCents,
   description: z.string().trim().min(1).max(300),
   occurredAt: iso.optional().nullable(),
@@ -313,6 +319,11 @@ router.get(
   '/:id/screens',
   handler(async (req, res) => res.json(await residentScreens(req.params.id))),
 )
+
+// ── Invoices ──────────────────────────────────────────────────────────────
+// Read is all-staff like the ledger's; sending is managers. Mounted from
+// routes/invoices.js so the invoice rules live in one file.
+residentInvoiceRoutes(router)
 
 // ── Fee ledger ────────────────────────────────────────────────────────────
 // Read is open to any staff member: a tech asked "what do I owe" at the door

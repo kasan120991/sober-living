@@ -25,6 +25,8 @@ import serviceRouter from './routes/service.js'
 import checksRouter from './routes/checks.js'
 import screensRouter from './routes/screens.js'
 import staffRouter from './routes/staff.js'
+import invoicesRouter from './routes/invoices.js'
+import stripeWebhookRouter from './routes/stripeWebhook.js'
 
 export function createApp() {
   const app = express()
@@ -40,6 +42,16 @@ export function createApp() {
   // the Socket.IO server — see lib/origins.js.
   app.use(cors({ origin: corsOrigins(), credentials: true }))
 
+  // Stripe signs the EXACT bytes it sent, so its webhook needs the raw buffer.
+  // express.json parses and discards them, and a signature checked against a
+  // re-serialised object is a check against a different string.
+  //
+  // Path-scoped and ABOVE the global parser: body-parser sets `req._body` once
+  // a body has been read, and every other body-parser skips a request carrying
+  // it — so the JSON parser below leaves this one route alone by construction.
+  // Rejected the alternative, express.json({ verify }), because it would
+  // buffer a copy of EVERY request body in the process to serve one URL.
+  app.use('/stripe/webhook', express.raw({ type: 'application/json', limit: '1mb' }))
   app.use(express.json({ limit: '1mb' }))
   app.use(cookieParser())
 
@@ -62,6 +74,13 @@ export function createApp() {
     next()
   })
   app.use(requestContextMiddleware)
+
+  // ABOVE sessionMiddleware, deliberately: the webhook has no cookie, and
+  // mounting it here makes "this route is not session-authenticated"
+  // structural rather than incidental — no forged cookie can establish an
+  // actor for it. Its signature check is its authentication.
+  app.use('/stripe/webhook', stripeWebhookRouter)
+
   app.use(sessionMiddleware)
   // After the session: what the database may show is derived from the verified
   // session, never from the request.
@@ -86,6 +105,7 @@ export function createApp() {
   app.use('/checks', checksRouter)
   app.use('/screens', screensRouter)
   app.use('/staff', staffRouter)
+  app.use('/invoices', invoicesRouter)
 
   app.use(notFound)
   app.use(errorHandler)

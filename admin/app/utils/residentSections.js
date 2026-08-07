@@ -141,5 +141,10 @@ export function sectionDots(resident) {
   const dots = {}
   if (resident?.current?.service?.behind) dots.service = SECTION_DOT.WARNING
   if (resident?.current?.checks?.notAccounted) dots.checks = SECTION_DOT.CRITICAL
+  // Balance-overdue, which module 1 said would JOIN red once invoicing gave a
+  // charge a due date. It has (2026-08-06). Note `dotDue`, not `overdue`: an
+  // invoice is past due the day after it is sent, and the dot waits a week —
+  // grace delays the alarm, not the arithmetic.
+  if (resident?.current?.invoices?.dotDue) dots.ledger = SECTION_DOT.CRITICAL
   return dots
 }

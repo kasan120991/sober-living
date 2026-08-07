@@ -3,6 +3,7 @@ import { HttpError } from '../middleware/authorize.js'
 import { STAY_STATUS } from '../domain/constants.js'
 import { balancesByStay, balanceOfStay } from './ledger.js'
 import { residentCheckStatus } from './checks.js'
+import { stayInvoiceSummary } from './invoices.js'
 import { serviceSummary } from './communityService.js'
 import { STAFF_ROLE } from '../domain/constants.js'
 
@@ -158,6 +159,10 @@ export async function getResident(id, { viewerRole } = {}) {
           // by the same helper the bell's RESIDENT_NOT_ACCOUNTED item uses —
           // one knob, so the record and the bell cannot disagree.
           checks: await residentCheckStatus(current.id),
+          // What lights the LEDGER section's red dot. Derived through the same
+          // helper the dashboard reads, so the record and the dashboard cannot
+          // disagree about who is overdue — the module 4 pattern.
+          invoices: await stayInvoiceSummary(current.id),
           stayId: current.id,
           intakeAt: current.intakeAt,
           expectedDischargeAt: current.expectedDischargeAt,

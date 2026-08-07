@@ -43,6 +43,23 @@ async function main() {
     }),
   ])
 
+  // The dormant account that owns machine-written ledger rows — a Stripe
+  // webhook has no human behind it, and `recordedById` is NOT NULL. isActive
+  // false, so login refuses it before a password is ever compared. Upserted
+  // rather than created because reset.js keeps non-.test accounts and this one
+  // must survive a reseed.
+  const stripeUser = await prisma.user.upsert({
+    where: { email: 'stripe@system.soberlife' },
+    update: {},
+    create: {
+      email: 'stripe@system.soberlife',
+      passwordHash: 'x',
+      fullName: 'Stripe (automated)',
+      role: 'STAFF',
+      isActive: false,
+    },
+  })
+
   // Phase privileges are deliberately left null — facility policy, not ours to
   // invent. See CLAUDE.md.
   // Orientation is level 0: the restricted first stretch before Phase 1. It is a
@@ -314,6 +331,84 @@ async function main() {
       recordedById: manager.id,
     },
   })
+
+  // ── Invoices ──────────────────────────────────────────────────────────────
+  // Two invoices with different fates, so a fresh seed shows both halves of
+  // module 11: one PAID (with the payment that settled it), and one long past
+  // due — old enough to be past the 7-day dot grace, so the resident record's
+  // red dot and the dashboard's overdue badge have something real to render.
+  // Everyone else's charges stay unbilled, which is what the Send invoice and
+  // the Friday weekly-run buttons act on.
+  const invoiceFor = async (stayId, { daysAgo, paid }) => {
+    const issued = new Date(Date.now() - daysAgo * 24 * 3_600_000)
+    const billable = await prisma.ledgerEntry.findMany({
+      where: { stayId, type: { in: ['CHARGE', 'CREDIT'] }, invoiceLine: { is: null } },
+      orderBy: { occurredAt: 'asc' },
+      take: 2,
+    })
+    if (!billable.length) return null
+    const total = billable.reduce(
+      (t, e) => t + (e.type === 'CHARGE' ? e.amountCents : -e.amountCents),
+      0,
+    )
+    if (total <= 0) return null
+    // Follows the REAL arc rather than short-cutting it: lines may only be
+    // added while an invoice is DRAFT (a line appended after finalization
+    // would make totalCents stop matching what is beneath it), and the status
+    // only ever moves forwards. The seed going through the same doors as the
+    // app is what makes it a trustworthy fixture.
+    const draft = await prisma.invoice.create({
+      data: {
+        stayId,
+        totalCents: total,
+        // Due on receipt, so the issue date is the due date.
+        dueAt: issued,
+        createdAt: issued,
+        sentById: manager.id,
+        lines: { create: billable.map((e) => ({ ledgerEntryId: e.id })) },
+      },
+    })
+
+    const open = await prisma.invoice.update({
+      where: { id: draft.id },
+      data: {
+        status: 'OPEN',
+        // Seed-shaped and unique: obviously not a real Stripe id.
+        stripeInvoiceId: `in_seed_${stayId.slice(-8)}_${daysAgo}`,
+        number: `SL-${1000 + daysAgo}`,
+        hostedUrl: `https://invoice.stripe.com/i/seed_${stayId.slice(-8)}`,
+        issuedAt: issued,
+        finalizedAt: issued,
+      },
+    })
+    if (!paid) return open
+
+    return prisma.invoice.update({
+      where: { id: draft.id },
+      data: { status: 'PAID', paidAt: new Date(issued.getTime() + 2 * 24 * 3_600_000) },
+    })
+  }
+
+  // Paid: Whitfield's, settled two days after it was sent.
+  const paidInvoice = await invoiceFor(byLast('Whitfield'), { daysAgo: 30, paid: true })
+  if (paidInvoice) {
+    await prisma.ledgerEntry.create({
+      data: {
+        stayId: byLast('Whitfield'),
+        type: 'PAYMENT',
+        amountCents: paidInvoice.totalCents,
+        description: 'Card payment',
+        occurredAt: paidInvoice.paidAt,
+        // What a real webhook would have written, recorded by the machine
+        // account rather than by a person who never touched the money.
+        externalRef: `stripe_pi_seed_${byLast('Whitfield').slice(-8)}`,
+        recordedById: stripeUser.id,
+      },
+    })
+  }
+
+  // Overdue by three weeks, so it is well past the dot's 7-day grace.
+  await invoiceFor(byLast('Castillo'), { daysAgo: 21, paid: false })
 
   // ── Sign-outs ─────────────────────────────────────────────────────────────
   // Relative times, because seed runs at arbitrary wall-clock moments: one
@@ -882,6 +977,7 @@ async function main() {
     ${await prisma.apartmentCheck.count()} apartment checks (men's CHECKED with 1 not found, women's OVERDUE, 1 missed hour, 1 amended)
     ${await prisma.drugScreen.count()} drug screens (1 negative, 1 awaiting the resident's decision, 1 declined, 1 at the lab, 1 lab-cleared after paying)
     ${await prisma.ledgerEntry.count()} ledger entries (rent, laundry, a trip, a damage, one credit)
+    ${await prisma.invoice.count()} invoices (1 paid, 1 three weeks overdue — past the dot's grace), the rest unbilled
     ${await prisma.scheduleEvent.count()} scheduled events (5 weekly, 1 one-off; 2 of them both cohorts), ${await prisma.scheduleOccurrence.count()} occurrences
     ${await prisma.scheduleAttendance.count()} attendance marks on 2 taken rolls (one of them shared) — earlier days left un-taken on purpose
 

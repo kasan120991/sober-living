@@ -212,6 +212,21 @@ enum ConfirmationStatus {
   RETURNED
 }
 
+/// An invoice's state, MIRRORING STRIPE's own. It deliberately has no OVERDUE
+/// member: overdue is `dueAt < now` and a clock, which is derived on read like
+/// PRESENCE and CHECK_STATE. A stored OVERDUE would need something to flip it
+/// and would lie the minute that something lagged.
+enum InvoiceStatus {
+  /// Ours, not Stripe's: swept and totalled locally, not yet sent. A crash
+  /// between the local write and Stripe leaves an invoice here, which is a
+  /// recoverable state rather than a lost charge.
+  DRAFT
+  OPEN
+  PAID
+  VOID
+  UNCOLLECTIBLE
+}
+
 enum CheckResidentStatus {
   /// Seen on site. What they were doing is REQUIRED (CHECK in the migration).
   PRESENT
@@ -356,6 +371,20 @@ model Resident {
   phone       String?
   email       String?
 
+  /// The Stripe Customer for this PERSON, created lazily on their first
+  /// invoice and never at intake.
+  ///
+  /// Per resident rather than per stay, although money belongs to the stay
+  /// everywhere else here: a Stripe Customer models a person, holds their
+  /// saved payment method, and should survive a readmission. Per-stay would
+  /// make a returning resident TWO named people in the Stripe dashboard —
+  /// a second, redundant disclosure of the same protected fact. Episode
+  /// separation is carried by `metadata.stayId`, an opaque id, instead.
+  ///
+  /// UNIQUE so a race between two managers pressing Send cannot quietly
+  /// create two Customers and double the disclosure.
+  stripeCustomerId String? @unique
+
   /// The LAST FOUR DIGITS ONLY. Never the full number — a facility has no use
   /// for one, and holding it turns a records breach into an identity-theft
   /// breach. Four digits is what a referral source or a lab asks for to confirm
@@ -446,6 +475,7 @@ model Stay {
 
   bedAssignments BedAssignment[]
   ledgerEntries  LedgerEntry[]
+  invoices       Invoice[]
   signOuts       SignOut[]
 
   scheduleAttendees   ScheduleAttendee[]
@@ -593,6 +623,17 @@ model LedgerEntry {
   /// The screen owns the link; this is only its other end. A LIST rather than
   /// one, because an amended screen's versions all point at the one charge.
   screenCharges DrugScreen[] @relation("screenCharges")
+
+  /// Whether this line has been billed — and note it is a RELATION, not a
+  /// column. Marking a line billed would be an UPDATE, and this table refuses
+  /// those by trigger AND by revoked privilege; "unbilled" is therefore the
+  /// ABSENCE of a row here, which is a read. Module 11 chose this deliberately
+  /// over relaxing the trigger for "just one column, only null → value".
+  ///
+  /// One-to-ONE only because invoice_lines is unique on ledgerEntryId — which
+  /// is also what lets the ledger read project `billed` in one query instead
+  /// of one per row.
+  invoiceLine InvoiceLine?
 
   createdAt DateTime @default(now())
   // Deliberately no updatedAt and no deletedAt. Nothing here is ever updated or
@@ -1018,6 +1059,105 @@ model ApartmentCheck {
   @@map("apartment_checks")
 }
 
+/// A demand for money: the unbilled lines of a stay, swept and sent.
+///
+/// Module 11's second half. A charge is UNBILLED until an invoice sweeps it,
+/// and "unbilled" is the absence of an `invoice_lines` row — never a column on
+/// the ledger, which refuses updates outright.
+///
+/// `totalCents` IS A SNAPSHOT, NOT A CACHED BALANCE, and the difference is the
+/// whole reason this table may hold a total at all while CLAUDE.md forbids
+/// storing a balance. A balance is recomputed; this one CANNOT be — the
+/// migration's whitelist leaves `totalCents` outside the UPDATE grant, so
+/// nothing, including a psql session, can move what was billed on the day it
+/// was sent. A later correction lands on the LEDGER and flows onto the next
+/// invoice; it never edits this one.
+model Invoice {
+  id     String @id @default(uuid(7))
+  stayId String
+  stay   Stay   @relation(fields: [stayId], references: [id])
+
+  /// The sum of the lines beneath it, in integer cents, at the moment of
+  /// sending. Charges add; credits subtract; the net must be positive, because
+  /// an invoice for nothing is a document nobody meant to create.
+  totalCents Int
+
+  /// Due ON RECEIPT (facility policy, 2026-08-06) — so this is the issue date
+  /// in practice. The record's red dot deliberately waits INVOICE_DOT_GRACE_DAYS
+  /// past it: the invoice is past due immediately, the app shouts after a week.
+  /// Grace delays the alarm, not the arithmetic — the OVERDUE_GRACE_MS idiom.
+  dueAt DateTime
+
+  status InvoiceStatus @default(DRAFT)
+
+  /// Stripe's own ids and page. Null while DRAFT — an invoice Stripe has never
+  /// seen. Unique so one local invoice can never bind to two Stripe invoices.
+  stripeInvoiceId String? @unique
+  number          String? @unique
+  hostedUrl       String?
+
+  issuedAt    DateTime?
+  finalizedAt DateTime?
+  paidAt      DateTime?
+  voidedAt    DateTime?
+  /// Required on a void. Voiding strands its lines permanently — they are
+  /// never re-billable — so it says why.
+  voidReason  String?
+
+  sentById String
+  sentBy   User   @relation("sentInvoices", fields: [sentById], references: [id])
+
+  lines InvoiceLine[]
+
+  createdAt DateTime @default(now())
+  // No updatedAt and no deletedAt: an invoice is VOIDED, never deleted, and
+  // every lifecycle fact already carries its own clock.
+
+  @@index([stayId, createdAt(sort: Desc)])
+  /// The overdue read's whole predicate.
+  @@index([status, dueAt])
+  @@map("invoices")
+}
+
+/// The link that makes a ledger line billed — its own append-only table
+/// precisely so `ledger_entries` never takes an UPDATE.
+///
+/// Deliberately carries NO amount: the amount lives on the ledger entry, and a
+/// copy here would be a second source of truth for the same cent. The invoice's
+/// total is the one permitted copy, and only because the SUM must not move.
+model InvoiceLine {
+  id        String  @id @default(uuid(7))
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id])
+
+  /// UNIQUE, and it does three jobs: a charge cannot be billed twice; two
+  /// managers pressing Send at the same instant produce one invoice and one
+  /// 409 rather than a double bill; and it is what makes the back-relation
+  /// 1:1 so the ledger read can project `billed` without an N+1.
+  ledgerEntryId String      @unique
+  ledgerEntry   LedgerEntry @relation(fields: [ledgerEntryId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([invoiceId])
+  @@map("invoice_lines")
+}
+
+/// Every Stripe event we have already handled.
+///
+/// Webhooks are delivered AT LEAST ONCE. `LedgerEntry.externalRef` already
+/// makes a duplicated payment impossible, but that only protects the one
+/// handler that writes a payment — a replayed `invoice.voided` would otherwise
+/// be a second UPDATE. Four columns make every handler idempotent instead of
+/// only the lucky one.
+model StripeEvent {
+  id         String   @id
+  type       String
+  receivedAt DateTime @default(now())
+
+  @@map("stripe_events")
+}
+
 /// One drug screen: the cup read on site, and the lab arc that may follow it.
 ///
 /// Module 5. Two halves with different rules:
@@ -1066,7 +1206,13 @@ model DrugScreen {
   /// defensible record. DUPLICATES are refused in the service and in zod, NOT
   /// by the database: a CHECK cannot contain a subquery, so the DISTINCT
   /// comparison is not expressible. Written down rather than assumed.
-  substances Substance[]
+  ///
+  /// `@default([])` is declared so schema.prisma AGREES with the column the
+  /// migration built. Prisma emits a scalar list as nullable with no default;
+  /// the migration set NOT NULL DEFAULT '{}' because cardinality(NULL) is NULL
+  /// and a CHECK passes on NULL. Without this line every future `migrate diff`
+  /// proposes dropping that default — quietly reopening the hole.
+  substances Substance[] @default([])
 
   /// The seal or label number — what ties this row to a lab report, and the
   /// thing CLAUDE.md means by "chain of custody matters". Required whenever a
@@ -1112,7 +1258,8 @@ model DrugScreen {
   labSentAt    DateTime?
 
   labResult       ScreenResult?
-  labSubstances   Substance[]
+  /// `@default([])` for the same reason as `substances` above.
+  labSubstances   Substance[]   @default([])
   labReturnedAt   DateTime?
   labRecordedById String?
   labRecordedBy   User?         @relation("screenLabResults", fields: [labRecordedById], references: [id])
@@ -1281,6 +1428,8 @@ model User {
   verifiedServiceEntries ServiceEntry[] @relation("verifiedServiceEntries")
 
   recordedApartmentChecks ApartmentCheck[] @relation("recordedApartmentChecks")
+
+  sentInvoices Invoice[] @relation("sentInvoices")
 
   witnessedScreens  DrugScreen[] @relation("witnessedScreens")
   recordedScreens   DrugScreen[] @relation("recordedScreens")

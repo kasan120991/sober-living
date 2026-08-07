@@ -66,12 +66,31 @@ export async function listEntries(stayId) {
     include: {
       recordedBy: { select: { id: true, fullName: true } },
       corrects: { select: { id: true, description: true, occurredAt: true } },
+      // Billed-ness, in the SAME query. Prisma batches this for the whole set
+      // rather than reading per row — and it is a to-ONE include only because
+      // invoice_lines is unique on ledgerEntryId, which is that index doing a
+      // third job beyond "a charge cannot be billed twice".
+      invoiceLine: {
+        select: {
+          invoice: {
+            select: { id: true, number: true, status: true, dueAt: true, hostedUrl: true },
+          },
+        },
+      },
     },
   })
 
   let running = 0
+  let unbilledCents = 0
   const rows = entries.map((e) => {
     running += LEDGER_SIGN[e.type] * e.amountCents
+    // "Unbilled" is the ABSENCE of an invoice line — a read, never a column
+    // on this table, which refuses updates. Payments are never billable, so
+    // they are never unbilled either.
+    const billed = Boolean(e.invoiceLine)
+    if (!billed && e.type !== LEDGER_ENTRY_TYPE.PAYMENT) {
+      unbilledCents += LEDGER_SIGN[e.type] * e.amountCents
+    }
     return {
       id: e.id,
       type: e.type,
@@ -84,12 +103,14 @@ export async function listEntries(stayId) {
       recordedBy: e.recordedBy,
       recordedAt: e.createdAt,
       runningCents: running,
+      billed,
+      invoice: e.invoiceLine?.invoice ?? null,
     }
   })
 
   // Newest first for display; the running balance was computed oldest first,
   // which is the only order in which a running total means anything.
-  return { entries: rows.reverse(), balanceCents: running }
+  return { entries: rows.reverse(), balanceCents: running, unbilledCents }
 }
 
 /**
