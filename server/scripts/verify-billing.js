@@ -145,6 +145,19 @@ async function main() {
     ? ok('and it is a PORTION of outstanding, which a split figure has to be')
     : bad('overdue ≤ outstanding', `${board.figures.overdueCents} > ${board.figures.outstandingCents}`)
 
+  // The card and the button are ONE number. It shipped as the facility NET,
+  // so a resident sitting on a credit made the card read "$150 waiting" above
+  // a button offering "$250" — both right, and looking like a contradiction.
+  // Asserted against the rows rather than against the button alone, or the
+  // two could agree on a figure that matches neither list.
+  const positivePending = board.ready.reduce((t, r) => t + r.netCents, 0)
+  board.figures.pendingCents === positivePending
+    ? ok(`"waiting to be billed" equals the rows beneath it (${money(positivePending)})`)
+    : bad('pending equals rows', `${board.figures.pendingCents} vs ${positivePending}`)
+  board.figures.creditCents === -board.skipped.reduce((t, s) => t + s.netCents, 0)
+    ? ok('and any credit is stated separately rather than netted out of it')
+    : bad('credit stated', `${board.figures.creditCents} vs ${board.skipped.length} skipped`)
+
   // ── The Friday nag ───────────────────────────────────────────────────────
   // Both directions. "It fired" passes even if it always fires.
   console.log('\n\x1b[1mThe Friday nag\x1b[0m')

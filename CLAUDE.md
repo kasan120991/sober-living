@@ -1679,6 +1679,15 @@ invoices. The Quick action moved here; the dashboard's balances panel stays and 
   from `overdueByStay()`, which keeps the oldest because the dashboard and the rail's dot each
   need a single answer. A chase list needs them all: Castillo carries two, and the second is
   $650 nobody was being shown. Both derive through the same `invoiceStatus()`.
+- **"Waiting to be billed" is the sum of the POSITIVE stays, not the facility net** — the
+  same number the Send button offers, by construction. It shipped as the net, so one
+  resident sitting on a $100 credit made the card read "$150 waiting" above a button
+  offering to send "$250": both right, and looking like a contradiction, because a sweep is
+  per stay and hers is never billed at all. The credit is stated beside the figure instead
+  of being netted out of it. This is the same trap the Friday nag avoids by carrying a
+  count, and the card walked straight into it — the two figures are now asserted equal.
+  Where they legitimately differ is a stay with no email, and the line under the button
+  names exactly who.
 - **The past-due figure is a SPLIT of outstanding, never a sum of invoice totals.** Summing
   the documents produced "$1,625 outstanding, $1,950 past due" — impossible on its face,
   because a part-paid $650 invoice leaves less than $650 owed. It is the balance of stays
@@ -2222,7 +2231,7 @@ Two verification suites, both run against a live database:
   log and verify but not set a target, and a **NULL amendment reason refused by the
   database** — the assertion that would have caught issue #1, which a CHECK passing on
   NULL let through until 2026-08-06
-- `node scripts/verify-billing.js` — **18 assertions** on the billing screen's one read:
+- `node scripts/verify-billing.js` — **20 assertions** on the billing screen's one read:
   a **tech refused** `/billing` *and* `/invoices/billable` while still reading one
   resident's ledger (the gate that matters, since hiding the nav link is not one); every
   band equal to its source, with `skipped` provably disjoint from `ready` so the run cannot

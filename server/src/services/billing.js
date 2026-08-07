@@ -147,7 +147,19 @@ export async function billingBoard() {
         (t, stayId) => t + Math.max(0, balances.get(stayId) ?? 0),
         0,
       ),
-      pendingCents: sum(pending),
+      // WHAT WILL BE BILLED, not the facility net — the sum of the positive
+      // stays only. It was the net, which meant the card read "$150 waiting"
+      // above a button offering to send "$250": one resident sitting on a $100
+      // credit, subtracted from a figure the button does not subtract it from,
+      // because a sweep is per stay and hers is never billed at all.
+      //
+      // Two money figures under the same word look like a disagreement even
+      // when both are right. This is the same trap the Friday nag avoids by
+      // carrying a COUNT — and this card walked into it.
+      pendingCents: sum(pending, (c) => c > 0),
+      // The credit, stated rather than netted away, so nothing is hidden by
+      // the change above.
+      creditCents: -sum(pending, (c) => c < 0),
       draftCents: [...drafts.values()].reduce((t, d) => t + d.cents, 0),
       draftCount: [...drafts.values()].reduce((t, d) => t + d.count, 0),
     },

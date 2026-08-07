@@ -115,8 +115,14 @@ const recent = computed(() => data.value?.recent ?? [])
           <p class="mt-0.5 text-[23px] font-semibold tracking-tight tabular-nums">
             {{ money(figures.pendingCents) }}
           </p>
+          <!-- This figure and the Send button are the SAME number by
+               construction; when they differ it is because somebody has no
+               email, and the line under the button says exactly who. -->
           <p class="text-muted-foreground mt-1 text-[12.5px]">
-            Not owed by anyone until it is invoiced
+            <span v-if="figures.creditCents > 0" class="text-success">
+              {{ money(figures.creditCents) }} in credit besides
+            </span>
+            <span v-else>Not owed by anyone until it is invoiced</span>
           </p>
         </div>
 
