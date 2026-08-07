@@ -129,6 +129,13 @@ const balances = computed(() => data.value?.balances ?? { totalCents: 0, owing: 
 // not. The badge above still counts every situation, so nothing is hidden,
 // only deferred to the overflow row.
 const ROLLS_SHOWN = 3
+// Repairs took the same treatment on 2026-08-07, when the panel started
+// carrying merely-AGED requests alongside urgent ones. An URGENT repair still
+// always renders — hiding a hazard is not on, which is the rule stated above —
+// but a house that has never worked its backlog can owe a dozen aged low
+// ones, and twelve of those bury the urgent one just as thirty rolls did.
+// Only the aged non-urgent tail is capped.
+const AGED_REPAIRS_SHOWN = 3
 const attention = computed(() => {
   const a = data.value?.attention
   if (!a) return []
@@ -167,6 +174,36 @@ const attention = computed(() => {
         }]
       : []
 
+  // Urgent repairs first and in full; the merely-aged tail capped behind them.
+  const repairRow = (r) => ({
+    key: `urgent:${r.id}`,
+    kind: 'Repair',
+    title: r.title,
+    chip: r.state === 'OVERDUE' ? 'Overdue' : null,
+    // facilityDateOf, not isoDate — see the balances panel below.
+    meta: `${r.apartment.name} · reported ${humanDate(facilityDateOf(r.reportedAt), { short: true })}`,
+    // /maintenance, not /apartments/:id: the apartment page is manager-only,
+    // and this panel greets every unlock including a tech's.
+    to: '/maintenance',
+  })
+  const urgentRepairs = a.urgentMaintenance.filter((r) => r.priority === 'URGENT')
+  const agedRepairs = a.urgentMaintenance.filter((r) => r.priority !== 'URGENT')
+  const repairRows = [
+    ...urgentRepairs.map(repairRow),
+    ...agedRepairs.slice(0, AGED_REPAIRS_SHOWN).map(repairRow),
+  ]
+  const repairOverflow =
+    agedRepairs.length > AGED_REPAIRS_SHOWN
+      ? [{
+          key: 'repair:overflow',
+          kind: 'Repair',
+          title: `${agedRepairs.length - AGED_REPAIRS_SHOWN} more repairs past their target`,
+          chip: null,
+          meta: 'Maintenance →',
+          to: '/maintenance',
+        }]
+      : []
+
   return [
     ...billingRows,
     ...a.unhoused.map((r) => ({
@@ -180,15 +217,8 @@ const attention = computed(() => {
     })),
     ...rollRows.slice(0, ROLLS_SHOWN),
     ...rollOverflow,
-    ...a.urgentMaintenance.map((r) => ({
-      key: `urgent:${r.id}`,
-      kind: 'Repair',
-      title: r.title,
-      chip: null,
-      // facilityDateOf, not isoDate — see the balances panel below.
-      meta: `${r.apartment.name} · reported ${humanDate(facilityDateOf(r.reportedAt), { short: true })}`,
-      to: `/apartments/${r.apartment.id}`,
-    })),
+    ...repairRows,
+    ...repairOverflow,
   ]
 })
 

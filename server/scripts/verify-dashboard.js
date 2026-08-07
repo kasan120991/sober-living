@@ -131,11 +131,21 @@ async function main() {
     ? ok(`attention.needsRoll equals the schedule board's queue (${d.attention.needsRoll.length})`)
     : bad('needsRoll agreement', rollKeys(d.attention.needsRoll))
 
+  // The panel took the target rule on 2026-08-07: it is urgent-and-open OR
+  // open past its own priority's target, not urgent alone. Re-derived here
+  // from the LIST endpoint rather than from the same helper the dashboard
+  // calls, so this stays an agreement test between two reads and not a
+  // tautology.
   const maint = await tech('/maintenance?status=open')
-  const urgentOpen = (maint.body?.requests ?? maint.body ?? []).filter?.((m) => m.priority === 'URGENT') ?? []
-  ids(d.attention.urgentMaintenance) === ids(urgentOpen)
-    ? ok(`attention.urgentMaintenance equals open URGENT requests (${d.attention.urgentMaintenance.length})`)
-    : bad('urgent agreement', `${ids(d.attention.urgentMaintenance)} vs ${ids(urgentOpen)}`)
+  const shouting =
+    (maint.body?.requests ?? maint.body ?? []).filter?.(
+      (m) => m.priority === 'URGENT' || m.state === 'OVERDUE',
+    ) ?? []
+  ids(d.attention.urgentMaintenance) === ids(shouting)
+    ? ok(
+        `attention.urgentMaintenance equals urgent-or-overdue requests (${d.attention.urgentMaintenance.length})`,
+      )
+    : bad('urgent agreement', `${ids(d.attention.urgentMaintenance)} vs ${ids(shouting)}`)
 
   const capFree = d.capacity.MEN.free + d.capacity.WOMEN.free
   capFree === census.body?.figures?.free

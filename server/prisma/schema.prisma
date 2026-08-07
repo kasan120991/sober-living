@@ -133,6 +133,12 @@ enum MaintenancePriority {
   URGENT
 }
 
+/// The two transitions worth a permanent row. See MaintenanceEvent.
+enum MaintenanceEventKind {
+  CLOSED
+  REOPENED
+}
+
 /// The outcome of a screen — the cup's, and later the lab's.
 ///
 /// REFUSAL and DILUTE are their own outcomes and are NEVER collapsed into a
@@ -333,20 +339,38 @@ model MaintenanceRequest {
   title       String
   description String?
   status      MaintenanceStatus   @default(OPEN)
+  /// Drives the alarm: a request is overdue against MAINTENANCE_TARGET_MS for
+  /// its OWN priority, derived on read. That is why raising priority is
+  /// all-staff and lowering it is managers — anyone may shout, only a manager
+  /// may quiet it.
   priority    MaintenancePriority @default(NORMAL)
 
   reportedById String
   reportedBy   User     @relation("reportedRequests", fields: [reportedById], references: [id])
   reportedAt   DateTime @default(now())
 
-  resolvedById String?
-  resolvedBy   User?     @relation("resolvedRequests", fields: [resolvedById], references: [id])
-  resolvedAt   DateTime?
+  /// IN_PROGRESS means somebody owns this, and a CHECK says so: the status may
+  /// not be IN_PROGRESS with neither an assignee nor a vendor. The two are
+  /// deliberately NOT mutually exclusive — a house manager who owns the job and
+  /// called a plumber is one request, not two.
+  assignedToId String?
+  assignedTo   User?   @relation("assignedRequests", fields: [assignedToId], references: [id])
 
-  /// Required whenever status becomes RESOLVED or CANCELLED. Enforced in the
-  /// route layer — a request that just disappears leaves no record of what was
-  /// actually done to the unit.
-  resolutionNote String?
+  /// The outside contractor, and their reference for the job. Free text, the
+  /// same call ServiceEntry.supervisorName made: a relation would mean a
+  /// directory of external companies and a picker on a hallway form. These
+  /// exist because the facility was already writing "work order 118" into the
+  /// description, which is a field doing a job it was not built for.
+  vendorName   String?
+  workOrderRef String?
+
+  /// Closing and reopening are APPENDED here, never overwritten. The columns
+  /// this replaces (resolvedById, resolvedAt, resolutionNote) were dropped
+  /// 2026-08-07: reopening cleared them, so a request closed, reopened and
+  /// closed again could only ever describe the second closure. Keeping them
+  /// alongside the trail would be a second copy that can disagree — the same
+  /// reasoning that dropped ServiceEntry.supersededById.
+  events MaintenanceEvent[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -355,6 +379,43 @@ model MaintenanceRequest {
   @@index([apartmentId, status])
   @@index([status, priority])
   @@map("maintenance_requests")
+}
+
+/// One closing or reopening of a request. Append-only by trigger AND by revoked
+/// privilege, asserted separately in verify-maintenance.js — the app role fails
+/// on privilege before a trigger is reached; a superuser, which bypasses RLS
+/// even with FORCE, fails on the trigger.
+///
+/// Deliberately only these two kinds. Starting work and changing priority are
+/// ordinary updates and leave no row here: the facility asked for a trail of the
+/// consequential transitions, not an event log of everything.
+///
+/// Outside SOFT_DELETE_MODELS on purpose, like ScheduleSession and the check
+/// tables — soft-deleting a trail row would hide the fact it records.
+model MaintenanceEvent {
+  id        String             @id @default(uuid(7))
+  requestId String
+  request   MaintenanceRequest @relation(fields: [requestId], references: [id])
+
+  kind MaintenanceEventKind
+
+  /// Which closed state, for a CLOSED row; null on a REOPENED one. Paired by
+  /// CHECK. Reuses MaintenanceStatus rather than growing a second vocabulary
+  /// for the same two words.
+  closedAs MaintenanceStatus?
+
+  /// Required on BOTH kinds, and non-empty by CHECK. On a closure it is what
+  /// was done; on a reopening it is why the work did not hold. This is the rule
+  /// that used to live only in a service function and could be bypassed by any
+  /// other code path.
+  note String
+
+  actorId String
+  actor   User     @relation("maintenanceEvents", fields: [actorId], references: [id])
+  at      DateTime @default(now())
+
+  @@index([requestId, at])
+  @@map("maintenance_events")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1414,7 +1475,8 @@ model User {
   auditEntries     AuditLog[]
   sessions         Session[]
   reportedRequests MaintenanceRequest[] @relation("reportedRequests")
-  resolvedRequests MaintenanceRequest[] @relation("resolvedRequests")
+  assignedRequests MaintenanceRequest[] @relation("assignedRequests")
+  maintenanceEvents MaintenanceEvent[]  @relation("maintenanceEvents")
   recordedSignOuts     SignOut[] @relation("recordedSignOuts")
   acknowledgedSignOuts SignOut[] @relation("acknowledgedSignOuts")
 

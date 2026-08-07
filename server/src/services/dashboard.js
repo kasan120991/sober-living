@@ -4,7 +4,7 @@ import { overdueApartmentChecks, unaccountedResidents } from './checks.js'
 import { balancesByStay } from './ledger.js'
 import { overdueByStay } from './invoices.js'
 import { fridayNag } from './billing.js'
-import { urgentOpenWhere } from './maintenance.js'
+import { bellMaintenanceWhere, requestState } from './maintenance.js'
 import { cohortCapacity, unhousedWithOptions } from './residents.js'
 import { scheduleWindow } from './schedule/read.js'
 import { listSignOuts } from './signOuts.js'
@@ -111,8 +111,10 @@ export async function dashboard() {
     // own fortnight window regardless of the span asked for, and the one-day
     // window is the "Today" list (a rolling week first; narrowed 2026-08-06).
     scheduleWindow({ days: 1 }),
+    // The same union the bell reads — one knob, so a row here and a row there
+    // cannot disagree about which repairs are shouting.
     prisma.maintenanceRequest.findMany({
-      where: urgentOpenWhere(),
+      where: bellMaintenanceWhere(),
       include: { apartment: { select: { id: true, name: true } } },
       orderBy: { reportedAt: 'asc' },
     }),
@@ -144,10 +146,17 @@ export async function dashboard() {
       needsRoll: schedule.needsRoll,
       checksOverdue,
       notAccounted,
+      // `priority` and `state` ride along so the panel can tell the two
+      // reasons apart: an URGENT repair always renders (hiding a hazard is not
+      // on), while merely-aged ones are capped with an overflow row, the same
+      // treatment rolls get. Without these the client would have to re-derive
+      // the target rule and could disagree with the server about it.
       urgentMaintenance: urgent.map((r) => ({
         id: r.id,
         title: r.title,
         status: r.status,
+        priority: r.priority,
+        state: requestState(r),
         reportedAt: r.reportedAt,
         apartment: r.apartment,
       })),

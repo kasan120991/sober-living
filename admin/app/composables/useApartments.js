@@ -1,5 +1,9 @@
 /**
- * Apartments, beds and maintenance.
+ * Apartments and beds.
+ *
+ * Maintenance moved to `useMaintenance()` on 2026-08-07 — a repair is work on a
+ * unit, not a property of one, and once it grew a lifecycle the two had nothing
+ * left in common.
  *
  * Every mutation refetches rather than patching local state. Occupancy is
  * derived on the server from live bed assignments, so a client-side guess would
@@ -25,15 +29,6 @@ export function useApartments() {
   const updateBed = (id, body) => api(`/beds/${id}`, { method: 'PATCH', body })
   const removeBed = (id) => api(`/beds/${id}`, { method: 'DELETE' })
 
-  const listRequests = (params = {}) => {
-    const qs = new URLSearchParams(
-      Object.entries(params).filter(([, v]) => v != null && v !== ''),
-    ).toString()
-    return api(`/maintenance${qs ? `?${qs}` : ''}`).then((r) => r.requests)
-  }
-  const createRequest = (body) => api('/maintenance', { method: 'POST', body })
-  const updateRequest = (id, body) => api(`/maintenance/${id}`, { method: 'PATCH', body })
-
   return {
     listApartments,
     getApartment,
@@ -45,9 +40,6 @@ export function useApartments() {
     addBeds,
     updateBed,
     removeBed,
-    listRequests,
-    createRequest,
-    updateRequest,
   }
 }
 

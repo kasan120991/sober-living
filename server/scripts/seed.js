@@ -746,31 +746,158 @@ async function main() {
   // it yet: zero whole months elapsed, no dot. That is the first-month grace
   // the whole-month step exists to give, visible on a fresh seed.
 
-  // Maintenance is raised against the APARTMENT. Bed 12D carries its own
-  // out-of-service note; the two read as related without being linked.
-  await prisma.maintenanceRequest.create({
+  // ── Maintenance ─────────────────────────────────────────────────────────
+  // Raised against the APARTMENT. Bed 12D carries its own out-of-service note;
+  // the two read as related without being linked.
+  //
+  // Ages are RELATIVE to now, not absolute dates, because a request's state is
+  // derived from its age against MAINTENANCE_TARGET_MS — urgent 24h, normal 7
+  // days, low 30 days. Fixed dates would mean the board drifted into all-red
+  // as the seed got older, which is exactly the "every screen looked plausible"
+  // failure this file warns about. Each row below is chosen to sit on a known
+  // side of its own target:
+  //
+  //   overdue: urgent @ 2d, normal @ 10d, low @ 41d
+  //   on time: urgent @ 3h, normal @ 2d, and the in-house job at 1d
+  //
+  // So the union the bell reads is visible in both directions on a fresh seed:
+  // one urgent request that is NOT yet overdue, and two overdue ones that are
+  // not urgent.
+  const req = (data) => prisma.maintenanceRequest.create({ data })
+
+  await req({
+    apartmentId: apt12.id,
+    title: 'No hot water in the second bathroom',
+    description: 'Heater is firing but the mixer runs cold. Whole apartment affected.',
+    priority: 'URGENT',
+    status: 'OPEN',
+    reportedById: manager.id,
+    reportedAt: new Date(nowMs - 2 * DAY),
+  })
+
+  // Urgent and NOT overdue — the reason urgentOpenWhere() survived the target
+  // rule instead of being replaced by it.
+  await req({
+    apartmentId: apt12.id,
+    title: 'Smoke alarm chirping in the hallway',
+    priority: 'URGENT',
+    status: 'OPEN',
+    reportedById: tech.id,
+    reportedAt: new Date(nowMs - 3 * HOUR),
+  })
+
+  // The work order finally has a column of its own. It was "Window latch
+  // broken — work order 118" with "Vendor scheduled." in the description,
+  // which is the whole reason vendorName and workOrderRef exist.
+  await req({
+    apartmentId: apt14.id,
+    title: 'Window latch broken in the front bedroom',
+    description: 'Will not latch shut. Sash is warped rather than the latch itself.',
+    priority: 'NORMAL',
+    status: 'IN_PROGRESS',
+    reportedById: manager.id,
+    reportedAt: new Date(nowMs - 10 * DAY),
+    vendorName: 'Ridgeway Glazing',
+    workOrderRef: '118',
+  })
+
+  // The in-house half of "both": a staff member owns it, no vendor.
+  await req({
+    apartmentId: apt14.id,
+    title: 'Dryer taking three cycles',
+    description: 'Vent likely blocked.',
+    priority: 'NORMAL',
+    status: 'IN_PROGRESS',
+    reportedById: tech.id,
+    reportedAt: new Date(nowMs - 1 * DAY),
+    assignedToId: tech.id,
+  })
+
+  // "Storm door", not "screen door", and that is not fussiness:
+  // verify-screens.js asserts module 5 never reaches the bell by testing the
+  // SERIALISED payload against /screen|POSITIVE|DILUTE|.../ — deliberately
+  // broad, so it catches an `attention.screensPending` somebody adds later.
+  // An overdue request reaches that payload, so a maintenance title
+  // containing the bare word "screen" fails a privacy assertion. Renaming the
+  // seed is the right way round; loosening that regex is not.
+  await req({
+    apartmentId: apt12.id,
+    title: 'Storm door closer is slack',
+    priority: 'LOW',
+    status: 'OPEN',
+    reportedById: tech.id,
+    reportedAt: new Date(nowMs - 41 * DAY),
+  })
+
+  await req({
+    apartmentId: apt14.id,
+    title: 'Fridge seal perished',
+    priority: 'NORMAL',
+    status: 'OPEN',
+    reportedById: manager.id,
+    reportedAt: new Date(nowMs - 2 * DAY),
+  })
+
+  // A plain closure, with its note in the trail rather than on the request.
+  const faucet = await req({
+    apartmentId: apt12.id,
+    title: 'Kitchen faucet dripping',
+    priority: 'LOW',
+    status: 'RESOLVED',
+    reportedById: tech.id,
+    reportedAt: new Date(nowMs - 66 * DAY),
+  })
+  await prisma.maintenanceEvent.create({
     data: {
-      apartmentId: apt12.id,
-      title: 'Window latch broken — work order 118',
-      description: 'Bedroom window will not latch shut. Vendor scheduled.',
-      priority: 'URGENT',
-      status: 'OPEN',
-      reportedById: manager.id,
-      reportedAt: new Date('2026-07-28T14:10:00Z'),
+      requestId: faucet.id,
+      kind: 'CLOSED',
+      closedAs: 'RESOLVED',
+      note: 'Replaced washer and seated the cartridge. No leak after 24h.',
+      actorId: manager.id,
+      at: new Date(nowMs - 64 * DAY),
     },
   })
-  await prisma.maintenanceRequest.create({
-    data: {
-      apartmentId: apt12.id,
-      title: 'Kitchen faucet dripping',
-      priority: 'LOW',
-      status: 'RESOLVED',
-      reportedById: tech.id,
-      reportedAt: new Date('2026-06-02T09:00:00Z'),
-      resolvedById: manager.id,
-      resolvedAt: new Date('2026-06-04T16:30:00Z'),
-      resolutionNote: 'Replaced washer and seated the cartridge. No leak after 24h.',
-    },
+
+  // Closed, reopened, closed again — the shape the old columns could not hold.
+  // Before 2026-08-07 reopening cleared resolvedBy/resolvedAt/resolutionNote,
+  // so the first closure below simply would not exist. It is seeded precisely
+  // so the trail has something to show on a fresh database.
+  const heater = await req({
+    apartmentId: apt14.id,
+    title: 'Radiator in the shared room will not bleed',
+    priority: 'NORMAL',
+    status: 'RESOLVED',
+    reportedById: tech.id,
+    reportedAt: new Date(nowMs - 30 * DAY),
+    vendorName: 'Kellerman Plumbing',
+    workOrderRef: 'KP-2291',
+  })
+  await prisma.maintenanceEvent.createMany({
+    data: [
+      {
+        requestId: heater.id,
+        kind: 'CLOSED',
+        closedAs: 'RESOLVED',
+        note: 'Bled the radiator and topped up the system.',
+        actorId: manager.id,
+        at: new Date(nowMs - 26 * DAY),
+      },
+      {
+        requestId: heater.id,
+        kind: 'REOPENED',
+        note: 'Cold again within the week. The bleed did not hold.',
+        actorId: manager.id,
+        at: new Date(nowMs - 19 * DAY),
+      },
+      {
+        requestId: heater.id,
+        kind: 'CLOSED',
+        closedAs: 'RESOLVED',
+        note: 'Kellerman replaced the valve. Warm through two cold nights since.',
+        actorId: manager.id,
+        at: new Date(nowMs - 12 * DAY),
+      },
+    ],
   })
 
   // ── The schedule ────────────────────────────────────────────────────────
@@ -976,7 +1103,7 @@ async function main() {
     ${await prisma.bed.count()} beds (1 out of service)
     ${await prisma.resident.count()} residents (5 housed, 1 awaiting a bed, 1 discharged)
     ${await prisma.user.count()} staff users
-    ${await prisma.maintenanceRequest.count()} maintenance requests (1 open urgent, 1 resolved)
+    ${await prisma.maintenanceRequest.count()} maintenance requests (2 urgent — one already overdue, one not yet), 2 in progress, ${await prisma.maintenanceEvent.count()} trail events across 2 closed (one closed, reopened and closed again)
     ${await prisma.signOut.count()} sign-outs (1 out, 1 OVERDUE, 1 returned)
     ${await prisma.apartmentCheck.count()} apartment checks (men's CHECKED with 1 not found, women's OVERDUE, 1 missed hour, 1 amended)
     ${await prisma.drugScreen.count()} drug screens (1 negative, 1 awaiting the resident's decision, 1 declined, 1 at the lab, 1 lab-cleared after paying)

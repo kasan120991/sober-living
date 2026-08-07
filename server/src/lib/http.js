@@ -17,10 +17,26 @@ export function handler(fn) {
  * response or a log. See CLAUDE.md.
  */
 export function parseBody(schema, body) {
-  const result = schema.safeParse(body)
+  return parseInto(schema, body, 'body')
+}
+
+/**
+ * The same, for `req.query`.
+ *
+ * A query string is user input exactly as a body is, and the one place that
+ * forgot it — `GET /maintenance`, which passed `status` straight into a Prisma
+ * `where` — answered a typo with a 500 instead of a 400. Named separately so a
+ * route reads honestly about what it is validating.
+ */
+export function parseQuery(schema, query) {
+  return parseInto(schema, query, 'query')
+}
+
+function parseInto(schema, value, kind) {
+  const result = schema.safeParse(value)
   if (result.success) return result.data
 
-  const fields = [...new Set(result.error.issues.map((i) => i.path.join('.') || 'body'))]
+  const fields = [...new Set(result.error.issues.map((i) => i.path.join('.') || kind))]
   throw new HttpError(400, `Invalid ${fields.join(', ')}`)
 }
 

@@ -1,7 +1,11 @@
 import { prisma, runInTransaction } from '../db/client.js'
 import { HttpError } from '../middleware/authorize.js'
 import { PRISMA } from '../lib/http.js'
-import { BED_STATUS, MAINTENANCE_STATUS } from '../domain/constants.js'
+import { BED_STATUS, MAINTENANCE_OPEN_STATUSES } from '../domain/constants.js'
+// The direction of this import reversed on 2026-08-07. Maintenance used to
+// import shapeRequest out of here, which put the shape of a request in the
+// module that merely displays it.
+import { REQUEST_ORDER, WITH_PEOPLE, shapeRequest } from './maintenance.js'
 
 /**
  * Occupancy is DERIVED, never stored.
@@ -72,11 +76,10 @@ export async function getApartment(id) {
       },
       maintenanceRequests: {
         where: { deletedAt: null },
-        orderBy: [{ status: 'asc' }, { reportedAt: 'desc' }],
-        include: {
-          reportedBy: { select: { id: true, fullName: true } },
-          resolvedBy: { select: { id: true, fullName: true } },
-        },
+        // ONE order, shared with listRequests — see REQUEST_ORDER. These were
+        // two different orders until 2026-08-07.
+        orderBy: [...REQUEST_ORDER],
+        include: { ...WITH_PEOPLE },
       },
     },
   })
@@ -87,27 +90,12 @@ export async function getApartment(id) {
     name: apartment.name,
     cohort: apartment.cohort,
     beds: apartment.beds.map(shapeBed),
-    maintenanceRequests: apartment.maintenanceRequests.map(shapeRequest),
-    openRequestCount: apartment.maintenanceRequests.filter(
-      (r) => r.status === MAINTENANCE_STATUS.OPEN || r.status === MAINTENANCE_STATUS.IN_PROGRESS,
+    // Not `.map(shapeRequest)` — map passes the INDEX as the second argument,
+    // which shapeRequest takes as `now`, and a number has no getTime().
+    maintenanceRequests: apartment.maintenanceRequests.map((r) => shapeRequest(r)),
+    openRequestCount: apartment.maintenanceRequests.filter((r) =>
+      MAINTENANCE_OPEN_STATUSES.includes(r.status),
     ).length,
-  }
-}
-
-export function shapeRequest(r) {
-  return {
-    id: r.id,
-    apartmentId: r.apartmentId,
-    apartmentName: r.apartment?.name ?? undefined,
-    title: r.title,
-    description: r.description,
-    status: r.status,
-    priority: r.priority,
-    reportedBy: r.reportedBy ?? null,
-    reportedAt: r.reportedAt,
-    resolvedBy: r.resolvedBy ?? null,
-    resolvedAt: r.resolvedAt,
-    resolutionNote: r.resolutionNote,
   }
 }
 

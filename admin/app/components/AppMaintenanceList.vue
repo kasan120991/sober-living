@@ -1,51 +1,45 @@
 <script setup>
-import { STAFF_ROLE } from '~/utils/roles.js'
+import { facilityDateOf } from '~/utils/facilityTime.js'
+import { toneClass } from '~/utils/schedule.js'
+import {
+  ageLabel,
+  eventLabel,
+  isOpen,
+  ownerLabel,
+  priorityDisplay,
+  requestStateDisplay,
+} from '~/utils/maintenance.js'
 
+/**
+ * Requests as cards, for the apartment detail page.
+ *
+ * The house-wide queue at /maintenance is a dense table (variant C); this stays
+ * cards because it sits inside a page about ONE apartment, alongside a bed
+ * table, and a second table there would read as a continuation of the first.
+ * Both surfaces share the same row menu and the same dialogs, so the two can
+ * never disagree about what an action does.
+ */
 defineProps({
   requests: { type: Array, default: () => [] },
   showApartment: { type: Boolean, default: false },
 })
 const emit = defineEmits(['changed'])
 
-const { user } = useAuth()
-const { updateRequest } = useApartments()
-const notify = useNotify()
+// One dialog each for the whole list, driven by a row ref.
+const active = ref(null)
+const closeOpen = ref(false)
+const closeMode = ref('RESOLVED')
+const reopenOpen = ref(false)
 
-const canClose = computed(() =>
-  [STAFF_ROLE.ADMIN, STAFF_ROLE.HOUSE_MANAGER].includes(user.value?.role),
-)
-
-const OPEN_STATES = ['OPEN', 'IN_PROGRESS']
-const isOpen = (r) => OPEN_STATES.includes(r.status)
-
-const closing = ref(null)
-const note = ref('')
-const pending = ref(false)
-const error = ref('')
-
-async function confirmClose() {
-  error.value = ''
-  if (!note.value.trim()) {
-    // The API refuses this too; saying so here avoids a pointless round trip.
-    error.value = 'Say what was done before closing.'
-    return
-  }
-  pending.value = true
-  try {
-    await updateRequest(closing.value.id, { status: 'RESOLVED', resolutionNote: note.value.trim() })
-    notify.success('Request resolved')
-    closing.value = null
-    note.value = ''
-    emit('changed')
-  } catch (err) {
-    error.value = err?.data?.error ?? 'Could not close the request.'
-  } finally {
-    pending.value = false
-  }
+function openClose({ request, status }) {
+  active.value = request
+  closeMode.value = status
+  closeOpen.value = true
 }
-
-const fmt = (d) =>
-  d ? new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '—'
+function openReopen(request) {
+  active.value = request
+  reopenOpen.value = true
+}
 </script>
 
 <template>
@@ -56,66 +50,78 @@ const fmt = (d) =>
       v-for="r in requests"
       :key="r.id"
       class="bg-card rounded-md border p-3"
-      :class="!isOpen(r) && 'opacity-70'"
+      :class="[
+        !isOpen(r) && 'opacity-70',
+        r.state === 'OVERDUE' && 'shadow-[inset_3px_0_0_var(--destructive)]',
+      ]"
     >
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-2">
-            <!-- URGENT is the only coloured thing here. Normal and low priority
-                 are the ordinary case and stay achromatic. -->
-            <Badge v-if="r.priority === 'URGENT' && isOpen(r)" variant="destructive"
-                   class="text-[10px] uppercase tracking-wider">
+            <!-- URGENT is the only coloured priority, and it is --warning, not
+                 --destructive: red on this screen means past its target, and an
+                 urgent request filed ten minutes ago is not late. -->
+            <Badge
+              v-if="r.priority === 'URGENT' && isOpen(r)"
+              variant="outline"
+              :class="['text-[10px] tracking-wider uppercase', toneClass(priorityDisplay(r.priority).tone)]"
+            >
               Urgent
             </Badge>
             <span class="text-sm font-medium">{{ r.title }}</span>
-            <span v-if="!isOpen(r)" class="text-muted-foreground text-[10px] uppercase tracking-wider">
-              {{ r.status === 'RESOLVED' ? 'Resolved' : 'Cancelled' }}
-            </span>
+            <Badge
+              v-if="requestStateDisplay(r).tone !== 'none'"
+              variant="outline"
+              :class="['text-[10px] tracking-wider uppercase', toneClass(requestStateDisplay(r).tone)]"
+            >
+              {{ requestStateDisplay(r).label }}
+            </Badge>
           </div>
 
           <p v-if="r.description" class="mt-1 max-w-[65ch] text-xs">{{ r.description }}</p>
 
           <p class="text-muted-foreground mt-1 text-xs">
             <template v-if="showApartment && r.apartmentName">{{ r.apartmentName }} · </template>
-            Reported by {{ r.reportedBy?.fullName ?? 'unknown' }} on
-            <span class="tabular-nums">{{ fmt(r.reportedAt) }}</span>
-            <template v-if="r.resolvedAt">
-              · Closed by {{ r.resolvedBy?.fullName }} on
-              <span class="tabular-nums">{{ fmt(r.resolvedAt) }}</span>
-            </template>
+            <span class="tabular-nums">{{ ageLabel(r.reportedAt) }}</span> old
+            <template v-if="r.reportedBy"> · reported by {{ r.reportedBy.fullName }}</template>
+            <template v-if="ownerLabel(r)"> · {{ ownerLabel(r) }}</template>
           </p>
 
-          <p v-if="r.resolutionNote" class="mt-1.5 border-l-2 pl-2 text-xs">
-            {{ r.resolutionNote }}
-          </p>
+          <!-- The trail. Every closure survives a reopening, so a request
+               closed twice shows both — which the old columns could not. -->
+          <div v-if="r.events?.length" class="mt-1.5 flex flex-col gap-1 border-l-2 pl-2">
+            <p v-for="e in r.events" :key="e.id" class="text-xs">
+              <span class="font-medium">{{ eventLabel(e) }}</span>
+              <span class="text-muted-foreground">
+                by {{ e.actor?.fullName ?? 'unknown' }} ·
+                <span class="tabular-nums">{{ facilityDateOf(e.at) }}</span>
+              </span>
+              — {{ e.note }}
+            </p>
+          </div>
         </div>
 
-        <Button v-if="isOpen(r) && canClose" size="sm" variant="outline"
-                @click="((closing = r), (note = ''), (error = ''))">
-          Resolve
-        </Button>
+        <AppMaintenanceActions
+          :request="r"
+          @changed="emit('changed')"
+          @close-request="openClose"
+          @reopen-request="openReopen"
+        />
       </div>
     </div>
   </div>
 
-  <Dialog :open="Boolean(closing)" @update:open="(v) => !v && (closing = null)">
-    <DialogContent class="sm:max-w-[440px]">
-      <DialogHeader><DialogTitle>Resolve request</DialogTitle></DialogHeader>
-      <form class="flex flex-col gap-4" @submit.prevent="confirmClose">
-        <p class="text-sm">{{ closing?.title }}</p>
-        <Alert v-if="error" variant="destructive"><AlertDescription>{{ error }}</AlertDescription></Alert>
-        <AppField
-          v-slot="{ id }"
-          label="What was done"
-          description="Required. A request that just disappears leaves no record of what was fixed."
-        >
-          <Textarea :id="id" v-model="note" :rows="3" placeholder="Replaced the latch." />
-        </AppField>
-        <DialogFooter>
-          <Button type="button" variant="ghost" @click="closing = null">Cancel</Button>
-          <Button type="submit" :disabled="pending">Resolve</Button>
-        </DialogFooter>
-      </form>
-    </DialogContent>
-  </Dialog>
+  <AppMaintenanceCloseDialog
+    v-model:open="closeOpen"
+    :request-id="active?.id"
+    :request-title="active?.title"
+    :mode="closeMode"
+    @done="emit('changed')"
+  />
+  <AppMaintenanceReopenDialog
+    v-model:open="reopenOpen"
+    :request-id="active?.id"
+    :request-title="active?.title"
+    @done="emit('changed')"
+  />
 </template>
