@@ -29,8 +29,10 @@ export function useScreens() {
   /** The resident record's section — outcome-free, same as the queue. */
   const getResidentScreens = (residentId) => api(`/residents/${residentId}/screens`)
 
-  /** Colleagues, for the witness picker. Staff names, never residents. */
-  const listStaff = () => api('/staff').then((r) => r.staff)
+  // Colleagues, for the witness picker. Lives in useStaff() since 2026-08-07 —
+  // maintenance needed the same picker — and is re-exported here so every
+  // existing caller keeps working.
+  const { listStaff } = useStaff()
 
   return {
     getScreens,

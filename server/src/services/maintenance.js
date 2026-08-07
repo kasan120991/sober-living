@@ -1,5 +1,6 @@
 import { prisma, runInTransaction } from '../db/client.js'
 import { HttpError } from '../middleware/authorize.js'
+import { facilityToday, facilityWallClockToUtc } from '../lib/facilityTime.js'
 import {
   MAINTENANCE_CLOSED_STATUSES,
   MAINTENANCE_EVENT_KIND,
@@ -213,6 +214,16 @@ export async function houseMaintenance() {
   const open = requests.filter((r) => r.state !== MAINTENANCE_STATE.CLOSED)
   const overdue = open.filter((r) => r.state === MAINTENANCE_STATE.OVERDUE)
 
+  // The FACILITY month, not the UTC one: a request closed at 9pm ET on the 1st
+  // is this month's, and `isoDate`-style slicing would file it under last.
+  // Computed over the requests already loaded rather than with a second query —
+  // module 14's no-per-request-loops rule applies to every composed read.
+  const monthStart = facilityWallClockToUtc(`${facilityToday(now).slice(0, 7)}-01`, '00:00')
+  const closedThisMonth = requests.filter((r) => {
+    if (!r.closure) return false
+    return new Date(r.closure.at).getTime() >= monthStart.getTime()
+  })
+
   return {
     requests,
     figures: {
@@ -220,6 +231,9 @@ export async function houseMaintenance() {
       overdue: overdue.length,
       urgent: open.filter((r) => r.priority === MAINTENANCE_PRIORITY.URGENT).length,
       inProgress: open.filter((r) => r.status === MAINTENANCE_STATUS.IN_PROGRESS).length,
+      /// Counts REQUESTS, not closure events — one closed, reopened and closed
+      /// again inside a month is one thing dealt with, not two.
+      closedThisMonth: closedThisMonth.length,
     },
     /// Echoed so a screen cannot quote a target the server disagrees with —
     /// the `feeCents` habit from module 5.
@@ -253,6 +267,54 @@ export async function createRequest({ apartmentId, title, description, priority 
     include: WITH_PEOPLE,
   })
   return shapeRequest(created)
+}
+
+/**
+ * Correct what a request SAYS — its title, its description, or which apartment
+ * it was filed against.
+ *
+ * Named `editRequest`, deliberately not `updateRequest`: that name meant "drive
+ * a status transition" until 2026-08-07, and a reader who half-remembers it
+ * would misread the guard below.
+ *
+ * ALL-STAFF, BUT ONLY WHILE THE REQUEST IS OPEN (facility, 2026-08-07). The
+ * tech who typed "smoke alrm" in a hallway should fix it without finding a
+ * manager — filing is all-staff and so is correcting what you filed. Once the
+ * request is closed it is a record with a trail against it, which is what an
+ * auditor reads, so it freezes: reopening first is one click and leaves a
+ * REOPENED row saying why.
+ *
+ * Moving `apartmentId` is a CORRECTION rather than an edit — it takes the
+ * request out of one unit's history and puts it in another's — which is
+ * exactly why it is only available while the request is open. A request filed
+ * against the wrong unit and already closed is corrected by filing it properly
+ * against the right one, not by rewriting where it happened.
+ */
+export async function editRequest(id, { title, description, apartmentId }) {
+  const existing = await loadRequest(id)
+  if (MAINTENANCE_CLOSED_STATUSES.includes(existing.status)) {
+    throw new HttpError(409, 'That request is closed. Reopen it before changing it.')
+  }
+
+  const patch = {}
+  if (title !== undefined) patch.title = title.trim()
+  if (description !== undefined) patch.description = description?.trim() || null
+  if (apartmentId !== undefined && apartmentId !== existing.apartmentId) {
+    const apartment = await prisma.apartment.findUnique({ where: { id: apartmentId } })
+    if (!apartment) throw new HttpError(404, 'Apartment not found')
+    patch.apartmentId = apartmentId
+  }
+
+  // An empty patch is refused rather than answered with a cheerful 200 — the
+  // `verify-schedule.js` precedent. Note this fires when every field sent
+  // matches what is already stored, which is the honest reading: nothing
+  // changed.
+  if (!Object.keys(patch).length) {
+    throw new HttpError(400, 'Nothing to change.')
+  }
+
+  await prisma.maintenanceRequest.update({ where: { id }, data: patch })
+  return reread(id)
 }
 
 /**

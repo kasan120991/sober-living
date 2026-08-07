@@ -7,6 +7,7 @@ import { MAINTENANCE_PRIORITY, MAINTENANCE_STATUS, STAFF_ROLE } from '../domain/
 import {
   closeRequest,
   createRequest,
+  editRequest,
   houseMaintenance,
   listRequests,
   reopenRequest,
@@ -57,6 +58,14 @@ const reopenBody = z.object({
 
 const priorityBody = z.object({
   priority: z.enum(PRIORITIES),
+})
+
+/// Identity and placement. Deliberately NOT status or priority — those have
+/// their own routes because they have their own rules.
+const editBody = z.object({
+  title: z.string().trim().min(1).max(140).optional(),
+  description: z.string().trim().max(2000).optional().nullable(),
+  apartmentId: z.string().min(1).optional(),
 })
 
 router.use(requireAuth, requireStaff)
@@ -114,6 +123,16 @@ router.post(
   handler(async (req, res) => {
     const data = parseBody(reopenBody, req.body)
     res.json(await reopenRequest(req.params.id, data, req.session.userId))
+  }),
+)
+
+// All-staff, and the service refuses it once the request is closed. Correcting
+// what you filed is the same kind of act as filing it.
+router.patch(
+  '/:id',
+  handler(async (req, res) => {
+    const data = parseBody(editBody, req.body)
+    res.json(await editRequest(req.params.id, data))
   }),
 )
 

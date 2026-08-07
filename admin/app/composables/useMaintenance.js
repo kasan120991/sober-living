@@ -31,6 +31,12 @@ export function useMaintenance() {
 
   const createRequest = (body) => api('/maintenance', { method: 'POST', body })
 
+  /**
+   * Correct what a request says: `{ title, description, apartmentId }`.
+   * All-staff, and the server refuses it once the request is closed.
+   */
+  const editRequest = (id, body) => api(`/maintenance/${id}`, { method: 'PATCH', body })
+
   /** No body takes it yourself. `{ assignedToId, vendorName, workOrderRef }` otherwise. */
   const startWork = (id, body = {}) =>
     api(`/maintenance/${id}/start`, { method: 'POST', body })
@@ -47,6 +53,7 @@ export function useMaintenance() {
     listRequests,
     houseMaintenance,
     createRequest,
+    editRequest,
     startWork,
     closeRequest,
     reopenRequest,
