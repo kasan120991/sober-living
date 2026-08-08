@@ -34,6 +34,27 @@ export function checkOverdueCutoff(now = new Date()) {
   return new Date(now.getTime() - (CHECK_INTERVAL_MS + CHECK_GRACE_MS))
 }
 
+/**
+ * Who was signed out AT a given instant — the one definition.
+ *
+ * A sign-out covers `[outAt, returnedAt)`, with an open one running to now.
+ * Extracted from amendCheck on 2026-08-08 when the resident record's trail
+ * needed the same question answered: two copies of "who was out then" is how
+ * the amendment validator and the display come to disagree about it, and one of
+ * those two is evidence.
+ *
+ * The soft-delete extension keeps removed-in-error sign-outs out of this by
+ * construction, which is also why a check line stores no signOutId — see the
+ * ApartmentCheckResident note in schema.prisma.
+ */
+export function signedOutAtWhere(stayIds, instant) {
+  return {
+    stayId: { in: [...stayIds] },
+    outAt: { lte: instant },
+    OR: [{ returnedAt: null }, { returnedAt: { gte: instant } }],
+  }
+}
+
 /** The current view: checks no amendment has superseded. */
 const CURRENT_ONLY = { supersededBy: { is: null } }
 
@@ -277,11 +298,7 @@ export function amendCheck(id, input, actorId) {
     // Who was signed out AT THE ORIGINAL INSTANT — not now. (The soft-delete
     // extension keeps removed-in-error sign-outs out of this.)
     const openThen = await prisma.signOut.findMany({
-      where: {
-        stayId: { in: [...expected] },
-        outAt: { lte: original.checkedAt },
-        OR: [{ returnedAt: null }, { returnedAt: { gte: original.checkedAt } }],
-      },
+      where: signedOutAtWhere(expected, original.checkedAt),
       select: { stayId: true },
     })
     validateLines(lines, new Set(openThen.map((s) => s.stayId)))
@@ -667,6 +684,8 @@ export async function residentChecks(residentId, { date, cursor, limit = 50 } = 
   })
 
   const page = rows.slice(0, limit)
+  const purposeByLine = await signOutPurposes(stay.id, page)
+
   return {
     hasActiveStay: true,
     stayId: stay.id,
@@ -679,6 +698,8 @@ export async function residentChecks(residentId, { date, cursor, limit = 50 } = 
       checkedAt: l.check.checkedAt,
       status: l.status,
       note: l.note,
+      // WHY they were out, and deliberately never WHERE. See signOutPurposes().
+      purpose: purposeByLine.get(l.id) ?? null,
       apartmentName: l.check.apartment.name,
       byName: l.check.recordedBy.fullName,
       amended: Boolean(l.check.supersedesId),
@@ -686,4 +707,61 @@ export async function residentChecks(residentId, { date, cursor, limit = 50 } = 
     })),
     nextCursor: !date && rows.length > limit ? encodeCursor(page[page.length - 1]) : null,
   }
+}
+
+/**
+ * The PURPOSE of the sign-out covering each SIGNED_OUT line on a page.
+ *
+ * `destination` is never selected, and that is the point rather than an
+ * oversight. CLAUDE.md withholds where somebody went from the census tile and
+ * the check sheet — a board read over a resident's shoulder — and grants it only
+ * to the bell and the dashboard, where somebody must act on an overdue return.
+ * This trail is a third case and the argument against it is that it is a
+ * HISTORY: a run of destinations over weeks reads as a pattern of where a
+ * person goes, on a page any staff member can open. The purpose explains the
+ * absence without recording where they physically were.
+ *
+ * Known and accepted (2026-08-08): `purpose` is unreviewed free text, so this
+ * rule is enforced by WHICH COLUMN IS READ, not by what the column holds —
+ * nothing stops somebody typing a place into it. The mitigation is at the point
+ * of entry, where AppSignOutDialog steers the field toward a reason; there is no
+ * mitigation available here, because the free-text field IS the thing being
+ * shown.
+ *
+ * ONE QUERY FOR THE WHOLE PAGE, not one per line: the trail returns up to fifty
+ * lines, and a lookup each is the per-row query loop CLAUDE.md forbids on a
+ * composed read. The page's span bounds a single fetch and the containment is
+ * resolved in memory.
+ */
+async function signOutPurposes(stayId, page) {
+  const signedOut = page.filter((l) => l.status === CHECK_RESIDENT_STATUS.SIGNED_OUT)
+  if (!signedOut.length) return new Map()
+
+  const instants = signedOut.map((l) => l.check.checkedAt)
+  const oldest = new Date(Math.min(...instants))
+  const newest = new Date(Math.max(...instants))
+
+  // Every sign-out whose interval overlaps the page at all. Bounded by the same
+  // shape as signedOutAtWhere, widened from an instant to a span.
+  const covering = await prisma.signOut.findMany({
+    where: {
+      stayId,
+      outAt: { lte: newest },
+      OR: [{ returnedAt: null }, { returnedAt: { gte: oldest } }],
+    },
+    select: { outAt: true, returnedAt: true, purpose: true },
+    orderBy: { outAt: 'desc' },
+  })
+  if (!covering.length) return new Map()
+
+  const out = new Map()
+  for (const line of signedOut) {
+    const at = line.check.checkedAt
+    // Newest-first, so the first match is the sign-out in force at that instant
+    // if two ever abut. A line whose sign-out was since soft-deleted simply
+    // finds nothing and renders as it did before this existed.
+    const match = covering.find((s) => s.outAt <= at && (!s.returnedAt || s.returnedAt >= at))
+    if (match?.purpose) out.set(line.id, match.purpose)
+  }
+  return out
 }

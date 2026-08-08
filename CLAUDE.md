@@ -807,6 +807,40 @@ per page, driven by refs. The page re-derives DUE/OVERDUE on the census's 30-sec
 (`checkState()` in `utils/facilityTime.js` mirrors the server), because crossing into
 either mutates nothing and no socket event will come.
 
+**A SIGNED_OUT line on the record explains itself with the sign-out's PURPOSE, never its
+destination** (2026-08-08). The line used to read only "Signed out", which says a person was
+accounted for but not why. `ApartmentCheckResident` stores no `signOutId` on purpose — the
+covering sign-out is derivable from `stayId` + `checkedAt` containment — so the lookup was
+always available; what needed deciding was what to show.
+
+This is the **third ruling on the destination rule**, and the three are consistent rather
+than ad hoc:
+
+- **Withheld** on the census tile and the check sheet — a board glanced at with residents
+  around, where where-somebody-went is nobody else's business.
+- **Granted** to the bell and the dashboard's signed-out panel, because whoever acts on an
+  overdue return needs to know where to start looking.
+- **Purpose only** here. The record is a deliberate navigation to one named person, which
+  is the argument that lets screens and medications show inline — but this trail is a
+  **HISTORY**, and a run of destinations over weeks reads as a pattern of where a person
+  goes, on a page any staff member can open. The purpose explains the absence without
+  recording where they physically were.
+
+**A known and accepted weakness, written down rather than discovered later:** `purpose` is
+unreviewed free text, so the rule is enforced by **which column is read**, not by what the
+column holds — nothing stops somebody typing a place into it. Note this is the *inverse* of
+the ledger-description rule, where free text never crosses to Stripe *because* it can say
+anything; here the free-text field is the one being displayed, so that defence is not
+available. The only lever is at the point of entry, and `AppSignOutDialog`'s Purpose field
+now carries a description and placeholder steering it to a reason ("Why they are out — not
+where").
+
+`signedOutAtWhere()` in `services/checks.js` is **the one definition** of who was signed out
+at an instant, extracted from `amendCheck` when the trail needed the same question answered.
+Two copies is how the amendment validator and the display come to disagree, and one of those
+two is evidence. The trail resolves it in **one query per page, never one per line** — fifty
+lines each doing a lookup is the per-row loop that is forbidden on a composed read.
+
 **On the resident record (built 2026-08-06, chosen from rendered variants):** the rail's
 Apartment checks section is READ-ONLY — a **"last seen" hero over a day-grouped trail** of
 this resident's own lines, newest first. The hero goes destructive when they are
@@ -2673,7 +2707,7 @@ Two verification suites, both run against a live database:
   resident record agreeing about who is overdue (one grouped query behind both). The
   sort assertion now asserts the two-key **rule**, because the one-key version kept
   passing by coincidence after the sort changed. Posts a $1 payment — reseed after.
-- `node scripts/verify-checks.js` — 65 assertions on the hourly round: the staff gate, the
+- `node scripts/verify-checks.js` — **68 assertions** on the hourly round: the staff gate, the
   board derived from the latest check (95 minutes OVERDUE, most-overdue-first, the missed
   bucket derived from absence, the amended marker), a roster that pre-accounts open
   sign-outs and never carries a destination, roster-completeness 409s (missing, extra,
@@ -2693,6 +2727,13 @@ Two verification suites, both run against a live database:
   empty rather than an error; keyset pages that neither overlap nor break the ordering;
   the hero riding on page one only; malformed date and cursor each a 400; and a
   discharged resident getting the no-active-stay payload while their record still opens.
+  **Three cover the signed-out line's purpose**, and the negative is the load-bearing one:
+  the purpose of the covering sign-out shows; **no destination appears anywhere in the
+  serialised payload** (a regex over the whole response, the `verify-screens.js` idiom, so a
+  `destination` added to the shape later fails rather than sliding past); and a sign-out with
+  **no purpose comes back null** rather than erroring — the common case, and the one a naive
+  implementation crashes on. The seed exercises both states without being asked to: Ocampo's
+  sign-out carries a purpose and Boone's deliberately does not.
   Posts checks — reseed after. **Known fragility, not a regression: it cannot pass in the
   first ~2 hours of the facility day.** Its missed-bucket and amendment probes sit 95
   minutes back, which before ~2 AM falls into *yesterday*, so today's log has no elapsed

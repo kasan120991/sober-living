@@ -180,6 +180,18 @@ const STATUS_DISPLAY = {
                   {{ STATUS_DISPLAY[l.status].label }}
                 </Badge>
                 <span v-if="l.note" class="min-w-0 text-[13px]">{{ l.note }}</span>
+                <!-- Why they were out, never where. The server selects the
+                     sign-out's `purpose` and deliberately never its
+                     `destination` — see signOutPurposes() for the reasoning.
+                     Absent purpose renders nothing rather than filler: most
+                     sign-outs have none, and "no purpose given" would be noise
+                     on the common case. -->
+                <span
+                  v-else-if="l.purpose"
+                  class="text-muted-foreground min-w-0 text-[13px] italic"
+                >
+                  {{ l.purpose }}
+                </span>
                 <span class="text-muted-foreground/80 ms-auto text-xs">
                   {{ l.apartmentName }} · {{ l.byName
                   }}<span

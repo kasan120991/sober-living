@@ -419,6 +419,39 @@ async function main() {
     ? ok('an amended check appears once — the amendment, marked, never the original')
     : bad('amended once', JSON.stringify({ orig: fromOriginal.length, amend: fromAmendment.length }))
 
+  // ── A signed-out line explains itself, with the PURPOSE ─────────────────
+  // Three assertions, and the negative is the load-bearing one: the whole point
+  // of this feature is which column it reads.
+  const allRes = (await tech('/residents?includeDischarged=true')).body.residents
+  const ocampoId = allRes.find((r) => r.lastName === 'Ocampo')?.id
+  const booneId = allRes.find((r) => r.lastName === 'Boone')?.id
+
+  const ocampoTrail = (await tech(`/residents/${ocampoId}/checks`)).body
+  const withPurpose = ocampoTrail.lines.find((l) => l.status === 'SIGNED_OUT' && l.purpose)
+  withPurpose
+    ? ok(`a signed-out line carries the covering sign-out's purpose ("${withPurpose.purpose}")`)
+    : bad('purpose shown', JSON.stringify(ocampoTrail.lines.filter((l) => l.status === 'SIGNED_OUT')))
+
+  // The DESTINATION must appear nowhere, and this is asserted against the whole
+  // SERIALISED payload rather than a key list — so a `destination` somebody adds
+  // to the shape later fails here rather than sliding past. Same idiom as
+  // verify-screens.js's clinical-leak check, and the seeded destinations are the
+  // needles.
+  const destinations = /St\. Mark's|Kroger|Probation check-in/
+  const trailText = JSON.stringify(ocampoTrail) + JSON.stringify(await tech(`/residents/${booneId}/checks`).then((r) => r.body))
+  !destinations.test(trailText)
+    ? ok('…and no destination appears anywhere in the trail payload')
+    : bad('destination leaked', trailText.match(destinations)?.[0])
+
+  // The common case: most sign-outs carry no purpose at all, and a line whose
+  // sign-out has none must come back null rather than erroring or inventing
+  // filler. Boone's seeded sign-out deliberately has no purpose.
+  const booneTrail = (await tech(`/residents/${booneId}/checks`)).body
+  const booneOut = booneTrail.lines.filter((l) => l.status === 'SIGNED_OUT')
+  booneOut.length > 0 && booneOut.every((l) => l.purpose === null)
+    ? ok(`a sign-out with no purpose comes back null, not an error (${booneOut.length} lines)`)
+    : bad('null purpose', JSON.stringify(booneOut.map((l) => l.purpose)))
+
   const { facilityToday } = await import('../src/lib/facilityTime.js')
   const todayKey = facilityToday()
   const dated = (await tech(`/residents/${castilloId}/checks?date=${todayKey}`)).body
