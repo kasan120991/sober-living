@@ -2134,15 +2134,49 @@ exception into a stated rule — `SILENT_PREFIXES`: *a write that changes nothin
 shows does not broadcast*. Without it, one person hovering their bell would fan `changed` out
 to every device in the building and make every screen refetch its dashboard.
 
-**Toasts are wired and DO NOT RENDER, for a reason that predates all of this.** The client
-diff is built and correct (`verify` aside, the console shows it selecting exactly the right
-events): a cold load toasts nothing, your own acts are suppressed via `actorId`, anything
-older than five minutes is dropped as the reconnect guard, and a burst over three collapses
-to one summary. But `useNotify()` has **never** produced a visible toast in this app — the
-`<Toaster>` mounts and receives no children, on pre-existing paths as much as new ones. Ruled
-out: the vendored shadcn wrapper (swapping it for vue-sonner's own `<Toaster>` changes
-nothing) and the missing `vue-sonner/nuxt` module plus its stylesheet (installing both changes
-nothing). It is a vue-sonner v2 integration defect and it wants its own slice.
+**Toasts render (fixed 2026-08-08), and the cause is worth keeping because the diagnosis
+recorded here was wrong.** This section said `useNotify()` had "never produced a visible
+toast" and that the `<Toaster>` "mounts and receives no children". The second half was
+false and it is what sent the search in the wrong direction: the Toaster mounted, subscribed
+and received every toast, and each one reached the DOM with the right text, the right type
+and the right coordinates. **`vue-sonner`'s stylesheet was simply never imported**, so
+`[data-sonner-toast]` had no rules at all — no `position`, no `opacity`, no background — and
+every toast was laid out invisibly at the end of the document.
+
+`import 'vue-sonner/style.css'` in `ui/sonner/Sonner.vue` is the whole fix. **vue-sonner 1.x
+injected its CSS from JavaScript and 2.x ships it as a file you must import** — the *identical*
+migration FullCalendar 7 made, recorded two sections up in this same file, and it produced the
+identical failure shape. Nothing throws and nothing warns; the symptom is silence. It lives in
+the component rather than `nuxt.config`'s `css:` array so it cannot outlive the thing that
+needs it, and because that array's four entries are ordered for a reason a fifth would muddy.
+
+Two things this cost, both recorded so the next reader does not repeat them:
+
+- **The earlier "ruled out: installing the `vue-sonner/nuxt` module changes nothing" was
+  measured against a dev server that had never restarted.** That module's `css: true` was in
+  fact the one thing that *did* fix it, and the observation was thrown away. A Nuxt module is
+  added at config load; a running `nuxt dev` will not pick one up. **Restart before concluding
+  a module did nothing.**
+- **`getComputedStyle().opacity` is not a reliable readout in a headless browser.** A toast
+  measured there sat at `opacity: 0` with `data-mounted="true"` and a matching `opacity: 1`
+  rule, which reads as a cascade mystery and is not one: the page composited at ~4fps, so the
+  CSS *transition* never advanced and every sample caught its start value. `getAnimations()
+  .forEach(a => a.finish())` before measuring is the fix — it asks what the element is
+  transitioning *to* rather than where it happens to be.
+
+**A second defect was hiding behind the first**, invisible while nothing rendered at all:
+vue-sonner defaults `theme` to the literal `"light"`, never `"system"`, so the toaster stamped
+`data-sonner-theme="light"` whatever the app was wearing. The `--normal-*` variables the
+vendored wrapper sets are theme-reactive and would have coped alone, but **`rich-colors` is on
+and rich colours are hardcoded per `data-theme` in sonner's own stylesheet** — a success toast
+in dark mode came out near-white. `Sonner.vue` now defaults `theme` from `useColorMode()`,
+defaulted rather than forced so a caller can still pin one. Measured both ways: light is
+`#ecfdf3` on `#008a2e`, dark is `#001f0f` on `#59f3a6`.
+
+The client diff was correct all along and is unchanged: a cold load toasts nothing, your own
+acts are suppressed via `actorId`, anything older than five minutes is dropped as the reconnect
+guard, and a burst over three collapses to one summary. All four are now visible rather than
+merely true.
 
 The badge counts only `action` items. A bed out of service is worth seeing and is not a
 number anyone should feel behind on.
