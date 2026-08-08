@@ -18,6 +18,7 @@ import {
   BedDouble,
   ChevronDown,
   CircleDollarSign,
+  ClipboardCheck,
   CreditCard,
   ReceiptText,
   DoorOpen,

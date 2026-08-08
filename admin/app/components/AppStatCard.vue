@@ -15,8 +15,18 @@
 // sentence — and a prop would either lose that or invite v-html.
 const props = defineProps({
   to: { type: String, required: true },
-  /** A Lucide component, not a name. */
-  icon: { type: Object, required: true },
+  /**
+   * A Lucide component, not a name.
+   *
+   * `[Object, Function]`, and the Function half is load-bearing: Lucide's Vue
+   * icons are FUNCTIONAL components, so typing this `Object` alone made all
+   * four cards warn "Expected Object, got Function" on every render. That noise
+   * is not cosmetic — it drowned the "Missing required prop" warning that was
+   * the only signal a card had been given an icon nobody imported, which is
+   * exactly how the hourly-round card shipped with no icon at all. A prop type
+   * that cries wolf costs more than no prop type.
+   */
+  icon: { type: [Object, Function], required: true },
   /** Pre-formatted: money() has already run, so this component does no maths. */
   figure: { type: [String, Number], required: true },
   /**
