@@ -2707,7 +2707,7 @@ Two verification suites, both run against a live database:
   resident record agreeing about who is overdue (one grouped query behind both). The
   sort assertion now asserts the two-key **rule**, because the one-key version kept
   passing by coincidence after the sort changed. Posts a $1 payment — reseed after.
-- `node scripts/verify-checks.js` — **68 assertions** on the hourly round: the staff gate, the
+- `node scripts/verify-checks.js` — **69 assertions** on the hourly round: the staff gate, the
   board derived from the latest check (95 minutes OVERDUE, most-overdue-first, the missed
   bucket derived from absence, the amended marker), a roster that pre-accounts open
   sign-outs and never carries a destination, roster-completeness 409s (missing, extra,
@@ -2734,13 +2734,27 @@ Two verification suites, both run against a live database:
   **no purpose comes back null** rather than erroring — the common case, and the one a naive
   implementation crashes on. The seed exercises both states without being asked to: Ocampo's
   sign-out carries a purpose and Boone's deliberately does not.
-  Posts checks — reseed after. **Known fragility, not a regression: it cannot pass in the
-  first ~2 hours of the facility day.** Its missed-bucket and amendment probes sit 95
-  minutes back, which before ~2 AM falls into *yesterday*, so today's log has no elapsed
-  bucket for them to land in and two assertions fail. Running it with
-  `FACILITY_TIMEZONE` set to a zone where it is currently mid-day gives 65/65 and is the
-  quickest way to confirm nothing is actually broken. The real fix is to anchor those
-  probes to the start of the facility day.
+  Posts checks — reseed after. **It passes at every hour of the day** (fixed 2026-08-08),
+  and the fix is worth knowing because the diagnosis in this file was wrong for two days.
+
+  This used to fail two assertions before about 2 AM, recorded here as a "known fragility
+  of the suite". It was not the suite: **the SEED was writing its rounds into yesterday.**
+  The women's checks sat at `nowMs - k * HOUR`, and the day log is bounded by facility
+  midnight, so before 2 AM every one of them landed in the previous day and today's log had
+  nothing to show. The seed now places them at *today's* elapsed hours — the last one in
+  hour `H-2`, which is 60–180 minutes back whatever the minute and so always past the
+  alarm, with hour `H-1` deliberately empty as the missed bucket.
+
+  **What remains is a property of the clock, not a defect, and the suite states it rather
+  than failing.** A MISSED bucket is an ELAPSED hour with no check; at 00:30 the facility
+  day is one hour old and that hour is still running, so no such hour exists and no seeding
+  can invent one. Between midnight and 2 AM the two bucket assertions print an explicit
+  skip naming the reason and the run is **67/0**; from 2 AM it is **69/0**. What IS asserted
+  at every hour is the universal half — the current hour is never called missed, because it
+  has not elapsed — so the rule still has a test in the window where its sibling cannot run.
+
+  Verified by running the suite in zones where it is currently 00:53, 01:53, 02:53, 10:54
+  and 22:54, which exercises the real code path rather than a stubbed clock.
 - `node scripts/verify-screens.js` — 66 assertions on drug screening: the staff gate; the
   queue carrying **no outcome fields and no outcome values at all**, so the reveal is a
   boundary rather than a curtain; a positive without substances, a negative with them, and

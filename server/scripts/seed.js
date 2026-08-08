@@ -485,6 +485,25 @@ async function main() {
       },
     })
 
+  // ── Anchored to TODAY'S hours, not stepped blindly back from `now` ───────
+  //
+  // These rounds used to sit at `nowMs - k * HOUR`, which put every one of them
+  // in YESTERDAY's log before about 2 AM — and the day log is bounded by
+  // facility midnight. That is what made verify-checks.js fail two assertions
+  // for the first couple of hours of each facility day, recorded in CLAUDE.md
+  // as a "known fragility of the suite". It was not the suite: it was this seed
+  // writing history into the wrong day.
+  //
+  // Placing them on today's clock instead fixes it for 22 of the 24 hours. The
+  // remaining two are not a bug and cannot be seeded away: a MISSED bucket is an
+  // ELAPSED hour with no check, and at 00:30 the facility day has exactly one
+  // hour and it is still running. The suite says so rather than failing.
+  const facilityHourNow = Number(facilityHourKey(new Date(nowMs)).slice(-2))
+  const todayKey = facilityToday(new Date(nowMs))
+  /** :12 past the given hour of today, on the facility clock. */
+  const todayAtHour = (h) =>
+    facilityWallClockToUtc(todayKey, `${String(h).padStart(2, '0')}:12`)
+
   const mensNotes = [
     'Sleeping',
     'In room, reading',
@@ -513,23 +532,39 @@ async function main() {
     { stayId: byLast('Castillo'), status: 'NOT_FOUND', note: 'Not in his room or the common areas' },
   ])
 
-  // The women's side: hourly until 95 minutes ago, then nothing — so the
-  // apartment sits OVERDUE on first login. Hour k=4 is skipped on purpose:
-  // that is what a missed bucket looks like in the log.
-  for (let k = 6; k >= 2; k--) {
-    if (k === 4) continue
-    const at = new Date(nowMs - k * HOUR - 12 * MIN)
-    await createCheck(apt14.id, at, k % 2 === 0 ? manager.id : tech.id, [
-      k >= 5
+  // The women's side: walked through today's earlier hours and then NOT walked
+  // for the last two, so the apartment sits OVERDUE and the most recent elapsed
+  // hour reads as a missed bucket.
+  //
+  // The last check lands in hour H-2, which is between 60 and 180 minutes ago
+  // whatever the minute — always past the hour-plus-grace alarm. Hour H-1 is
+  // deliberately left empty: that is the missed bucket.
+  const womensHours = []
+  for (let h = Math.max(0, facilityHourNow - 6); h <= facilityHourNow - 2; h++) {
+    womensHours.push(h)
+  }
+
+  let womensLast = null
+  for (const h of womensHours) {
+    const early = h < facilityHourNow - 3
+    womensLast = await createCheck(apt14.id, todayAtHour(h), h % 2 === 0 ? manager.id : tech.id, [
+      early
         ? { stayId: byLast('Boone'), status: 'PRESENT', note: 'Getting ready for her shift' }
         : { stayId: byLast('Boone'), status: 'SIGNED_OUT' },
       { stayId: byLast('Ferrer'), status: 'PRESENT', note: 'In room, on the phone with family' },
     ])
   }
-  const womensLast = await createCheck(apt14.id, new Date(nowMs - 95 * MIN), tech.id, [
-    { stayId: byLast('Boone'), status: 'SIGNED_OUT' },
-    { stayId: byLast('Ferrer'), status: 'PRESENT', note: 'Doing laundry' },
-  ])
+
+  // Before 2 AM the facility day is too young to hold any of this: there is no
+  // elapsed hour to have skipped. Fall back to a single check 95 minutes back —
+  // it lands in yesterday, and the apartment still reads OVERDUE, because the
+  // alarm measures elapsed milliseconds and does not care about buckets.
+  if (!womensLast) {
+    womensLast = await createCheck(apt14.id, new Date(nowMs - 95 * MIN), tech.id, [
+      { stayId: byLast('Boone'), status: 'SIGNED_OUT' },
+      { stayId: byLast('Ferrer'), status: 'PRESENT', note: 'Doing laundry' },
+    ])
+  }
 
   // One amendment, so the log renders the marker: same visit, same instant,
   // corrected note, reason attached. The original stays.
