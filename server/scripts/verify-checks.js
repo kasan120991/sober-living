@@ -96,12 +96,34 @@ async function main() {
     ? ok('the most overdue apartment sorts first')
     : bad('overdue first', apts[0]?.name)
 
-  board.body.log.some((b) => b.missing.includes('Apt 14'))
-    ? ok('a skipped hour surfaces as a missed bucket — derived from absence, nothing written')
-    : bad('missed bucket', JSON.stringify(board.body.log.map((b) => [b.hourKey, b.missing])))
-  board.body.log.flatMap((b) => b.checks).some((c) => c.amended && c.amendmentReason)
-    ? ok('an amended check carries its marker and reason into the log')
-    : bad('amended marker', 'no amended row found')
+  // The current hour is DUE, never MISSED — no callout until it has passed.
+  // Universal: true at any hour of any day, so it is asserted unconditionally.
+  const currentBucket = board.body.log.find((b) => b.hourKey === board.body.hour.key)
+  currentBucket && currentBucket.missing.length === 0
+    ? ok('the current hour is never called missed — it has not elapsed yet')
+    : bad('current hour missing', JSON.stringify(currentBucket))
+
+  // A MISSED bucket is an ELAPSED hour with no check, so it needs the facility
+  // day to have elapsed hours to skip. Before 2 AM it has none — the day is one
+  // hour old and that hour is still running — and no amount of seeding can
+  // conjure one. This used to fail for the first two hours of every facility
+  // day and was recorded as a fragility of the suite; it was really the seed
+  // writing its rounds into yesterday, fixed there. What remains is a genuine
+  // property of the clock, so it is STATED rather than failed or hidden.
+  const elapsedBuckets = board.body.log.filter((b) => b.hourKey !== board.body.hour.key).length
+  if (elapsedBuckets >= 2) {
+    board.body.log.some((b) => b.missing.includes('Apt 14'))
+      ? ok('a skipped hour surfaces as a missed bucket — derived from absence, nothing written')
+      : bad('missed bucket', JSON.stringify(board.body.log.map((b) => [b.hourKey, b.missing])))
+    board.body.log.flatMap((b) => b.checks).some((c) => c.amended && c.amendmentReason)
+      ? ok('an amended check carries its marker and reason into the log')
+      : bad('amended marker', 'no amended row found')
+  } else {
+    console.log(
+      `  \x1b[33m—\x1b[0m missed-bucket and amended-marker skipped: the facility day is ` +
+        `${elapsedBuckets} elapsed hour(s) old, so no hour exists to have been skipped`,
+    )
+  }
   mens?.lastCheck?.accounted?.notFound === 1
     ? ok("the latest men's check carries one NOT_FOUND")
     : bad('notFound on card', JSON.stringify(mens?.lastCheck))
