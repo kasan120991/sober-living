@@ -117,8 +117,16 @@ async function submit() {
           <Input :id="id" v-model="form.destination" placeholder="NA meeting — St. Mark's" required />
         </AppField>
 
-        <AppField v-slot="{ id }" label="Purpose" description="Optional.">
-          <Input :id="id" v-model="form.purpose" />
+        <!-- Steered toward a REASON rather than a place, because this field is
+             what the resident record's apartment-check trail shows in place of
+             the destination. That rule is enforced by which column is read, so
+             the only lever on what the column HOLDS is here, where it is typed. -->
+        <AppField
+          v-slot="{ id }"
+          label="Purpose"
+          description="Optional. Why they are out — not where."
+        >
+          <Input :id="id" v-model="form.purpose" placeholder="Work shift" />
         </AppField>
 
         <div class="grid grid-cols-2 gap-3">
