@@ -18,15 +18,56 @@
 // NO RAIL DOT, also deliberately — AppResidentScreens' rule. A dot on a Clinical
 // section is an ambient clinical signal on every screen that draws the rail, and
 // an unmarked dose is the med pass board's business, not this pane's.
+import { Ellipsis, Plus } from '@lucide/vue'
 import { toneClass } from '~/utils/schedule.js'
 import { doseLine, medStateDisplay } from '~/utils/meds.js'
+import { STAFF_ROLE } from '~/utils/roles.js'
 import { facilityDateOf, formatFacilityTime, formatWallClock, humanDate } from '~/utils/facilityTime.js'
 
 const props = defineProps({
   residentId: { type: String, required: true },
 })
 
-const { getResidentMeds } = useMeds()
+const { getResidentMeds, deleteMedication } = useMeds()
+const { user } = useAuth()
+const notify = useNotify()
+
+// Presentation only. The routes are managers-only server-side and refuse a tech
+// regardless — this just stops offering a button that would always 403.
+const canManage = computed(() =>
+  [STAFF_ROLE.ADMIN, STAFF_ROLE.HOUSE_MANAGER].includes(user.value?.role),
+)
+
+// One dialog per section driven by a row ref, never one per row — the
+// AppBedTable rule.
+const editOpen = ref(false)
+const endOpen = ref(false)
+const active = ref(null)
+
+function openAdd() {
+  active.value = null
+  editOpen.value = true
+}
+function openEdit(m) {
+  active.value = m
+  editOpen.value = true
+}
+function openEnd(m) {
+  active.value = m
+  endOpen.value = true
+}
+
+async function remove(m) {
+  try {
+    await deleteMedication(m.id)
+    notify.success(`${m.name} removed`)
+    await load()
+  } catch (err) {
+    // The 409 here is the good one: it means doses exist and the record is
+    // being protected. Surface the server's own sentence, which says so.
+    notify.error(err?.data?.error ?? 'Could not remove this medication.')
+  }
+}
 
 const data = ref(null) // page-1 response — carries the medication list
 const logs = ref([]) // accumulated across Load more
@@ -91,11 +132,25 @@ const scheduleOf = (m) =>
     </p>
 
     <template v-else>
+      <!-- Managers only; a tech sees the list and no controls. -->
+      <AppMedicationDialog
+        v-model:open="editOpen"
+        :resident-id="residentId"
+        :medication="active"
+        @saved="load"
+      />
+      <AppMedicationEndDialog v-model:open="endOpen" :medication="active" @saved="load" />
+
       <!-- ── The standing instructions ─────────────────────────────────── -->
       <section>
-        <p class="text-muted-foreground mb-2 text-[11px] font-semibold tracking-wider uppercase">
-          Current medications
-        </p>
+        <div class="mb-2 flex items-center gap-2">
+          <p class="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
+            Current medications
+          </p>
+          <Button v-if="canManage" variant="outline" size="sm" class="ms-auto" @click="openAdd">
+            <Plus class="size-4" /> Add medication
+          </Button>
+        </div>
 
         <p v-if="!standing.length" class="text-muted-foreground text-sm">
           No medications are on this resident’s list.
@@ -106,7 +161,27 @@ const scheduleOf = (m) =>
             <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <span class="text-[14px] font-medium">{{ m.name }}</span>
               <span class="text-muted-foreground text-xs">{{ doseLine(m) }}</span>
-              <span class="text-muted-foreground ms-auto text-xs tabular-nums">{{ scheduleOf(m) }}</span>
+              <span class="text-muted-foreground ms-auto text-xs tabular-nums">
+                {{ scheduleOf(m) }}
+              </span>
+              <DropdownMenu v-if="canManage">
+                <DropdownMenuTrigger as-child>
+                  <Button variant="ghost" size="icon-sm" :aria-label="`Actions for ${m.name}`">
+                    <Ellipsis class="size-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" class="w-52">
+                  <DropdownMenuItem @select="openEdit(m)">Edit…</DropdownMenuItem>
+                  <DropdownMenuItem @select="openEnd(m)">Discontinue…</DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <!-- Offered because a medication added in error is a real
+                       case. The server refuses once any dose exists, and that
+                       refusal is surfaced verbatim. -->
+                  <DropdownMenuItem variant="destructive" @select="remove(m)">
+                    Remove
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
             <p v-if="m.prescriber || m.pharmacy" class="text-muted-foreground mt-1 text-xs">
               {{ [m.prescriber, m.pharmacy].filter(Boolean).join(' · ') }}

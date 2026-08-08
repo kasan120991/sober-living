@@ -1,0 +1,242 @@
+<script setup>
+// Putting a resident ON a medication, and correcting the entry afterwards.
+//
+// ADD AND EDIT ARE ONE MODAL IN TWO MODES, never two components — the
+// AppMaintenanceDetailDialog rule. Two forms is how the add path comes to
+// accept a shape the edit path refuses.
+//
+// Managers only, matching the server: recording a dose is a hallway act, but
+// deciding what somebody takes is not. The dialog is simply not rendered for a
+// tech — and that is presentation, not protection. The route refuses either
+// way.
+//
+// This component existing at all is the fix for a real gap: the API and the
+// read-only record section shipped without it, so a medication could only be
+// created by calling the API by hand. Exactly the failure CLAUDE.md records
+// against module 10's vendorName — a column whose whole justification was
+// getting something out of a description, with nothing in the UI able to set it.
+import { Plus, X } from '@lucide/vue'
+import { facilityDateNow, facilityDateOf, formatWallClock } from '~/utils/facilityTime.js'
+
+const props = defineProps({
+  open: { type: Boolean, default: false },
+  residentId: { type: String, default: null },
+  /** Pass a medication to edit it; omit to add a new one. */
+  medication: { type: Object, default: null },
+})
+const emit = defineEmits(['update:open', 'saved'])
+
+const { addMedication, editMedication } = useMeds()
+const notify = useNotify()
+
+const blank = () => ({
+  name: '',
+  dosage: '',
+  instructions: '',
+  prescriber: '',
+  pharmacy: '',
+  isPrn: false,
+  times: [],
+  startsOn: facilityDateNow(),
+})
+
+const form = reactive(blank())
+const newTime = ref('')
+const busy = ref(false)
+const error = ref('')
+
+const editing = computed(() => Boolean(props.medication))
+
+watch(
+  () => (props.open ? (props.medication?.id ?? 'new') : null),
+  (key) => {
+    if (!key) return
+    error.value = ''
+    newTime.value = ''
+    Object.assign(form, blank())
+    if (props.medication) {
+      const m = props.medication
+      Object.assign(form, {
+        name: m.name,
+        dosage: m.dosage,
+        instructions: m.instructions ?? '',
+        prescriber: m.prescriber ?? '',
+        pharmacy: m.pharmacy ?? '',
+        isPrn: m.isPrn,
+        times: [...m.times],
+        startsOn: facilityDateOf(m.startsOn),
+      })
+    }
+  },
+  { immediate: true },
+)
+
+function addTime() {
+  const t = newTime.value
+  if (!/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(t)) return
+  if (form.times.includes(t)) return
+  form.times = [...form.times, t].sort()
+  newTime.value = ''
+}
+const dropTime = (t) => (form.times = form.times.filter((x) => x !== t))
+
+// The same pairing the database enforces: a scheduled medication needs at least
+// one time, an as-needed one carries none. Refusing here only saves the round
+// trip — the CHECK is what actually holds.
+const canSave = computed(
+  () =>
+    form.name.trim() &&
+    form.dosage.trim() &&
+    (form.isPrn ? form.times.length === 0 : form.times.length > 0),
+)
+
+// Switching to as-needed clears the schedule rather than leaving times behind
+// that the server would refuse — the control says what it does.
+watch(
+  () => form.isPrn,
+  (prn) => {
+    if (prn) form.times = []
+  },
+)
+
+async function submit() {
+  busy.value = true
+  error.value = ''
+  const body = {
+    name: form.name.trim(),
+    dosage: form.dosage.trim(),
+    instructions: form.instructions.trim() || undefined,
+    prescriber: form.prescriber.trim() || undefined,
+    pharmacy: form.pharmacy.trim() || undefined,
+    isPrn: form.isPrn,
+    times: form.times,
+    startsOn: form.startsOn,
+  }
+  try {
+    if (editing.value) {
+      await editMedication(props.medication.id, body)
+      notify.success('Medication updated')
+    } else {
+      await addMedication(props.residentId, body)
+      notify.success('Medication added')
+    }
+    emit('update:open', false)
+    emit('saved')
+  } catch (err) {
+    error.value = err?.data?.error ?? 'Could not save this medication.'
+  } finally {
+    busy.value = false
+  }
+}
+</script>
+
+<template>
+  <Dialog :open="open" @update:open="(v) => emit('update:open', v)">
+    <DialogContent class="sm:max-w-[520px]">
+      <DialogHeader>
+        <DialogTitle>{{ editing ? 'Edit medication' : 'Add a medication' }}</DialogTitle>
+        <DialogDescription>
+          What the resident takes and when. Staff hand the dose over and observe it —
+          the times below are when it appears on the med pass.
+        </DialogDescription>
+      </DialogHeader>
+
+      <form class="flex flex-col gap-4" @submit.prevent="submit">
+        <Alert v-if="error" variant="destructive">
+          <AlertDescription>{{ error }}</AlertDescription>
+        </Alert>
+
+        <div class="flex gap-3">
+          <AppField v-slot="{ id }" label="Name" class="flex-1">
+            <Input :id="id" v-model="form.name" placeholder="Sertraline" required />
+          </AppField>
+          <AppField
+            v-slot="{ id }"
+            label="Dose"
+            class="flex-1"
+            description="As written on the label."
+          >
+            <Input :id="id" v-model="form.dosage" placeholder="50 mg, 1 tablet" required />
+          </AppField>
+        </div>
+
+        <AppField v-slot="{ id }" label="Instructions" description="Optional.">
+          <Input :id="id" v-model="form.instructions" placeholder="With food" />
+        </AppField>
+
+        <!-- Scheduled vs as-needed. The one control whose effect is another
+             control's contents, so it sits directly above the times. -->
+        <div class="flex items-center gap-3 rounded-md border px-3 py-2">
+          <Switch id="prn" :model-value="form.isPrn" @update:model-value="form.isPrn = $event" />
+          <label for="prn" class="flex-1 text-sm">
+            As needed
+            <span class="text-muted-foreground block text-xs">
+              No set times. Logged when the resident actually takes it, never shown as due.
+            </span>
+          </label>
+        </div>
+
+        <AppField
+          v-if="!form.isPrn"
+          label="Times"
+          description="Facility clock. An 8pm dose stays 8pm across daylight saving."
+        >
+          <div class="flex flex-col gap-2">
+            <div v-if="form.times.length" class="flex flex-wrap gap-1.5">
+              <span
+                v-for="t in form.times"
+                :key="t"
+                class="bg-accent flex items-center gap-1 rounded-full px-2.5 py-1 text-xs tabular-nums"
+              >
+                {{ formatWallClock(t) }}
+                <button
+                  type="button"
+                  class="text-muted-foreground hover:text-foreground"
+                  :aria-label="`Remove ${formatWallClock(t)}`"
+                  @click="dropTime(t)"
+                >
+                  <X class="size-3" />
+                </button>
+              </span>
+            </div>
+            <div class="flex gap-2">
+              <Input
+                v-model="newTime"
+                type="time"
+                class="w-36"
+                aria-label="Add a time"
+                @keydown.enter.prevent="addTime"
+              />
+              <Button type="button" variant="outline" size="sm" @click="addTime">
+                <Plus class="size-4" /> Add time
+              </Button>
+            </div>
+          </div>
+        </AppField>
+
+        <div class="flex gap-3">
+          <AppField v-slot="{ id }" label="Prescriber" class="flex-1" description="Optional.">
+            <Input :id="id" v-model="form.prescriber" placeholder="Dr. Alvarez" />
+          </AppField>
+          <AppField v-slot="{ id }" label="Starts" class="flex-1">
+            <Input :id="id" v-model="form.startsOn" type="date" />
+          </AppField>
+        </div>
+
+        <!-- Say where the irreversibility is, at the point somebody is writing
+             one — the AppLedgerEntryDialog habit. -->
+        <p class="text-muted-foreground text-xs">
+          A medication can be edited freely. Once a dose has been recorded against it, it
+          can only be discontinued — never deleted, because that would hide the doses.
+        </p>
+
+        <DialogFooter class="border-t pt-4">
+          <Button type="button" variant="ghost" @click="emit('update:open', false)">Cancel</Button>
+          <Button type="submit" :disabled="busy || !canSave">
+            {{ editing ? 'Save changes' : 'Add medication' }}
+          </Button>
+        </DialogFooter>
+      </form>
+    </DialogContent>
+  </Dialog>
+</template>
