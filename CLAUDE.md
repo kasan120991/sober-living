@@ -255,47 +255,61 @@ Two consequences worth stating, because the cheaper design forecloses both:
   excused. A cohort-derived schedule has nowhere to put those, which is the retrofit to
   avoid.
 
-This is the resident record's **Schedule** section (see module 1) and it is read-only there:
-the record answers what this person is scheduled for, and the event itself is edited from
-the schedule module. That split is what stops twelve rail sections each growing an editor.
+This is the resident record's **Attendance** section (see module 1) and it is read-only
+there: the record answers what HAPPENED, and the event itself is created, edited and rolled
+from the schedule module. That split is what stops twelve rail sections each growing an editor.
 
-**The section is three bands — attendance, the diary, the history** (chosen 2026-08-05 from
-three rendered variants; a two-column split and a record-first order were the others).
-Schedule-first, because the rail already carries a dot for what needs attention and Overview is
-*defined* as the needs-attention surface, so this section does not have to be where a review
-starts. What it uniquely answers is "what is this person scheduled for".
+**It was called Schedule and carried a 14-day diary until 2026-08-08.** The facility removed
+the diary and renamed the section, and the rename is the honest half of that rather than a
+relabel: with no diary, "what is this person scheduled for" is not a question this section
+answers at all — `/schedule` owns the events and answers it. The old name would have gone on
+promising something that had been taken out. Confirmed at the same time: the upcoming view
+does **not** move elsewhere on the record.
 
-- **The diary is FullCalendar's LIST VIEW**, not a hand-rolled day-grouped list — a `list` view
-  *is* a day-grouped agenda, and pulse themes it (`listDay*`, `listItemEvent*`, `noEvents*`), so
-  the section inherits the board's typography and palette instead of approximating them. The
-  plugin is a **subpath of the already-installed package** (`@fullcalendar/vue3/list`), so it
-  adds no dependency. It is a **custom 14-day view** (`duration: { days: 14 }`) because the
-  shipped ones are 7 days or a calendar month and the endpoint's window is 14.
-- **Fed naive wall-clock strings**, never `startsAt` — the same rule as the board, for the same
-  reason.
-- **`height: 420`, not `'auto'`.** A fortnight of a daily group is eighteen rows over thirteen
-  day headers, and at auto height that pushed the attendance history a full screen below the
-  fold. Three bands you cannot see together are not three bands.
-- **A list day header has TWO cells**, `level` 0 leading and 1 trailing, and a content generator
-  replaces the text of BOTH — so overriding it without branching on `level` prints the label
-  twice, once at each end of the row. `listDayAltFormat: false` does not help: it suppresses the
-  alt *format*, not the alt *cell*. Note it is **not** `listDaySideFormat`, which was v6's name
-  and silently does nothing. The trailing cell now carries the day's session count, which is the
-  one thing a day header can say that its rows cannot.
-- Headers come from **`humanDate`** so today and tomorrow read as "Today" and "Tomorrow" — no
-  date format can produce those — and `localDateKeyOf`, not `facilityDateOf`, because
-  FullCalendar built that Date from our own naive string.
+Three things went with it, and each was load-bearing while it lasted, so they are recorded
+rather than deleted: the FullCalendar **list view** and its 14-day custom duration; the
+`height: 420` that kept three bands visible together; and the day-header `level` branch, whose
+lesson — a list day header has TWO cells and a content generator replaces the text of BOTH —
+now lives in `AppTodaySchedule.vue`, which still renders one. The board keeps its own list
+view; only the record's copy is gone.
+
+**The section is a counts band over a day-grouped trail** (variant A, chosen 2026-08-08 from
+three rendered variants; a per-group breakdown and an eight-week grid were the others). It is
+the same shape as Apartment checks and Medications, so the rail reads consistently the whole
+way down — and a record section is usually opened by somebody who came for a different reason.
+What it gives up, knowingly: it shows a **list, not a shape**, so three absences in a row and
+three across a month look alike until you read the dates. The grid variant is the fallback if
+the house ever wants the pattern, though attendance here is a few sessions a week and too
+sparse for a grid to earn its space.
+
+**`GET /residents/:id/attendance` covers the WHOLE STAY, keyset-paginated** — renamed from
+`/schedule`, which answered a question the endpoint no longer asks. Dropping `upcoming` removed
+this read's only use of `expand()`, `materializedByKey()` and the window; what is left is a
+straight paginated read over `schedule_attendance`, cursored on `(sessionDate, id)` exactly
+like `residentChecks()` and `residentMeds()`. The old `?s=schedule` section key is aliased to
+`attendance` in `residentSections.js`, because the key is in the URL and a link somebody saved
+outlives the rename — without the alias it falls through to Overview, which looks like the
+link worked while showing the wrong thing.
+
+**THE SUMMARY COUNTS THE STAY, NOT THE PAGE**, and it is computed on the server for exactly
+that reason. `attendanceSummary()` derived its counts from the ten rows it had been sent, which
+was true while ten rows were all there were; against a paginated history the same arithmetic
+describes page one under a heading claiming to describe the stay — a figure that shrinks as
+somebody scrolls. It is a `groupBy` over the stay, it rides on page one only, and `since` is
+the oldest session date rather than the oldest loaded one. There are assertions for the total
+exceeding a loaded page and for a cursor page omitting the summary.
+
+**Marks are ordered by the SESSION's date, not `createdAt`.** It was "the most recently *typed*
+marks", which is a different list the moment anybody back-fills a roll — and the section reads
+it as a chronology. The tiebreak is the **id**, not `createdAt`, so the keyset is total: two
+marks sharing a date still have a stable order, which is what stops a page boundary repeating
+or skipping a row. There is an assertion pinning the order.
 
 **Two fields had always been on the wire and dropped.** `hasActiveStay` is why a discharged
 resident used to be told "nothing scheduled in the next two weeks" — which reads as a rota gap
-and sends somebody hunting for events that ought to be there. There are now **three** empty
-states where there was one: no active stay, active but on nothing, and no attendance recorded
-yet. And `rescheduled` now shows as the muted word "moved", matching the board.
-
-**`recent` is ordered by the SESSION's date, not `createdAt`.** It was "the ten most recently
-*typed* marks", which is a different list the moment anybody back-fills a roll — and the section
-presents it as chronological, with a summary and a "since" date reading it as a sequence. There
-is an assertion pinning the order.
+and sends somebody hunting for events that ought to be there. There are still **three** empty
+states: no active stay, an active resident with nothing recorded, and a stay whose marks have
+not started yet.
 
 **Attendance reads as counts, never a percentage** — `attendanceSummary()` in
 `utils/schedule.js`. `recent` caps at ten and a new resident has one or two marks, so "1 of 2"
@@ -2590,10 +2604,18 @@ Two verification suites, both run against a live database:
   interpretation in the facility timezone, one-open-per-stay, the grace window, census
   presence (and that it never carries a destination), the pill's critical branch, the
   bell item clearing itself on return, and returned records refusing deletion.
-- `node scripts/verify-schedule.js` — 94 assertions on the schedule. On the resident record:
-  `recent` coming back **newest-session-first** (nothing pinned that before, and the section now
-  reads it as a sequence), and `hasActiveStay` being **true for an active resident and false for
-  a discharged one** — the pair the section's three empty states rest on. **Thirty on editing,
+- `node scripts/verify-schedule.js` — **99 assertions** on the schedule. On the resident record:
+  marks coming back **newest-session-first**, and `hasActiveStay` being **true for an active
+  resident and false for a discharged one** — the pair the section's three empty states rest
+  on. **Eight cover the 2026-08-08 reshape**, and two are the ones that matter: no `upcoming`
+  key rides on the payload at all — a KEY-PRESENCE check, because a re-added `upcoming: []`
+  would pass a length check while quietly restoring the coupling — and the summary's total
+  **exceeds a one-row page**, which is what catches a client counting the rows it happens to
+  hold. Plus two keyset pages that neither overlap nor break the ordering, a cursor page
+  omitting the summary, a malformed cursor as a 400, and a resident with no marks getting **no
+  summary** rather than a 0-of-0 bar. The old board-vs-record "one expander" assertion is
+  **gone rather than broken**: the record expands nothing now, so no second read is left to
+  disagree — the dashboard still carries that property, asserted in `verify-dashboard.js`. **Thirty on editing,
   moving and deleting:** identity and the roster editable *with* attendance recorded and the
   taken roll untouched, all five shape fields refused once anything is recorded, `endsOn`
   refused below the last recorded date, **the merged shared card surviving an in-place timing

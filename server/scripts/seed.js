@@ -18,7 +18,7 @@ import {
   facilityWallClockToUtc,
 } from '../src/lib/facilityTime.js'
 import { INVOICE_NET_DAYS } from '../src/domain/constants.js'
-import { addDays, dateKeyToUtc } from '../src/services/schedule/expand.js'
+import { addDays, dateKeyToUtc, occursOn } from '../src/services/schedule/expand.js'
 
 const DEV_PASSWORD = 'soberlife-dev-1234'
 
@@ -1230,9 +1230,92 @@ async function main() {
     })),
   ])
 
-  // Two days ago is deliberately left with NO session row at all — that is what
-  // an un-taken roll looks like, and it is what the board's queue is built
-  // from. Nothing was written to make it appear; it is derived from its absence.
+  /**
+   * Back-fill the rest of the fortnight, so a fresh seed looks like a house that
+   * has been running rather than one that started yesterday.
+   *
+   * Reads the occurrences back out of the database and uses `occursOn` — THE
+   * expander's own predicate — rather than re-deriving which dates each event
+   * covers. Two reasons: a roll on a date the rule does not cover is a phantom
+   * session the board would refuse to show, and hand-wiring the weekdays here
+   * would silently rot the first time somebody edits an event above.
+   *
+   * The mix is DETERMINISTIC, hashed from the stay and the date rather than
+   * random. A seed that shuffles on every run makes a screenshot unreproducible
+   * and a "why is this different now" question unanswerable.
+   *
+   * A both-cohorts event gets BOTH of its occurrences stamped, because the loop
+   * walks occurrences rather than events — which is what the merge's unanimity
+   * rule requires. Stamping one side would leave the shared card permanently
+   * MISSED and stuck in the queue.
+   */
+  const ROLL_BACKFILL_DAYS = 14
+  // The two most recent days are left alone ON PURPOSE — see the note below.
+  const ROLL_LEAVE_RECENT = 2
+
+  /** ~85% attended, with a stable scattering of absences and excusals. */
+  const markFor = (stayId, dateKey) => {
+    let h = 7
+    for (const ch of `${stayId}|${dateKey}`) h = (h * 31 + ch.charCodeAt(0)) >>> 0
+    const r = h % 100
+    if (r < 8) return { status: 'ABSENT', note: 'Did not show. Spoken to.' }
+    if (r < 15) return { status: 'EXCUSED', note: 'Work shift. Cleared in advance.' }
+    return { status: 'ATTENDED', note: null }
+  }
+
+  const allOccurrences = await prisma.scheduleOccurrence.findMany({
+    include: { attendees: true },
+  })
+  const existing = new Set(
+    (await prisma.scheduleSession.findMany({ select: { occurrenceId: true, sessionDate: true } })).map(
+      (r) => `${r.occurrenceId}|${r.sessionDate.toISOString().slice(0, 10)}`,
+    ),
+  )
+
+  let backfilled = 0
+  for (let back = ROLL_BACKFILL_DAYS; back >= ROLL_LEAVE_RECENT; back--) {
+    const dateKey = addDays(facilityToday(), -back)
+    for (const occurrence of allOccurrences) {
+      if (!occursOn(occurrence, dateKey)) continue
+      // Never write over the two hand-written rolls above — they demonstrate
+      // specific states (an absence, a shared roll with an excusal) and the
+      // unique index would refuse a second session anyway.
+      if (existing.has(`${occurrence.id}|${dateKey}`)) continue
+      if (!occurrence.attendees.length) continue
+
+      const session = await prisma.scheduleSession.create({
+        data: {
+          occurrenceId: occurrence.id,
+          cohort: occurrence.cohort,
+          sessionDate: dateKeyToUtc(dateKey),
+          attendanceTakenAt: facilityWallClockToUtc(dateKey, occurrence.startsAtLocal),
+          attendanceTakenById: tech.id,
+        },
+      })
+      await prisma.scheduleAttendance.createMany({
+        data: occurrence.attendees.map((a) => {
+          const mark = markFor(a.stayId, dateKey)
+          return {
+            sessionId: session.id,
+            cohort: occurrence.cohort,
+            stayId: a.stayId,
+            status: mark.status,
+            note: mark.note,
+            recordedById: tech.id,
+          }
+        }),
+      })
+      backfilled++
+    }
+  }
+
+  // The last two days are deliberately left with NO session rows — that is what
+  // an un-taken roll looks like, and it is what the board's queue is built from.
+  // Nothing is written to make one appear; it is derived from its absence.
+  //
+  // Taking EVERY roll would empty the queue, and the queue is the one place the
+  // board says something needs doing. A seed that hides its own alarm is a seed
+  // that teaches the wrong thing about the screen.
 
   console.log(`
   Seeded:
@@ -1249,7 +1332,7 @@ async function main() {
     ${await prisma.invoice.count()} invoices — rent billed monthly (net 3), most paid, 3 unpaid months long overdue
     balances are invoiced-and-due: 2 residents owe, the rest are square; fees stay pending
     ${await prisma.scheduleEvent.count()} scheduled events (5 weekly, 1 one-off; 2 of them both cohorts), ${await prisma.scheduleOccurrence.count()} occurrences
-    ${await prisma.scheduleAttendance.count()} attendance marks on 2 taken rolls (one of them shared) — earlier days left un-taken on purpose
+    ${await prisma.scheduleAttendance.count()} attendance marks across ${await prisma.scheduleSession.count()} taken rolls (~85% attended, the rest absent or excused) — the last 2 days left un-taken on purpose, so the board's queue has something in it
 
   Any account you created with scripts/create-user.js was kept.
 

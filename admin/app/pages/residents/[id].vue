@@ -65,7 +65,10 @@ const dischargeLabel = (t) => DISCHARGE_TYPES.find((d) => d.value === t)?.label 
 // behaves. A section key is not resident data — unlike the search query, which
 // CLAUDE.md keeps out of URLs because it is somebody's name.
 const section = computed({
-  get: () => (sectionByKey(route.query.s) ? route.query.s : 'overview'),
+  // The RESOLVED key, not the raw query value — sectionByKey maps renamed keys
+  // (`?s=schedule` → attendance), and returning the raw one would match no
+  // template arm and render nothing.
+  get: () => sectionByKey(route.query.s)?.key ?? 'overview',
   set: (s) => router.replace({ query: { ...route.query, s: s === 'overview' ? undefined : s } }),
 })
 const currentSection = computed(() => sectionByKey(section.value))
@@ -427,14 +430,14 @@ const maskedSsn = computed(() =>
         </template>
 
         <!-- ── Schedule ──────────────────────────────────────────────────── -->
-        <template v-else-if="section === 'schedule'">
+        <template v-else-if="section === 'attendance'">
           <!-- Fetches on open, like the ledger, and needs its own Suspense for
                the same reason: it awaits in setup and mounts on a click, outside
                Nuxt's own boundary. -->
           <Suspense>
-            <AppResidentSchedule :resident-id="resident.id" />
+            <AppResidentAttendance :resident-id="resident.id" />
             <template #fallback>
-              <p class="text-muted-foreground text-sm">Loading the schedule…</p>
+              <p class="text-muted-foreground text-sm">Loading attendance…</p>
             </template>
           </Suspense>
         </template>

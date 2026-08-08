@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { handler, parseBody } from '../lib/http.js'
 import { requireAuth, requireStaff, requireRole } from '../middleware/authorize.js'
 import { ATTENDANCE_STATUS, RECURRENCE, STAFF_ROLE } from '../domain/constants.js'
-import { parseCohorts, residentSchedule, scheduleWindow } from '../services/schedule/read.js'
+import { parseCohorts, scheduleWindow } from '../services/schedule/read.js'
 import {
   createEvent,
   deleteEvent,
@@ -237,6 +237,3 @@ router.delete(
 )
 
 export default router
-
-/** Mounted separately under /residents/:id/schedule — see routes/residents.js. */
-export { residentSchedule }
