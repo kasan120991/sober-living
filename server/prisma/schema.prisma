@@ -244,6 +244,29 @@ enum CheckResidentStatus {
   NOT_FOUND
 }
 
+/// What happened at one dose of one medication.
+///
+/// THREE members, and the absence of MISSED is the design rather than an
+/// oversight. A missed dose is the ABSENCE of a record — derived on read from a
+/// scheduled instant older than MED_PASS_GRACE_MS with no log against it, the
+/// same way PRESENCE, CHECK_STATE and SESSION_STATE are derived. Storing it
+/// would make "nobody ran the pass" indistinguishable from "we ran it and
+/// marked everyone missed": the first is the evidence gap the alarm exists to
+/// find, and a storable MISSED lets it be silenced with a tap.
+///
+/// HELD is what staff reach for instead, and it carries a required note — the
+/// honest record of a dose deliberately not given.
+enum MedLogStatus {
+  /// Handed over and observed being taken. The ordinary case, no note needed.
+  GIVEN
+  /// The resident declined it. Note REQUIRED (CHECK in the migration): an
+  /// unexplained refusal is a half-filled form that reached the table.
+  REFUSED
+  /// Staff deliberately did not give it — asleep, off property, held pending a
+  /// prescriber call. Note REQUIRED, for the same reason.
+  HELD
+}
+
 enum DocumentType {
   RESIDENT_AGREEMENT
   PHOTO_ID
@@ -544,6 +567,7 @@ model Stay {
   serviceEntries      ServiceEntry[]
   checkLines          ApartmentCheckResident[]
   drugScreens         DrugScreen[]
+  medications         Medication[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -1369,6 +1393,142 @@ model ApartmentCheckResident {
   @@map("apartment_check_residents")
 }
 
+/// One medication a resident is on — the standing instruction, not evidence.
+///
+/// The facility's model (confirmed 2026-08-07, closing open question 3) is
+/// STAFF-STORED, RESIDENT SELF-ADMINISTERED: the house holds the meds, staff
+/// hand over the dose and observe it being taken. Staff never administer, so
+/// this is not a clinical MAR — there is no route, no site, no PRN protocol.
+/// The house stores NO controlled substances, so there is deliberately no
+/// count, no on-hand figure and no reconciliation anywhere in this module.
+///
+/// Freely UPDATABLE and soft-deletable, the maintenance_requests posture: a
+/// dose that changes is current state, not a new fact about the past. Two rules
+/// keep that safe, and both are enforced in services/meds.js:
+///
+///   1. A medication with any log CANNOT BE DELETED, only ended (`endsOn`).
+///      Soft-deleting it would make the soft-delete extension filter it out of
+///      every read and silently erase the dose history hanging off it — the
+///      identical failure the ScheduleEvent rule warns about.
+///   2. MedLog SNAPSHOTS `name` and `dosage`, so raising a dose next month
+///      cannot rewrite what was handed over last week. Deliberately a second
+///      copy that MAY disagree, exactly like Invoice.totalCents.
+///
+/// Hangs off Stay, like the ledger, sign-outs, service hours and check lines: a
+/// readmission starts a fresh list, and a discharge drops the resident off every
+/// future pass WITH NO WRITE AT ALL.
+model Medication {
+  id     String @id @default(uuid(7))
+  stayId String
+  stay   Stay   @relation(fields: [stayId], references: [id])
+
+  /// As written on the label.
+  name String
+  /// "500 mg, 1 tablet" — label text, deliberately not a structured dose. A
+  /// quantity/unit/route triple is MAR territory and this facility does not
+  /// administer.
+  dosage String
+  /// "with food", "do not crush".
+  instructions String?
+  /// Text references, the ServiceEntry.supervisorName precedent: neither is an
+  /// entity in this app and neither needs to be.
+  prescriber String?
+  pharmacy   String?
+
+  /// The dose times, as facility WALL-CLOCK 'HH:MM' strings — never instants.
+  /// ScheduleOccurrence.startsAtLocal's rule verbatim and for its reason: an
+  /// 8pm dose is 8pm on both sides of a DST boundary, where a stored instant
+  /// drifts an hour in November. Converted per date by facilityWallClockToUtc().
+  ///
+  /// A Prisma scalar list emits a NULLABLE column with no default, so the
+  /// migration adds SET NOT NULL + SET DEFAULT — otherwise cardinality(NULL) is
+  /// NULL and the CHECK below passes on NULL.
+  times String[] @default([])
+
+  /// As-needed. A PRN medication carries NO times and never reads DUE — it is
+  /// logged when it is actually taken. Paired with `times` by CHECK.
+  isPrn Boolean @default(false)
+
+  startsOn DateTime @db.Date
+  /// Discontinuation. This is how a medication ends — never a delete once
+  /// anything has been logged against it, and never earlier than the last
+  /// logged dose. Paired with `endReason` by CHECK: an unexplained
+  /// discontinuation is exactly what an auditor asks about.
+  endsOn    DateTime? @db.Date
+  endReason String?
+
+  addedById String
+  addedBy   User   @relation("addedMedications", fields: [addedById], references: [id])
+
+  logs MedLog[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  /// The composite-FK target for MedLog, so a log can never claim a medication
+  /// belonging to a different stay. Same idiom as Stay's @@unique([id, cohort]).
+  @@unique([id, stayId])
+  @@index([stayId])
+  @@map("medications")
+}
+
+/// One dose, as observed. Append-only evidence, amendment pattern.
+///
+/// Stricter than service_entries, which keeps one write-once UPDATE for
+/// verification: a dose has no transition at all, so every UPDATE and DELETE is
+/// refused by trigger AND by revoked privilege.
+///
+/// `observedById` is the OBSERVING STAFF MEMBER — the glossary's term, and
+/// deliberately NOT module 5's `witnessedById`. Watching somebody swallow their
+/// own medication and taking custody of a specimen are different acts and keep
+/// different words. `recordedById` is whoever typed it, usually the same person;
+/// both are kept because a second staff member entering it later is a real case,
+/// and only one of them attests to having watched.
+model MedLog {
+  id           String @id @default(uuid(7))
+  medicationId String
+  /// Carried directly for the RLS own-stay policy and the resident record's
+  /// keyset read — the apartment_check_residents precedent. The COMPOSITE
+  /// foreign key below is what makes a mismatched pair impossible: Postgres
+  /// itself refuses a log claiming stay B against stay A's medication.
+  stayId String
+
+  medication Medication @relation(fields: [medicationId, stayId], references: [id, stayId])
+
+  /// The scheduled instant this log answers, from facilityWallClockToUtc(date,
+  /// time). NULL for a PRN dose — nothing was scheduled, so there is no slot to
+  /// answer. One live log per (medicationId, scheduledFor), by trigger.
+  scheduledFor DateTime?
+
+  status MedLogStatus
+
+  observedById String
+  observedBy   User   @relation("observedMedLogs", fields: [observedById], references: [id])
+  recordedById String
+  recordedBy   User   @relation("recordedMedLogs", fields: [recordedById], references: [id])
+
+  /// Snapshots, taken at the dose. See Medication's note: these exist precisely
+  /// so a later edit to the med list cannot rewrite the record of what was
+  /// actually handed over.
+  medicationName String
+  dosage         String
+
+  /// REQUIRED for REFUSED and HELD (CHECK in the migration), optional for GIVEN.
+  note String?
+
+  supersedesId    String? @unique
+  supersedes      MedLog? @relation("MedAmendment", fields: [supersedesId], references: [id])
+  supersededBy    MedLog? @relation("MedAmendment")
+  amendmentReason String?
+
+  createdAt DateTime @default(now())
+
+  @@index([stayId, scheduledFor(sort: Desc)])
+  @@index([medicationId])
+  @@map("med_logs")
+}
+
 model InsurancePolicy {
   id String @id @default(uuid(7))
 
@@ -1497,6 +1657,11 @@ model User {
   recordedScreens   DrugScreen[] @relation("recordedScreens")
   screenDecisions   DrugScreen[] @relation("screenDecisions")
   screenLabResults  DrugScreen[] @relation("screenLabResults")
+
+  addedMedications Medication[] @relation("addedMedications")
+  /// Two relations, one act each: who watched the dose, and who typed it.
+  observedMedLogs  MedLog[]     @relation("observedMedLogs")
+  recordedMedLogs  MedLog[]     @relation("recordedMedLogs")
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

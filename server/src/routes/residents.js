@@ -28,6 +28,8 @@ import {
 } from '../services/ledger.js'
 import { residentChecks } from '../services/checks.js'
 import { residentScreens } from '../services/screens.js'
+import { addMedication, residentMeds } from '../services/meds.js'
+import { createMedicationBody } from './meds.js'
 import { residentInvoiceRoutes } from './invoices.js'
 import { residentSchedule } from '../services/schedule/read.js'
 // Aliased: the ledger exports a listEntries too, and this file imports both.
@@ -328,6 +330,44 @@ router.get(
 router.get(
   '/:id/screens',
   handler(async (req, res) => res.json(await residentScreens(req.params.id))),
+)
+
+// ── Medications ───────────────────────────────────────────────────────────
+// Read-only here, the Apartment checks and Drug screens precedent: the record
+// answers what this person is on and how their doses have gone; recording,
+// amending and changing the list all live on /meds.
+//
+// Medications ARE named in this payload, unlike anywhere on the med pass
+// board. Same exception, same justification as screens on the record: a record
+// page is a deliberate navigation to one person somebody already chose, and the
+// audit log records it at that grain.
+router.get(
+  '/:id/meds',
+  handler(async (req, res) => {
+    const { date, cursor, limit } = req.query
+    if (date !== undefined && !dateOnly.safeParse(date).success) {
+      throw new HttpError(400, 'date must be YYYY-MM-DD')
+    }
+    res.json(
+      await residentMeds(req.params.id, {
+        date,
+        cursor,
+        limit: limit ? Math.min(Math.max(parseInt(limit, 10) || 0, 1), 100) : undefined,
+      }),
+    )
+  }),
+)
+
+// Adding a medication is MANAGERS, and it lives here rather than on /meds
+// because it is addressed by resident: the service resolves their active stay,
+// which is what a medication actually hangs off.
+router.post(
+  '/:id/medications',
+  requireRole(STAFF_ROLE.ADMIN, STAFF_ROLE.HOUSE_MANAGER),
+  handler(async (req, res) => {
+    const data = parseBody(createMedicationBody, req.body)
+    res.status(201).json(await addMedication(req.params.id, data, req.session.userId))
+  }),
 )
 
 // ── Invoices ──────────────────────────────────────────────────────────────

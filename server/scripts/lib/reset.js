@@ -35,11 +35,14 @@ export async function resetFacilityData(prisma, { quiet = false } = {}) {
   // must be cleared before either.
   // invoice_lines and invoices lead: both refuse DELETE by trigger even to the
   // owner, and both reference ledger_entries and stays, so they clear first.
+  // med_logs joins for the same reason and must precede medications, which it
+  // references; medications is DELETE-able but sits here so the pair clears
+  // together, and both are BEFORE stays.
   await sql(
     // maintenance_events joins the TRUNCATE list for the same reason as the
     // others: its append-only trigger refuses DELETE even to the owner, and it
     // references maintenance_requests, so it must clear before them.
-    'TRUNCATE "invoice_lines", "invoices", "stripe_events", "drug_screens", "apartment_check_residents", "apartment_checks", "maintenance_events", "service_entries", "ledger_entries", "bed_assignments", "sessions", "audit_log" RESTART IDENTITY',
+    'TRUNCATE "invoice_lines", "invoices", "stripe_events", "drug_screens", "med_logs", "medications", "apartment_check_residents", "apartment_checks", "maintenance_events", "service_entries", "ledger_entries", "bed_assignments", "sessions", "audit_log" RESTART IDENTITY',
   )
 
   // The schedule, in foreign-key order and all of it BEFORE stays, which the
