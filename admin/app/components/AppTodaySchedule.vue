@@ -82,9 +82,17 @@ const options = computed(() => ({
 <template>
   <FcCalendar :options="options">
     <!-- Pulse highlights TODAY's list day-header with its own cushion, so the
-         label leans into that rather than fighting it: "Today" in primary,
-         with the date as the quiet trailing cell (level 1 — see
-         AppResidentSchedule for why the branch is required). -->
+         label leans into that rather than fighting it: "Today" in primary, with
+         the date as the quiet trailing cell.
+
+         THE `level` BRANCH IS REQUIRED. A FullCalendar list day header renders
+         TWO cells — level 0 leading and level 1 trailing — and a content
+         generator replaces the text of BOTH, so overriding without branching
+         prints the label twice, once at each end of the row.
+         `listDayAltFormat: false` does not help: it suppresses the alt FORMAT,
+         not the alt CELL. (This reasoning used to live in
+         AppResidentSchedule, which was deleted on 2026-08-08 when the record's
+         diary was replaced by the Attendance section.) -->
     <template #listDayHeaderContent="arg">
       <span v-if="!arg.level" :class="arg.isToday && 'text-primary font-semibold'">
         {{ humanDate(localDateKeyOf(arg.date), { short: true }) }}

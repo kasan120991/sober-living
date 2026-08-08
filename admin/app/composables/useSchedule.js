@@ -82,8 +82,13 @@ export function useSchedule() {
 
   const deleteEvent = (id) => api(`/schedule/events/${id}`, { method: 'DELETE' })
 
-  /** One resident's own schedule — their attendee rows, never their cohort. */
-  const getResidentSchedule = (residentId) => api(`/residents/${residentId}/schedule`)
+  /**
+   * One resident's ATTENDANCE — recorded marks over the whole stay, keyset
+   * paginated. Renamed from getResidentSchedule on 2026-08-08: the record's
+   * diary was removed, so this no longer returns anything upcoming.
+   */
+  const getResidentAttendance = (residentId, { cursor } = {}) =>
+    api(`/residents/${residentId}/attendance${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`)
 
   return {
     getSchedule,
@@ -96,6 +101,6 @@ export function useSchedule() {
     updateEvent,
     moveSeries,
     deleteEvent,
-    getResidentSchedule,
+    getResidentAttendance,
   }
 }

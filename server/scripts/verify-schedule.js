@@ -318,14 +318,15 @@ async function main() {
     ? ok('a weekly 6pm reads 6:00 PM on both sides of the DST boundary')
     : bad('DST stability', dstHits.map((s) => `${s.date} ${formatFacilityTime(s.startsAt)}`).join(', '))
 
-  const resSched = (await tech(`/residents/${men[0].residentId}/schedule`)).body
-  const sameInstant = resSched.upcoming.every((u) => {
-    const match = wideAll.find((s) => s.eventId === u.eventId && s.date === u.date)
-    return !match || match.startsAt === u.startsAt
-  })
-  sameInstant
-    ? ok('the board and the resident record agree on every shared session — one expander')
-    : bad('expander agreement', 'a session differs between the two reads')
+  // The board-vs-record "one expander" assertion lived here until 2026-08-08.
+  // It is GONE because the coupling it guarded is: the resident record no longer
+  // expands anything, so there is no second read to disagree with. What replaced
+  // it is the check further down that no `upcoming` key rides on the record at
+  // all — a stronger guarantee than the two agreeing.
+  //
+  // The one-expander property still holds where it still applies: the dashboard
+  // calls scheduleWindow() and verify-dashboard.js asserts its window matches
+  // the board's.
 
   // ── Lazy materialization ────────────────────────────────────────────────
   console.log('\n\x1b[1mLazy materialization\x1b[0m')
@@ -976,42 +977,81 @@ async function main() {
   // ── The resident record ─────────────────────────────────────────────────
   console.log('\n\x1b[1mThe resident record\x1b[0m')
 
-  const mine = (await tech(`/residents/${men[0].residentId}/schedule`)).body
-  const dupes = mine.upcoming.filter(
-    (s, i, all) => all.findIndex((x) => x.eventId === s.eventId && x.date === s.date) !== i,
-  )
-  mine.upcoming.length > 0 && dupes.length === 0
-    ? ok(`a man on a shared event sees it once (${mine.upcoming.length} upcoming, no duplicates)`)
-    : bad('resident schedule', `${dupes.length} duplicates`)
+  const mine = (await tech(`/residents/${men[0].residentId}/attendance`)).body
 
-  // `recent` is ordered by the SESSION's date, not by when the mark was typed.
-  // The record presents it as chronological — a summary, a "since" date, a run of
-  // marks all read it as a sequence — and `createdAt desc` is a different sequence
-  // the moment anybody back-fills a roll.
-  const recentDates = mine.recent.map((a) => a.date)
-  const descending = [...recentDates].sort().reverse()
-  JSON.stringify(recentDates) === JSON.stringify(descending)
-    ? ok(`recent attendance comes back newest-session-first (${recentDates.join(', ') || 'empty'})`)
-    : bad('recent ordered by session date', JSON.stringify(recentDates))
+  // The DIARY IS GONE (2026-08-08). This endpoint answers what happened, and
+  // /schedule answers what is coming — so nothing upcoming may ride along. A
+  // key-presence check rather than a length check: a re-added `upcoming: []`
+  // would pass the second and quietly restore the coupling.
+  !('upcoming' in mine)
+    ? ok('the record carries no upcoming sessions — the diary moved out, it did not empty')
+    : bad('upcoming gone', JSON.stringify(Object.keys(mine)))
 
-  // The resident record distinguishes "no active stay" from "on nothing", and it
+  // Ordered by the SESSION's date, not by when the mark was typed. The section
+  // presents it as chronological — a summary, a "since" date, a run of marks all
+  // read it as a sequence — and `createdAt desc` is a different sequence the
+  // moment anybody back-fills a roll.
+  const markDates = mine.marks.map((a) => a.date)
+  const descending = [...markDates].sort().reverse()
+  JSON.stringify(markDates) === JSON.stringify(descending)
+    ? ok(`attendance comes back newest-session-first (${markDates.join(', ') || 'empty'})`)
+    : bad('marks ordered by session date', JSON.stringify(markDates))
+
+  // The section distinguishes "no active stay" from "nothing recorded", and it
   // can only do that because the payload says which.
   mine.hasActiveStay === true
-    ? ok('an active resident’s schedule says so, so the record can tell the empty states apart')
+    ? ok('an active resident says so, so the section can tell the empty states apart')
     : bad('hasActiveStay', mine.hasActiveStay)
+
+  // ── The summary counts the STAY, not the page ───────────────────────────
+  // The easiest bug to ship in this reshape: attendanceSummary() used to count
+  // the ten rows it had been sent, which was true while ten was all there was.
+  // Against a paginated history the same arithmetic describes page one while the
+  // heading claims to describe the stay — a figure that shrinks as you scroll.
+  const paged = (await tech(`/residents/${men[0].residentId}/attendance?limit=1`)).body
+  paged.marks.length === 1 && paged.summary
+    ? ok('page one carries the summary alongside a single mark')
+    : bad('summary on page one', `${paged.marks.length} marks, summary ${Boolean(paged.summary)}`)
+
+  paged.summary && paged.summary.total > paged.marks.length
+    ? ok(`the summary counts the whole stay, not the page (${paged.summary.total} vs ${paged.marks.length} loaded)`)
+    : bad('summary counts stay', JSON.stringify(paged.summary))
+
+  // ── Keyset pages ────────────────────────────────────────────────────────
+  if (paged.nextCursor) {
+    const second = (await tech(
+      `/residents/${men[0].residentId}/attendance?limit=1&cursor=${encodeURIComponent(paged.nextCursor)}`,
+    )).body
+    const overlap = second.marks.some((m) => paged.marks.some((p) => p.id === m.id))
+    !overlap
+      ? ok('a second keyset page does not repeat the first')
+      : bad('page overlap', JSON.stringify(second.marks.map((m) => m.id)))
+    second.marks.every((m) => m.date <= paged.marks[paged.marks.length - 1].date)
+      ? ok('…and does not break the newest-first ordering across the boundary')
+      : bad('page ordering', `${second.marks[0]?.date} after ${paged.marks.at(-1)?.date}`)
+    // The aggregate rides on page one only, so a Load-more does not re-run it.
+    second.summary === null
+      ? ok('…and a cursor page omits the summary rather than recomputing it')
+      : bad('summary on page two', JSON.stringify(second.summary))
+  }
+
+  const badCursor = await tech(`/residents/${men[0].residentId}/attendance?cursor=not-a-cursor`)
+  badCursor.status === 400
+    ? ok('a malformed cursor is a 400')
+    : bad('bad cursor', badCursor.status)
 
   const roster2 = (await tech('/residents')).body.residents
   const joy = roster2.find((r) => r.lastName === 'Nakamura')
-  const joySched = (await tech(`/residents/${joy.id}/schedule`)).body
-  joySched.upcoming.length === 0 && joySched.hasActiveStay === true
-    ? ok('a resident on no events gets an EMPTY schedule, not their cohort’s — and is still active')
-    : bad('empty not cohort', `${joySched.upcoming.length} sessions, active ${joySched.hasActiveStay}`)
+  const joyAtt = (await tech(`/residents/${joy.id}/attendance`)).body
+  joyAtt.marks.length === 0 && joyAtt.hasActiveStay === true && joyAtt.summary === null
+    ? ok('a resident with no marks gets an empty record and NO summary — a 0-of-0 bar is not shown')
+    : bad('empty attendance', JSON.stringify({ n: joyAtt.marks.length, a: joyAtt.hasActiveStay }))
 
   // `victim` was discharged by the roster-lifecycle group above.
-  const goneSched = (await tech(`/residents/${victim.residentId}/schedule`)).body
-  goneSched.hasActiveStay === false && goneSched.upcoming.length === 0
-    ? ok('a DISCHARGED resident reports hasActiveStay:false — a different empty state, not an empty diary')
-    : bad('discharged schedule', JSON.stringify({ a: goneSched.hasActiveStay, u: goneSched.upcoming?.length }))
+  const goneAtt = (await tech(`/residents/${victim.residentId}/attendance`)).body
+  goneAtt.hasActiveStay === false && goneAtt.marks.length === 0
+    ? ok('a DISCHARGED resident reports hasActiveStay:false — a different empty state')
+    : bad('discharged attendance', JSON.stringify({ a: goneAtt.hasActiveStay, n: goneAtt.marks?.length }))
 
   const audited = await runAsSystem(async () =>
     prisma.auditLog.count({ where: { entity: { in: ['ScheduleAttendance', 'ScheduleAttendee'] } } }),

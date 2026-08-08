@@ -31,7 +31,7 @@ import { residentScreens } from '../services/screens.js'
 import { addMedication, residentMeds } from '../services/meds.js'
 import { createMedicationBody } from './meds.js'
 import { residentInvoiceRoutes } from './invoices.js'
-import { residentSchedule } from '../services/schedule/read.js'
+import { residentAttendance } from '../services/schedule/read.js'
 // Aliased: the ledger exports a listEntries too, and this file imports both.
 import {
   listEntries as listServiceEntries,
@@ -285,14 +285,24 @@ router.patch(
   }),
 )
 
-// ── Schedule ──────────────────────────────────────────────────────────────
-// Read-only here: the record answers what this person is scheduled for, and the
-// event itself is edited from the schedule module. A join through THEIR
-// ATTENDEE ROWS, never a query on their cohort — so a resident on nothing gets
-// an empty list rather than everything their cohort does.
+// ── Attendance ────────────────────────────────────────────────────────────
+// Read-only, and deliberately NOT the schedule: the record answers what
+// happened, and /schedule owns the events and answers what is coming. Renamed
+// from `/schedule` on 2026-08-08 when the diary was removed from the record —
+// the old path answered a question this endpoint no longer asks.
+//
+// Keyset-paginated over the whole stay, the /checks and /meds shape.
 router.get(
-  '/:id/schedule',
-  handler(async (req, res) => res.json(await residentSchedule(req.params.id))),
+  '/:id/attendance',
+  handler(async (req, res) => {
+    const { cursor, limit } = req.query
+    res.json(
+      await residentAttendance(req.params.id, {
+        cursor,
+        limit: limit ? Math.min(Math.max(parseInt(limit, 10) || 0, 1), 100) : undefined,
+      }),
+    )
+  }),
 )
 
 // ── Apartment checks ──────────────────────────────────────────────────────

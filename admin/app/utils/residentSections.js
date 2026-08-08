@@ -26,9 +26,12 @@ export const RESIDENT_SECTIONS = Object.freeze([
     group: 'Record',
     built: true,
   },
+  // Renamed from Schedule on 2026-08-08 when the record's 14-day diary was
+  // removed. The section answers what HAPPENED; /schedule owns the events and
+  // answers what is coming, so "Schedule" here had stopped being true.
   {
-    key: 'schedule',
-    label: 'Schedule',
+    key: 'attendance',
+    label: 'Attendance',
     group: 'Record',
     built: true,
   },
@@ -99,7 +102,20 @@ export const RESIDENT_SECTIONS = Object.freeze([
 
 export const sectionsInGroup = (group) => RESIDENT_SECTIONS.filter((s) => s.group === group)
 
-export const sectionByKey = (key) => RESIDENT_SECTIONS.find((s) => s.key === key) ?? null
+/**
+ * Section keys that have been renamed, old → new.
+ *
+ * The key is in the URL (`?s=…`), so a link somebody saved or pasted into a
+ * handover note outlives the rename. Without this, `?s=schedule` silently falls
+ * through to Overview — which looks like the link worked and quietly shows the
+ * wrong thing, the worst of the three possible outcomes.
+ */
+const RENAMED_SECTIONS = Object.freeze({ schedule: 'attendance' })
+
+export const sectionByKey = (key) => {
+  const resolved = RENAMED_SECTIONS[key] ?? key
+  return RESIDENT_SECTIONS.find((s) => s.key === resolved) ?? null
+}
 
 /**
  * The dot rules (CLAUDE.md module 1): amber is behind on service hours;
