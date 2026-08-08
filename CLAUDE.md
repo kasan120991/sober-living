@@ -278,8 +278,10 @@ Three things went with it, and each was load-bearing while it lasted, so they ar
 rather than deleted: the FullCalendar **list view** and its 14-day custom duration; the
 `height: 420` that kept three bands visible together; and the day-header `level` branch, whose
 lesson — a list day header has TWO cells and a content generator replaces the text of BOTH —
-now lives in `AppTodaySchedule.vue`, which still renders one. The board keeps its own list
-view; only the record's copy is gone.
+is recorded **here and nowhere else in code** as of 2026-08-08: it lived on in
+`AppTodaySchedule.vue`, and that component stopped being a FullCalendar view the same day.
+The lesson still holds for any list view the board grows. The board keeps its own list view;
+only the record's copy is gone.
 
 **The section is a counts band over a day-grouped trail** (variant A, chosen 2026-08-08 from
 three rendered variants; a per-group breakdown and an eight-week grid were the others). It is
@@ -2181,15 +2183,90 @@ domain name, its own nav entry and its whole board at `/census`, one tap away, a
 status pill and logo still link to `/` because the pill's figure (overdue / unplaced) is
 exactly what the dashboard's panels answer.
 
-The layout is Kasan's own, chosen from a rendered mock: a **greeting header** ("Good
-afternoon, Dana" on the **facility clock**, never the browser's) with a **Quick actions**
-menu on the right; **three icon status cards** — signed out (with overdue), beds free,
-outstanding balances; then two columns, left wider — **Needs attention**, **Signed out**
-and **Outstanding balances** panels on the left, **today's schedule** on the right as
-FullCalendar's one-day list view (`AppTodaySchedule`; it was a rolling 7-day list first,
-narrowed 2026-08-06 by request). The whole day shows, including sessions already over —
-the panel answers "what is today's schedule", and un-taken rolls are the queue's
-business, not this list's.
+**Relaid 2026-08-08, chosen from three rendered variants.** The shape is now: greeting
+header → **unaccounted band** → **strip of four status cards** → **Needs attention** full
+width → a **three-panel foot** (Today · Signed out · Outstanding balances). The greeting
+still reads on the **facility clock**, never the browser's, with **Quick actions** on the
+right; `AppTodaySchedule` is a **plain list** since 2026-08-08 (FullCalendar's one-day list
+view before that, and a rolling 7-day list before *that*, narrowed 2026-08-06), and the whole
+day still shows including sessions already over
+— the panel answers "what is today's schedule", and un-taken rolls are the queue's business.
+
+**What was wrong, measured rather than felt.** The old 1.55 : 1 split gave the right column
+one content-sized panel beside three stacked ones, so **the schedule ended at y 480 while
+the left column ran to y 1018 — 537px of nothing, over half the grid**. Needs attention was
+422px, about 40% of a 1,041px page that scrolled at every desktop height. And two of the
+three cards restated the panel directly beneath them: "2 signed out · 1 overdue" sat above
+the Signed out panel, "$1,625.00 outstanding" above Outstanding balances.
+
+**The result: 892px in a 900px viewport at 1440 — the page fits, alarm band and all**, down
+from 1,041. Attention is 230px, down from 422, **with nothing hidden and no cap changed**.
+The foot's three panels end within **78px** of each other.
+
+**THREE PANELS IN THE FOOT, AND THE NUMBER WAS MEASURED.** Two-up left Today 138px short of
+the panels beside it; stretching the cells to fix that put **140px of blank inside the Today
+card**, which reads as a bug rather than as breathing room. Three panels at their natural
+heights agree to within 78px with no stretch at all, which is why `items-start` is still
+there — nothing needs to stretch when the heights already match. The rejected two-up is
+recorded so it is not re-proposed as new.
+
+**Needs attention goes TWO-UP at `xl`**, and the row shape, the priority order, the caps,
+the overflow rows, the situations badge and the single amber dot are all **unchanged**.
+Priority reads left-to-right then down, which is the natural order — the rows' *sequence* is
+what makes this a queue rather than a list, so it is preserved rather than gridded into a
+serpentine (which is what sank the rejected "bands, no columns" variant). The cost, taken
+knowingly: an odd number of situations leaves a hole at the end of the last row.
+
+**Two situation classes that were on the wire from the start and rendered NOWHERE are now
+rendered** — `attention.notAccounted` and `attention.checksOverdue`. Both already fed the
+bell at `severity: CRITICAL`, and module 1 calls unaccounted-for "the record's loudest
+fact", so the screen that greets every unlock was silent about the loudest thing the
+facility can be told. **No server change was needed**, which is why `verify-dashboard.js`
+passes **unchanged** — that unchanged suite is the evidence the whole relay was client-side.
+
+- **The band is people, and is NEVER capped** — the cap rule already refuses to hide one:
+  "hiding either is hiding a person or a hazard." Sorted longest-missing-first, the same
+  rule `checksOverdue.since` follows.
+- **The round is a FIGURE, not rows**, with a named first apartment and an "and N more"
+  tail — navigation, the roll-overflow rule applied to a box. Strictly less than `/checks`
+  shows, which is the one place this layout trades detail for height.
+- **The figure always means one thing**: apartments past their round. It is deliberately not
+  overloaded with the unaccounted count — two facts sharing one number is how a reader
+  learns to distrust it. **The last-checked time is stated only when ONE apartment is
+  overdue**; beside "and 2 more" it would read as describing all of them.
+- **`lastCheckAt` is legitimately NULL** for an apartment nobody has walked (module 4: "an
+  apartment never checked reads OVERDUE, not blank"), so it is branched on, never defaulted
+  into a formatter.
+- **Membership is NOT re-derived client-side.** `/checks` re-filters its own full apartment
+  list; this page receives the already-filtered subset, so re-filtering could only shorten it
+  and would let the two screens disagree. Only the elapsed label ticks.
+- **THE ROUND BOX IS THE ONE PLACE THIS PAGE STATES A POSITIVE** — "Everyone accounted for".
+  The absence of an alarm is not the same as its presence, and on the screen that greets
+  every unlock at a recovery residence, saying so is worth a box.
+
+**THE ONE INSET MOVED, and that is a deliberate reversal.** It was on the overdue sign-out
+row since 2026-08-06; it is now on the unaccounted band. Module 1 settles the tie in its own
+words: *"where anything ever needs a single answer, unaccounted-for outranks overdue,
+because one is a person nobody can find and the other is money."* The sign-out row keeps its
+destructive badge and its red due time, so it **loses styling and no information** — the
+same trade the balances panel and the overdue-pass row each made when they considered the
+inset and declined it. The page still carries **exactly one**, and that is now asserted in
+the browser by counting computed `box-shadow`s rather than being merely aspirational.
+
+**`AppStatCard` was extracted** — three inline copies of the same ~25-line class string, and
+the strip needed a fourth. The sub-line is a **slot**, not a string prop, because every one
+of them carries markup. It was landed as its own commit, verified pixel-identical first, so
+the layout commit had a clean baseline.
+
+**The balances card and panel link is role-aware, and this was a defect.** Both pointed at
+`/residents`; `/billing` shipped 2026-08-07, the day *after* the rule that a card "should
+take you where you act on its number". It is **not a swap**: `/billing` is manager-gated and
+its route guard bounces a tech, so `balancesTo` is `canManage ? '/billing' : '/residents'`.
+
+**`quietDay` gained the two new clauses**, which was also a defect waiting to happen: it read
+only attention/signedOut/balances, so a house with every queue empty but one apartment past
+its round would have printed "Nothing needs attention" directly above a box saying otherwise
+— the self-contradiction module 15 records for the "$150 waiting / Send $250" card.
 
 **One read, `GET /dashboard`, composed entirely from the modules' own derivations** —
 `listSignOuts`, `unhousedWithOptions`, `cohortCapacity`, `scheduleWindow`,
@@ -2258,18 +2335,31 @@ Decisions with teeth, each chosen explicitly:
   **Rolls are the one kind capped — at THREE (2026-08-06)**, with an overflow row
   ("30 more rolls due → Schedule") carrying the rest. A house that has never taken a
   roll owes a fortnight × two cohorts of them, and thirty roll rows bury the one urgent
-  repair. Unhoused residents and urgent repairs always render **in full**: both are
+  repair. Unhoused residents and **URGENT** repairs always render **in full**: both are
   structurally small, and hiding either is hiding a person or a hazard. **The badge
   counts SITUATIONS, not rendered rows** — the capped rolls are still true, and the
   overflow row is navigation.
+  **A correction to this paragraph (2026-08-08):** it said "urgent repairs" render in full
+  and meant every repair in the panel, which stopped being true on 2026-08-07 when the
+  bell's union grew a merely-*aged* arm. `AGED_REPAIRS_SHOWN = 3` caps that tail with its
+  own overflow row; a request at **URGENT priority** still always renders, hazard-first.
+  The rule did not change — the prose was describing half of it.
 - **The beds-free card shows one figure with the cohort split beside it** ("2 · 1 men,
   1 women") — the bare total alone would hide one side full while the other has room,
   which is the exact failure `cohortCapacity()`'s per-cohort shape exists to prevent.
 - **`upcoming` crosses the wire in band form**, `{ shared, lanes }` like `GET /schedule`
   and produced by the same merge — there is still no server endpoint returning a flat
   schedule list. `AppTodaySchedule` concatenates the provably-disjoint bands
-  client-side (the board's own sanctioned pattern) and renders FullCalendar's shipped
-  `listDay` view. Read-only; a row navigates to `/schedule`.
+  client-side (the board's own sanctioned pattern) and renders them as a **plain list**
+  (2026-08-08, by request — a five-row read-only list is not what a calendar library is
+  for, and this is the app's most-refetched page). Read-only; a row navigates to
+  `/schedule`.
+  **IT MUST SORT.** That is the one thing FullCalendar was quietly doing for us:
+  `shared` and `lanes` are each ordered, but concatenating them interleaves two ordered
+  runs into an unordered one, so a 7:30 women's session would print above a 9:00 shared
+  house meeting purely because of which band it came from. It sorts on the wall-clock
+  string, which is safe *because* `'HH:MM'` is zero-padded — lexical order is
+  chronological order and no Date is constructed.
 - **Overdue is re-derived client-side on a 30-second tick** against `signedOut` rows
   the server sends un-filtered — the census pattern, so a resident crosses the grace
   window without a refetch. The needsRoll queue does NOT get the schedule board's 60s
@@ -2289,11 +2379,18 @@ Decisions with teeth, each chosen explicitly:
 **Polish pass (2026-08-06), two rules worth keeping:** the attention panel carries ONE
 amber signal — a dot on its eyebrow — and its rows are quiet; an inset rule on every row
 made urgency read as wallpaper, so the destructive inset on an overdue sign-out card is
-now the only inset on the page, which is what gives it meaning. And the three status
-cards are LINKS to the page that explains their figure (sign-outs, census, residents) —
-a card that names a number should take you where you act on it. One trap hit in
+now the only inset on the page, which is what gives it meaning. And the status cards are LINKS to the page that
+explains their figure — a card that names a number should take you where you act on it.
+**There are FOUR since 2026-08-08** (hourly round, sign-outs, census, money), and the money
+one now resolves per role: it pointed at `/residents` for a year after `/billing` became
+the page that explains it. One trap **that used to be hit** in
 `AppTodaySchedule`: pulse's stylesheets are unlayered and beat Tailwind utilities, so
-overriding its nowrap on event titles takes an inline style, not a class.
+overriding its nowrap on event titles took an inline style rather than a class. That is
+no longer live on this page — the plain list wraps its titles with an ordinary class —
+but **the trap itself still applies anywhere FullCalendar renders**, which is `/schedule`.
+The title still wraps rather than truncating, and for the original reason: this panel is a
+third of the foot's width and the whole width of a phone row, and a clipped group name is
+worse than a second line.
 
 **Deliberately excluded, so they are not "added later" casually:** an occupancy-over-time
 trend (needs replaying `bed_assignments` history per day — a report, not a page read) and
