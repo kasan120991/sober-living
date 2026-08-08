@@ -312,86 +312,49 @@ const quietDay = computed(
     <div v-else class="flex min-w-0 flex-col gap-4">
       <!-- ── Status cards ─────────────────────────────────────────────────
            Each card is a LINK to the page that explains its figure — a card
-           that names a number should take you to where you act on it. Hover
-           and focus states say so; the border warms to primary rather than
-           the card lifting, which is the preset's own idiom. -->
+           that names a number should take you to where you act on it. The
+           shape lives in AppStatCard; this block only says what the numbers
+           are and where each one goes. -->
       <div class="grid gap-3 sm:grid-cols-3">
-        <NuxtLink
+        <AppStatCard
           to="/sign-outs"
-          class="bg-card hover:border-primary/40 hover:bg-muted/30 focus-visible:ring-ring/30
-            flex items-center gap-3.5 rounded-md border p-4 outline-none transition-colors
-            focus-visible:ring-3"
+          :icon="DoorOpen"
+          :figure="signedOut.length"
+          :tone="overdueCount ? 'destructive' : 'default'"
         >
-          <div
-            class="flex size-10 shrink-0 items-center justify-center rounded-lg"
-            :class="overdueCount ? 'bg-destructive/10 text-destructive' : 'bg-primary/10 text-primary'"
-          >
-            <DoorOpen class="size-5" />
-          </div>
-          <div>
-            <p class="text-2xl leading-tight font-semibold tracking-tight tabular-nums">
-              {{ signedOut.length }}
-            </p>
-            <p class="text-muted-foreground text-xs">
-              signed out
-              <template v-if="overdueCount">
-                · <span class="text-destructive font-semibold">{{ overdueCount }} overdue</span>
-              </template>
-            </p>
-          </div>
-        </NuxtLink>
+          <template #qualifier>
+            signed out
+            <template v-if="overdueCount">
+              · <span class="text-destructive font-semibold">{{ overdueCount }} overdue</span>
+            </template>
+          </template>
+        </AppStatCard>
 
-        <NuxtLink
-          to="/census"
-          class="bg-card hover:border-primary/40 hover:bg-muted/30 focus-visible:ring-ring/30
-            flex items-center gap-3.5 rounded-md border p-4 outline-none transition-colors
-            focus-visible:ring-3"
-        >
-          <div class="bg-primary/10 text-primary flex size-10 shrink-0 items-center justify-center rounded-lg">
-            <BedDouble class="size-5" />
-          </div>
-          <div>
-            <p class="text-2xl leading-tight font-semibold tracking-tight tabular-nums">
-              {{ bedsFree.total }}
-            </p>
-            <p class="text-muted-foreground text-xs">
-              {{ bedsFree.total === 1 ? 'bed free' : 'beds free' }}
-              <template v-if="bedsFree.total"> · {{ bedsFree.sub }}</template>
-            </p>
-          </div>
-        </NuxtLink>
+        <AppStatCard to="/census" :icon="BedDouble" :figure="bedsFree.total">
+          <template #qualifier>
+            {{ bedsFree.total === 1 ? 'bed free' : 'beds free' }}
+            <template v-if="bedsFree.total"> · {{ bedsFree.sub }}</template>
+          </template>
+        </AppStatCard>
 
-        <NuxtLink
-          to="/residents"
-          class="bg-card hover:border-primary/40 hover:bg-muted/30 focus-visible:ring-ring/30
-            flex items-center gap-3.5 rounded-md border p-4 outline-none transition-colors
-            focus-visible:ring-3"
-        >
-          <div class="bg-primary/10 text-primary flex size-10 shrink-0 items-center justify-center rounded-lg">
-            <CircleDollarSign class="size-5" />
-          </div>
-          <div>
-            <p class="text-2xl leading-tight font-semibold tracking-tight tabular-nums">
-              {{ money(balances.totalCents) }}
-            </p>
-            <!-- The beds-free card's split treatment: the total, then the part
-                 of it that is past due. A bare total hides the difference
-                 between owing and being late, which is the whole judgement. -->
-            <p class="text-muted-foreground text-xs">
-              <template v-if="balances.owing.length">
-                outstanding ·
-                <span v-if="balances.overdueCents > 0" class="text-destructive font-medium tabular-nums">
-                  {{ money(balances.overdueCents) }} overdue
-                </span>
-                <template v-else>
-                  <span class="tabular-nums">{{ balances.owing.length }}</span>
-                  {{ balances.owing.length === 1 ? 'resident owes' : 'residents owe' }}
-                </template>
+        <AppStatCard to="/residents" :icon="CircleDollarSign" :figure="money(balances.totalCents)">
+          <!-- The beds-free card's split treatment: the total, then the part of
+               it that is past due. A bare total hides the difference between
+               owing and being late, which is the whole judgement. -->
+          <template #qualifier>
+            <template v-if="balances.owing.length">
+              outstanding ·
+              <span v-if="balances.overdueCents > 0" class="text-destructive font-medium tabular-nums">
+                {{ money(balances.overdueCents) }} overdue
+              </span>
+              <template v-else>
+                <span class="tabular-nums">{{ balances.owing.length }}</span>
+                {{ balances.owing.length === 1 ? 'resident owes' : 'residents owe' }}
               </template>
-              <template v-else>outstanding · nobody owes</template>
-            </p>
-          </div>
-        </NuxtLink>
+            </template>
+            <template v-else>outstanding · nobody owes</template>
+          </template>
+        </AppStatCard>
       </div>
 
       <!-- ── Two columns, left wider ──────────────────────────────────────── -->
