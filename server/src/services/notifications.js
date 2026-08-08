@@ -4,6 +4,7 @@ import { formatFacilityTime } from '../lib/facilityTime.js'
 import { overdueApartmentChecks, unaccountedResidents } from './checks.js'
 import { MAINTENANCE_STATE, bellMaintenanceWhere, requestState } from './maintenance.js'
 import { unmarkedDoses } from './meds.js'
+import { overduePasses } from './passes.js'
 import { overdueWhere } from './signOuts.js'
 
 /**
@@ -30,7 +31,7 @@ import { overdueWhere } from './signOuts.js'
 const LEVEL = { ACTION: 'action', WATCH: 'watch' }
 
 export async function listNotifications() {
-  const [overdue, unhoused, urgent, staleOpen, checksOverdue, notAccounted, medsDue] = await Promise.all([
+  const [overdue, unhoused, urgent, staleOpen, checksOverdue, notAccounted, medsDue, passesLate] = await Promise.all([
     // The loudest state in the app: someone off property past their expected
     // return (plus the grace window — see OVERDUE_GRACE_MS).
     prisma.signOut.findMany({
@@ -79,6 +80,10 @@ export async function listNotifications() {
     // The med pass: doses due now with nothing recorded. COUNTS AND A TIME
     // ONLY — see below, and see unmarkedDoses() for why DUE and never MISSED.
     unmarkedDoses(),
+
+    // Passes past their return time plus the hour of grace. Derived through
+    // the module's own knob, so the bell and /passes cannot disagree.
+    overduePasses(),
   ])
 
   const items = []
@@ -181,6 +186,23 @@ export async function listNotifications() {
       detail: `${medsDue.label} med pass · ${medsDue.residents} ${medsDue.residents === 1 ? 'resident' : 'residents'}`,
       to: '/meds',
       at: medsDue.at,
+    })
+  }
+
+  for (const p of passesLate) {
+    items.push({
+      id: `pass:${p.id}`,
+      level: LEVEL.ACTION,
+      kind: 'PASS_OVERDUE',
+      title: `${p.fullName} is not back from their pass`,
+      // The DESTINATION rides here, exactly as it does on the overdue sign-out
+      // item and for the same reason: whoever acts on this needs to know where
+      // to start looking. The census tile still withholds it — that board is
+      // glanced at with residents around, and this is a work queue.
+      detail: `Due back ${formatFacilityTime(p.returnBy)} · ${p.destination}`,
+      to: '/passes',
+      // Return time as the timestamp: the longest overdue sorts first.
+      at: p.returnBy,
     })
   }
 

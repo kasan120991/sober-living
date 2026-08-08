@@ -24,6 +24,7 @@ import { RECURRENCE, STAY_STATUS } from '../../domain/constants.js'
 import { facilityWallClockToUtc } from '../../lib/facilityTime.js'
 import { LANE_ORDER } from './band.js'
 import { addDays, dateKeyToUtc, occursOn, utcToDateKey } from './expand.js'
+import { passesCovering } from '../passes.js'
 
 /**
  * Resolve one combined roster onto the cohorts that will hold it.
@@ -885,6 +886,28 @@ export async function sessionRoll(eventId, date) {
   const allMarks = sessions.flatMap((s) => s.attendance)
   const marks = new Map(allMarks.map((a) => [a.stayId, a]))
 
+  /**
+   * Who is away on an approved travel pass at this session's start.
+   *
+   * The roll sheet uses it to PRE-SELECT Excused, muted — the same treatment
+   * AppCheckForm gives a signed-out row. Deliberately a flag rather than a
+   * written mark: nothing is recorded until a human saves the roll.
+   *
+   * That is not squeamishness. `recordedAgainst()` counts attendance rows to
+   * decide whether an event's SHAPE is frozen, so writing marks at approval
+   * time would mean a resident's travel pass silently blocked a manager from
+   * rescheduling the group — a 409 with no hint of the cause. One query for the
+   * whole roster, never one per attendee.
+   */
+  // The session's own start instant, not `now` — a roll taken late must still
+  // reflect who was away when the group actually ran. Wall-clock converted per
+  // date, the module's rule throughout.
+  const sessionStartsAt = facilityWallClockToUtc(date, first.startsAtLocal)
+  const onPass = await passesCovering(
+    sessionStartsAt,
+    roster.map((a) => a.stayId),
+  )
+
   const fromRoster = roster.map((a) => ({
     stayId: a.stayId,
     residentId: a.stay.resident.id,
@@ -896,6 +919,11 @@ export async function sessionRoll(eventId, date) {
       : null,
     status: marks.get(a.stayId)?.status ?? null,
     note: marks.get(a.stayId)?.note ?? null,
+    // Dates only, never the destination — the roll is taken in a room with
+    // other residents in it, the census-tile rule.
+    onPass: onPass.has(a.stayId)
+      ? { departAt: onPass.get(a.stayId).departAt, returnBy: onPass.get(a.stayId).returnBy }
+      : null,
   }))
 
   // Anyone marked who is no longer on the live roster — discharged since, or

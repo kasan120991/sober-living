@@ -7,6 +7,7 @@ import { facilityToday, facilityWallClockToUtc, formatFacilityTime } from '../li
 // round-trips as UTC midnight, and a second helper reading one as a local date
 // is precisely how two screens come to disagree about which day it is.
 import { addDays, dateKeyToUtc, utcToDateKey } from './schedule/expand.js'
+import { passesOverlapping } from './passes.js'
 
 /**
  * Med pass: the scheduled window in which staff observe residents taking their
@@ -89,8 +90,23 @@ const doseKey = (medicationId, scheduledFor) =>
  * `now`. A PRN medication produces none: it carries no times, so there is no
  * slot to answer and it can never read DUE.
  */
-function expandDoses(medications, dateKey, logsByKey, now) {
+function expandDoses(medications, dateKey, logsByKey, now, travelPasses = []) {
   const out = []
+  /**
+   * A dose inside an approved travel pass is not due, and — more importantly —
+   * must never become MISSED. Without this a three-day pass reads as a run of
+   * missed doses, which is a FALSE RECORD: it asserts the facility failed to
+   * medicate somebody who was not on the premises and was approved to be away.
+   *
+   * Same shape and same reasoning as the discontinued-medication filter below:
+   * suppress the SLOT, never write a log. A dose actually handed over before
+   * departure still has its log and still shows, because a recorded
+   * observation always outranks a derivation.
+   */
+  // Departure only, matching coversInstant() — a pass running late is still
+  // an absence, and a dose inside one must never become MISSED.
+  const awayAt = (at) => travelPasses.some((p) => p.departAt <= at)
+
   for (const med of medications) {
     if (med.isPrn) continue
 
@@ -118,6 +134,7 @@ function expandDoses(medications, dateKey, logsByKey, now) {
       const scheduledFor = facilityWallClockToUtc(dateKey, time)
       const log = logsByKey.get(doseKey(med.id, scheduledFor)) ?? null
       if (finalDay && !log) continue
+      if (!log && awayAt(scheduledFor)) continue
       out.push({
         medicationId: med.id,
         stayId: med.stayId,
@@ -167,7 +184,23 @@ async function dayContext(dateKey, { stayId = null } = {}) {
     : []
 
   const logsByKey = new Map(logs.map((l) => [doseKey(l.medicationId, l.scheduledFor), l]))
-  return { medications, logsByKey }
+
+  // One query for the day, never one per dose — the composed read's rule. The
+  // window is the facility day, so a pass that merely touches it is included
+  // and `awayAt` decides per slot.
+  const bounds = facilityDayBounds(dateKey)
+  // Named travelPasses, not passes: in this module a "pass" is already a MED
+  // pass — a group of doses sharing a time. Two meanings for one word in one
+  // file is how somebody later reads the wrong one.
+  const travelPasses = medications.length
+    ? await passesOverlapping(
+        bounds.gte,
+        bounds.lt,
+        [...new Set(medications.map((m) => m.stayId))],
+      )
+    : []
+
+  return { medications, logsByKey, travelPasses }
 }
 
 const isMarked = (s) =>
@@ -186,8 +219,8 @@ const isMarked = (s) =>
  */
 export async function houseMeds({ date, now = new Date() } = {}) {
   const dateKey = date ?? facilityToday(now)
-  const { medications, logsByKey } = await dayContext(dateKey)
-  const doses = expandDoses(medications, dateKey, logsByKey, now)
+  const { medications, logsByKey, travelPasses } = await dayContext(dateKey)
+  const doses = expandDoses(medications, dateKey, logsByKey, now, travelPasses)
 
   // Grouped by the wall-clock time they share, which is what a "pass" is. It
   // needs no entity of its own: the times cluster naturally because the house
@@ -290,8 +323,8 @@ export async function passFor(stayId, { date, now = new Date() } = {}) {
   })
   if (!stay) throw new HttpError(404, 'Resident not found')
 
-  const { medications, logsByKey } = await dayContext(dateKey, { stayId })
-  const doses = expandDoses(medications, dateKey, logsByKey, now)
+  const { medications, logsByKey, travelPasses } = await dayContext(dateKey, { stayId })
+  const doses = expandDoses(medications, dateKey, logsByKey, now, travelPasses)
 
   return {
     now,
@@ -406,7 +439,13 @@ export async function recordDoses({ stayId, entries, observedById }, actorId) {
       select: { medicationId: true, scheduledFor: true },
     })
     const logsByKey = new Map(logs.map((l) => [doseKey(l.medicationId, l.scheduledFor), l]))
-    const doses = expandDoses(medications, dateKey, logsByKey, now)
+    // The same pass windows the board used, re-read inside the transaction. A
+    // pass approved between sheet-load and Save makes the dose vanish, and the
+    // route must agree with the board about that rather than accepting a dose
+    // for somebody who is now away.
+    const bounds = facilityDayBounds(dateKey)
+    const travelPasses = await passesOverlapping(bounds.gte, bounds.lt, [stayId])
+    const doses = expandDoses(medications, dateKey, logsByKey, now, travelPasses)
     const byKey = new Map(doses.map((d) => [`${d.medicationId}|${d.time}`, d]))
 
     const seen = new Set()
@@ -574,8 +613,8 @@ export async function amendLog(id, input, actorId) {
  */
 export async function unmarkedDoses(now = new Date()) {
   const dateKey = facilityToday(now)
-  const { medications, logsByKey } = await dayContext(dateKey)
-  const due = expandDoses(medications, dateKey, logsByKey, now).filter(
+  const { medications, logsByKey, travelPasses } = await dayContext(dateKey)
+  const due = expandDoses(medications, dateKey, logsByKey, now, travelPasses).filter(
     (d) => d.state === MED_DOSE_STATE.DUE,
   )
   if (!due.length) return null

@@ -78,10 +78,45 @@ async function main() {
   // on purpose — nothing is owed in the restricted first stretch — though no
   // seeded resident is on it, so the no-target rendering is exercised by
   // verify-service.js rather than by the seed.
-  const [orientation, phase1, phase2] = await Promise.all([
-    prisma.program.create({ data: { name: 'Orientation', level: 0 } }),
-    prisma.program.create({ data: { name: 'Phase 1', level: 1, serviceHoursRequired: 20 } }),
-    prisma.program.create({ data: { name: 'Phase 2', level: 2, serviceHoursRequired: 40 } }),
+  //
+  // TRAVEL PASS POLICY (facility, 2026-08-08): Orientation is not eligible at
+  // all; Phase 1 and above are, after 90 days in the programme. These two
+  // columns had been null since the schema was written, waiting for exactly
+  // this answer — `passEligible: null` reads as "not granted", the same
+  // conservative posture as a null service-hours target meaning "no target".
+  const [orientation, phase1, phase2, phase3] = await Promise.all([
+    prisma.program.create({
+      data: { name: 'Orientation', level: 0, passEligible: false },
+    }),
+    prisma.program.create({
+      data: {
+        name: 'Phase 1',
+        level: 1,
+        serviceHoursRequired: 20,
+        passEligible: true,
+        minDaysBeforePass: 90,
+      },
+    }),
+    prisma.program.create({
+      data: {
+        name: 'Phase 2',
+        level: 2,
+        serviceHoursRequired: 40,
+        passEligible: true,
+        minDaysBeforePass: 90,
+      },
+    }),
+    // Phase 3 has been in the glossary since the beginning ("Phase 1 / 2 / 3")
+    // and only reached the seed with module 9.
+    prisma.program.create({
+      data: {
+        name: 'Phase 3',
+        level: 3,
+        serviceHoursRequired: 60,
+        passEligible: true,
+        minDaysBeforePass: 90,
+      },
+    }),
   ])
   const apt12 = await prisma.apartment.create({
     data: { name: 'Apt 12', cohort: 'MEN' },
@@ -698,6 +733,83 @@ async function main() {
     labReturnedAt: new Date(nowMs - 1 * DAY),
     labRecordedById: manager.id,
   })
+
+  // ── Travel passes ───────────────────────────────────────────────────────
+  // One per state, so /passes has every band populated on first login: a
+  // request waiting on a manager, somebody away right now with their bed still
+  // held, somebody overdue back, one returned and one denied.
+  //
+  // Every seeded resident intaked 2026-05-01, so all of them clear the 90-day
+  // minimum — which is what makes the eligible path demonstrable at all. Joy
+  // Nakamura intaked today and is the one who cannot: her denial names the
+  // rule rather than being a bare refusal.
+  const passFor = (stayId, data) =>
+    prisma.travelPass.create({ data: { stayId, requestedById: tech.id, ...data } })
+
+  await passFor(byLast('Whitfield'), {
+    destination: "Sister's wedding — Macon, GA",
+    purpose: 'Family event, back Sunday evening',
+    departAt: new Date(nowMs + 6 * DAY),
+    returnBy: new Date(nowMs + 8 * DAY),
+  })
+
+  await passFor(byLast('Ocampo'), {
+    destination: 'Family visit — Savannah',
+    departAt: new Date(nowMs + 14 * DAY),
+    returnBy: new Date(nowMs + 15 * DAY),
+  })
+
+  // APPROVED but not departed yet — and deliberately NOT an active absence.
+  //
+  // Every housed resident is already a fixture for another suite: Ocampo and
+  // Boone carry the open sign-outs, Ferrer is verify-signouts' grace-window
+  // case, and Castillo is verify-checks' NOT_FOUND. A pass OUTRANKS a sign-out
+  // in presenceOf() and pre-accounts its resident on the round, so seeding an
+  // ACTIVE pass on any of them silently rewrote a fixture the other suites
+  // depend on — which is exactly what it did, twice, before landing here.
+  //
+  // So the seed shows the arc up to departure, and verify-passes.js proves the
+  // away and overdue states on a fixture it creates and owns. The cost, stated:
+  // a fresh seed has nobody actually away, so the census "on pass" chip and the
+  // dose suppression are two clicks away (request, approve) rather than
+  // on screen at first login.
+  await passFor(byLast('Ferrer'), {
+    destination: 'Aunt’s house — Columbus, GA',
+    purpose: 'Family visit',
+    departAt: new Date(nowMs + 2 * DAY),
+    returnBy: new Date(nowMs + 4 * DAY),
+    status: 'APPROVED',
+    reviewedById: manager.id,
+    reviewedAt: new Date(nowMs - 1 * DAY),
+  })
+
+  await passFor(byLast('Castillo'), {
+    destination: 'Home visit — Marietta',
+    departAt: new Date(nowMs - 8 * DAY),
+    returnBy: new Date(nowMs - 6 * DAY),
+    status: 'RETURNED',
+    reviewedById: manager.id,
+    reviewedAt: new Date(nowMs - 9 * DAY),
+    returnedAt: new Date(nowMs - 6 * DAY),
+    returnAcknowledgedById: tech.id,
+  })
+
+  // The refusal that names its rule — she intaked today.
+  const joyStay = await prisma.stay.findFirst({
+    where: { resident: { lastName: 'Nakamura' }, status: 'ACTIVE' },
+    select: { id: true },
+  })
+  if (joyStay) {
+    await passFor(joyStay.id, {
+      destination: 'Friend’s place — Atlanta',
+      departAt: new Date(nowMs + 3 * DAY),
+      returnBy: new Date(nowMs + 4 * DAY),
+      status: 'DENIED',
+      reviewedById: manager.id,
+      reviewedAt: new Date(nowMs - 1 * HOUR),
+      reviewNote: 'Phase 1 needs 90 days in the programme — this is day 0.',
+    })
+  }
 
   // ── Medications and the med pass ────────────────────────────────────────
   // Staff-stored, resident self-administered, no controlled substances — the
@@ -1360,6 +1472,7 @@ async function main() {
     ${await prisma.user.count()} staff users
     ${await prisma.maintenanceRequest.count()} maintenance requests (2 urgent — one already overdue, one not yet), 2 in progress, ${await prisma.maintenanceEvent.count()} trail events across 2 closed (one closed, reopened and closed again)
     ${await prisma.signOut.count()} sign-outs (1 out, 1 OVERDUE, 1 returned)
+    ${await prisma.travelPass.count()} travel passes (2 awaiting review, 1 approved for next week, 1 returned, 1 denied)
     ${await prisma.apartmentCheck.count()} apartment checks (men's CHECKED with 1 not found, women's OVERDUE, 1 missed hour, 1 amended)
     ${await prisma.drugScreen.count()} drug screens (1 negative, 1 awaiting the resident's decision, 1 declined, 1 at the lab, 1 lab-cleared after paying)
     ${await prisma.medication.count()} medications (1 as-needed, 1 discontinued), ${await prisma.medLog.count()} doses recorded (1 amended, 1 dose deliberately missed)

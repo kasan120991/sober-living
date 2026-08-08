@@ -239,9 +239,29 @@ enum CheckResidentStatus {
   /// Accounted for by an open sign-out — recorded so the check is complete
   /// evidence of the whole apartment, not just of whoever was home.
   SIGNED_OUT
+  /// Accounted for by an approved travel pass — an overnight or multi-day
+  /// absence. Deliberately NOT folded into SIGNED_OUT: a pass is not a
+  /// sign-out, the glossary forbids synonyms, and a check that called a
+  /// three-day absence a sign-out would misdescribe what accounted for them.
+  ON_PASS
   /// Expected on site and not found. Lights the bell until a later check,
   /// a sign-out, or a discharge accounts for them.
   NOT_FOUND
+}
+
+/// A travel pass's arc: requested, then reviewed, then closed.
+///
+/// Runs ONCE AND FORWARDS, like DrugScreen's confirmation arc and for the same
+/// reason — approving is a later fact ABOUT the request, not an edit to it, so
+/// the request half stays immutable and only these transitions are granted.
+enum PassStatus {
+  REQUESTED
+  APPROVED
+  DENIED
+  /// Approved and then called off before or during the absence.
+  CANCELLED
+  /// Came back and a staff member acknowledged it at the door.
+  RETURNED
 }
 
 /// What happened at one dose of one medication.
@@ -568,6 +588,7 @@ model Stay {
   checkLines          ApartmentCheckResident[]
   drugScreens         DrugScreen[]
   medications         Medication[]
+  travelPasses        TravelPass[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -1529,6 +1550,65 @@ model MedLog {
   @@map("med_logs")
 }
 
+/// An overnight or multi-day approved absence. The bed is HELD.
+///
+/// That last part costs nothing and is worth saying plainly: a pass writes
+/// nothing to `bed_assignments`. See that model's own note — assignment is not
+/// presence, and a resident away on a pass still holds their bed. The census
+/// renders "on pass" instead of a free tile purely by deriving presence.
+///
+/// The request half is IMMUTABLE and the review is a write-once forward arc,
+/// the DrugScreen posture rather than the amendment pattern: approving or
+/// denying is a later fact ABOUT the request, not a correction of it. A request
+/// filed in error is soft-deleted while nothing has been recorded against it —
+/// the sign_outs shape.
+///
+/// Eligibility is NOT stored here. It is derived at request time from the
+/// stay's program (`passEligible`, `minDaysBeforePass`) and days in the
+/// programme, so changing the phase policy changes what is refused tomorrow
+/// without a backfill — and a pass approved under an older rule keeps its own
+/// history rather than being retro-judged.
+model TravelPass {
+  id     String @id @default(uuid(7))
+  stayId String
+  stay   Stay   @relation(fields: [stayId], references: [id])
+
+  /// Where they are going. Shown on the passes page and to whoever chases an
+  /// overdue return — and deliberately NOT on the census tile, which is read
+  /// over a resident's shoulder.
+  destination String
+  purpose     String?
+
+  departAt DateTime
+  returnBy DateTime
+
+  status PassStatus @default(REQUESTED)
+
+  requestedById String
+  requestedBy   User   @relation("requestedPasses", fields: [requestedById], references: [id])
+
+  reviewedById String?
+  reviewedBy   User?     @relation("reviewedPasses", fields: [reviewedById], references: [id])
+  reviewedAt   DateTime?
+  /// REQUIRED on DENIED and on CANCELLED (CHECK in the migration): a refusal
+  /// with no stated reason is exactly what a resident appeals and the facility
+  /// cannot defend.
+  reviewNote String?
+
+  returnedAt             DateTime?
+  returnAcknowledgedById String?
+  returnAcknowledgedBy   User?     @relation("acknowledgedPassReturns", fields: [returnAcknowledgedById], references: [id])
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([stayId, departAt])
+  /// Serves the away-now and overdue reads, which key on the arc state.
+  @@index([status])
+  @@map("travel_passes")
+}
+
 model InsurancePolicy {
   id String @id @default(uuid(7))
 
@@ -1657,6 +1737,10 @@ model User {
   recordedScreens   DrugScreen[] @relation("recordedScreens")
   screenDecisions   DrugScreen[] @relation("screenDecisions")
   screenLabResults  DrugScreen[] @relation("screenLabResults")
+
+  requestedPasses      TravelPass[] @relation("requestedPasses")
+  reviewedPasses       TravelPass[] @relation("reviewedPasses")
+  acknowledgedReturns  TravelPass[] @relation("acknowledgedPassReturns")
 
   addedMedications Medication[] @relation("addedMedications")
   /// Two relations, one act each: who watched the dose, and who typed it.

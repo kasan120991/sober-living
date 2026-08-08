@@ -25,6 +25,7 @@ import serviceRouter from './routes/service.js'
 import checksRouter from './routes/checks.js'
 import screensRouter from './routes/screens.js'
 import medsRouter from './routes/meds.js'
+import passesRouter from './routes/passes.js'
 import staffRouter from './routes/staff.js'
 import invoicesRouter from './routes/invoices.js'
 import billingRouter from './routes/billing.js'
@@ -107,6 +108,7 @@ export function createApp() {
   app.use('/checks', checksRouter)
   app.use('/screens', screensRouter)
   app.use('/meds', medsRouter)
+  app.use('/passes', passesRouter)
   app.use('/staff', staffRouter)
   app.use('/invoices', invoicesRouter)
   // Managers and admins only — the gate lives on the router itself.

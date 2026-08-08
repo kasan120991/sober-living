@@ -3,6 +3,7 @@ import { HttpError } from '../middleware/authorize.js'
 import { CHECK_RESIDENT_STATUS, CHECK_STATE, PRESENCE, STAY_STATUS } from '../domain/constants.js'
 import { facilityHourKey, facilityStartOfToday, facilityWallClockToUtc } from '../lib/facilityTime.js'
 import { presenceOf } from './signOuts.js'
+import { passesCovering } from './passes.js'
 
 /**
  * Apartment checks: the hourly round. Staff walk each apartment every hour,
@@ -111,9 +112,16 @@ export async function rosterFor(apartmentId) {
   if (!apartment) throw new HttpError(404, 'Apartment not found')
 
   const now = new Date()
-  const people = apartment.beds
-    .filter((b) => b.assignments.length > 0)
-    .map((b) => {
+  const occupied = apartment.beds.filter((b) => b.assignments.length > 0)
+  // ONE query for the whole roster rather than one per resident — the composed
+  // read's no-per-row-loop rule. Shared with the med board and the roll sheet
+  // (passesCovering), so none of the three can disagree about who is away.
+  const onPass = await passesCovering(
+    now,
+    occupied.map((b) => b.assignments[0].stay.id),
+  )
+
+  const people = occupied.map((b) => {
       const stay = b.assignments[0].stay
       const openSignOut = stay.signOuts[0] ?? null
       return {
@@ -123,8 +131,9 @@ export async function rosterFor(apartmentId) {
         bedLabel: b.label,
         programName: stay.program?.name ?? null,
         // State and times only, never a destination — the sheet is read in a
-        // hallway with residents around, the census-tile rule.
-        presence: presenceOf(openSignOut, now),
+        // hallway with residents around, the census-tile rule. That holds for a
+        // pass exactly as it does for a sign-out.
+        presence: presenceOf(openSignOut, now, onPass.get(stay.id) ?? null),
       }
     })
 
@@ -135,19 +144,39 @@ export async function rosterFor(apartmentId) {
 }
 
 /** Validates one submission's lines against a roster's open sign-outs. */
-function validateLines(lines, outStayIds) {
+function validateLines(lines, outStayIds, onPassStayIds = new Set()) {
   for (const line of lines) {
-    const isOut = outStayIds.has(line.stayId)
+    const isOnPass = onPassStayIds.has(line.stayId)
+    // Somebody on a pass is away on the pass, not signed out for the afternoon.
+    // Both facts would otherwise satisfy "not IN", which is why this is asked
+    // first and separately.
+    const isOut = outStayIds.has(line.stayId) && !isOnPass
+
     if (line.status === CHECK_RESIDENT_STATUS.PRESENT && !line.note?.trim()) {
       throw new HttpError(400, 'Each present resident needs a note of what they were doing.')
     }
     if (line.status === CHECK_RESIDENT_STATUS.SIGNED_OUT && !isOut) {
-      throw new HttpError(409, 'Someone marked signed out has no open sign-out. Reload and try again.')
-    }
-    if (line.status === CHECK_RESIDENT_STATUS.NOT_FOUND && isOut) {
       throw new HttpError(
         409,
-        'A signed-out resident is accounted for by the sign-out. Mark them signed out — or present, if they are on site.',
+        isOnPass
+          ? 'That resident is away on a travel pass, not signed out. Mark them on pass.'
+          : 'Someone marked signed out has no open sign-out. Reload and try again.',
+      )
+    }
+    if (line.status === CHECK_RESIDENT_STATUS.ON_PASS && !isOnPass) {
+      throw new HttpError(
+        409,
+        'Someone marked on pass has no approved pass covering this round. Reload and try again.',
+      )
+    }
+    // A resident who is accounted for elsewhere cannot also be missing. PRESENT
+    // stays legal for both — truth wins if they are standing in front of you.
+    if (line.status === CHECK_RESIDENT_STATUS.NOT_FOUND && (isOut || isOnPass)) {
+      throw new HttpError(
+        409,
+        isOnPass
+          ? 'A resident on a travel pass is accounted for by the pass. Mark them on pass — or present, if they are on site.'
+          : 'A signed-out resident is accounted for by the sign-out. Mark them signed out — or present, if they are on site.',
       )
     }
   }
@@ -241,7 +270,12 @@ export function recordCheck(input, actorId) {
     const outNow = new Set(
       people.filter((p) => p.presence.state !== PRESENCE.IN).map((p) => p.stayId),
     )
-    validateLines(input.lines, outNow)
+    const onPassNow = new Set(
+      people
+        .filter((p) => p.presence.state === PRESENCE.ON_PASS || p.presence.state === PRESENCE.PASS_OVERDUE)
+        .map((p) => p.stayId),
+    )
+    validateLines(input.lines, outNow, onPassNow)
 
     const check = await prisma.apartmentCheck.create({
       data: {
@@ -301,7 +335,10 @@ export function amendCheck(id, input, actorId) {
       where: signedOutAtWhere(expected, original.checkedAt),
       select: { stayId: true },
     })
-    validateLines(lines, new Set(openThen.map((s) => s.stayId)))
+    // Who was away AT THE ORIGINAL INSTANT — not now — the same rule the
+    // sign-out lookup above follows, and for the same reason.
+    const onPassThen = await passesCovering(original.checkedAt, expected)
+    validateLines(lines, new Set(openThen.map((s) => s.stayId)), new Set(onPassThen.keys()))
 
     const check = await prisma.apartmentCheck.create({
       data: {
@@ -394,9 +431,23 @@ export async function houseChecks() {
   const lastByApartment = new Map(latest.map((c) => [c.apartmentId, c]))
   const hourNow = facilityHourKey(now)
 
+  // ONE query for the whole board, the roster's own rule — and it has to be
+  // here at all because "on site" was `no open sign-out`, which counted a
+  // resident away for the weekend as being in the building. That is the exact
+  // claim this module exists to make false, on the board's headline figure.
+  const onPassNow = await passesCovering(
+    now,
+    apartments.flatMap((a) =>
+      a.beds.filter((b) => b.assignments.length > 0).map((b) => b.assignments[0].stay.id),
+    ),
+  )
+
   const shapedApartments = apartments.map((a) => {
     const occupants = a.beds.filter((b) => b.assignments.length > 0)
-    const onSite = occupants.filter((b) => b.assignments[0].stay.signOuts.length === 0)
+    const onSite = occupants.filter(
+      (b) =>
+        b.assignments[0].stay.signOuts.length === 0 && !onPassNow.has(b.assignments[0].stay.id),
+    )
     const last = lastByApartment.get(a.id) ?? null
     return {
       id: a.id,

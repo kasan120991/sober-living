@@ -204,7 +204,25 @@ const attention = computed(() => {
         }]
       : []
 
+  // FIRST, above everything. This panel is ordered by urgency and an overdue
+  // pass is a resident nobody can account for — the same class as the census's
+  // unaccounted-for red, and louder than a bed or a repair. Never capped:
+  // it is structurally small, and hiding a person is the one thing the cap
+  // rule already refuses to do.
+  const passRows = (a.passOverdue ?? []).map((p) => ({
+    key: `pass:${p.id}`,
+    kind: 'Pass',
+    title: p.fullName,
+    chip: 'Overdue back',
+    // The destination, as on an overdue sign-out row: this is a work queue and
+    // whoever goes after them needs somewhere to start.
+    meta: `Due back ${formatFacilityTime(p.returnBy)} · ${p.destination}`,
+    to: '/passes',
+    tone: 'destructive',
+  }))
+
   return [
+    ...passRows,
     ...billingRows,
     ...a.unhoused.map((r) => ({
       key: `unhoused:${r.id}`,
@@ -228,6 +246,7 @@ const attentionCount = computed(() => {
   const a = data.value?.attention
   if (!a) return 0
   return (
+    (a.passOverdue?.length ?? 0) +
     a.unhoused.length +
     a.needsRoll.length +
     a.urgentMaintenance.length +
@@ -410,7 +429,17 @@ const quietDay = computed(
                 {{ row.kind }}
               </span>
               <span class="min-w-0 flex-1 basis-40 truncate text-sm font-medium">{{ row.title }}</span>
-              <Badge v-if="row.chip" variant="outline" class="text-[10px] tracking-wider uppercase">
+              <!-- A destructive BADGE, and deliberately not an inset — the
+                   2026-08-06 polish pass left exactly one inset on this page
+                   (the overdue sign-out card) so that inset means something,
+                   and the balances panel took the same trade. The rows here
+                   stay quiet; the badge is the whole signal. -->
+              <Badge
+                v-if="row.chip"
+                variant="outline"
+                class="text-[10px] tracking-wider uppercase"
+                :class="row.tone === 'destructive' && 'border-destructive/40 bg-destructive/10 text-destructive'"
+              >
                 {{ row.chip }}
               </Badge>
               <span class="text-muted-foreground ms-auto shrink-0 text-xs tabular-nums">

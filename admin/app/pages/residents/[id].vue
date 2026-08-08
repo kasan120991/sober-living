@@ -442,6 +442,17 @@ const maskedSsn = computed(() =>
           </Suspense>
         </template>
 
+        <!-- ── Travel passes ─────────────────────────────────────────────── -->
+        <template v-else-if="section === 'passes'">
+          <!-- Same Suspense reasoning as the checks arm below. -->
+          <Suspense>
+            <AppResidentPasses :resident-id="resident.id" :resident-name="resident.fullName" />
+            <template #fallback>
+              <p class="text-muted-foreground text-sm">Loading travel passes…</p>
+            </template>
+          </Suspense>
+        </template>
+
         <!-- ── Apartment checks ──────────────────────────────────────────── -->
         <template v-else-if="section === 'checks'">
           <!-- Same Suspense reasoning as the schedule arm above. -->

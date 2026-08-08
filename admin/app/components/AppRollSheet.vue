@@ -18,7 +18,7 @@
 // recording what happened at it is the job of whoever was in the room.
 import { Check, Ellipsis, Pencil } from '@lucide/vue'
 import { ATTENDANCE_SHORT, ATTENDANCE_STATUS, COHORT_LABEL, cohortsLabel } from '~/utils/schedule.js'
-import { formatFacilityTime, formatWallClock, humanDate } from '~/utils/facilityTime.js'
+import { facilityDateOf, formatFacilityTime, formatWallClock, humanDate } from '~/utils/facilityTime.js'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -72,7 +72,21 @@ watch(
       roll.value = data
       // Existing marks pre-select, so reopening a taken roll shows what was
       // recorded rather than a blank sheet somebody has to redo.
-      for (const p of data.people) if (p.status) marks[p.stayId] = p.status
+      //
+      // An attendee AWAY ON A TRAVEL PASS pre-selects EXCUSED — but only when
+      // nothing has been recorded for them, so a mark somebody deliberately
+      // typed is never overwritten by a pass. This is the whole of module 9's
+      // attendance integration, and where it lives is the decision: nothing is
+      // written at approval time. Writing EXCUSED marks ahead would freeze the
+      // event's SHAPE, because recordedAgainst() in schedule/write.js counts
+      // attendance rows — so approving a five-day pass for somebody on a daily
+      // group would block a manager from rescheduling that group, with a 409
+      // giving no hint why. Pre-selecting instead keeps the mark real and
+      // human-authored: a person opened the roll and saved it.
+      for (const p of data.people) {
+        if (p.status) marks[p.stayId] = p.status
+        else if (p.onPass) marks[p.stayId] = ATTENDANCE_STATUS.EXCUSED
+      }
     } catch (err) {
       error.value = err?.data?.error ?? 'Could not load this roll.'
     } finally {
@@ -85,8 +99,21 @@ const people = computed(() => roll.value?.people ?? [])
 const markedCount = computed(() => Object.keys(marks).length)
 const allMarked = computed(() => people.value.length > 0 && markedCount.value === people.value.length)
 
+/**
+ * "Mark all attended" SKIPS anyone away on a travel pass, and that is the one
+ * thing about this button worth guarding. Without it, one tap records a
+ * resident as present at a group they are two hundred miles from — a false
+ * entry in the evidence this module exists to protect, made by the button most
+ * likely to be pressed. Their EXCUSED stands, and the row says why.
+ *
+ * A per-row tap still overrides it: truth wins, exactly as a signed-out
+ * resident found on site may be marked PRESENT on an apartment check.
+ */
 function markAll(status) {
-  for (const p of people.value) marks[p.stayId] = status
+  for (const p of people.value) {
+    if (p.onPass && status !== ATTENDANCE_STATUS.EXCUSED) continue
+    marks[p.stayId] = status
+  }
 }
 
 async function submit() {
@@ -201,6 +228,12 @@ const toneFor = (status, active) => {
                     {{ COHORT_LABEL[p.cohort] }} ·
                   </template>
                   <template v-if="p.offRoster">No longer on this roster</template>
+                  <!-- Dates, not the destination — the roll sheet is held up
+                       in a room full of residents, so it follows the census
+                       tile's rule rather than the work-queue exception. -->
+                  <template v-else-if="p.onPass">
+                    On a travel pass · back {{ humanDate(facilityDateOf(p.onPass.returnBy), { short: true }) }}
+                  </template>
                   <template v-else>
                     {{ p.programName ?? 'No program' }}
                     <template v-if="p.bedLabel"> · {{ p.bedLabel }}</template>

@@ -29,7 +29,20 @@ import {
 import { residentChecks } from '../services/checks.js'
 import { residentScreens } from '../services/screens.js'
 import { addMedication, residentMeds } from '../services/meds.js'
+import { requestPass, residentPasses } from '../services/passes.js'
 import { createMedicationBody } from './meds.js'
+
+// Wall-clock date + time, interpreted server-side against FACILITY_TIMEZONE —
+// the sign-outs rule, so a manager filing from another timezone still writes
+// facility time.
+const passRequestBody = z.object({
+  destination: z.string().trim().min(1).max(200),
+  purpose: z.string().trim().max(500).optional(),
+  departDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD'),
+  departTime: z.string().regex(/^([01][0-9]|2[0-3]):[0-5][0-9]$/, 'Expected HH:MM'),
+  returnDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD'),
+  returnTime: z.string().regex(/^([01][0-9]|2[0-3]):[0-5][0-9]$/, 'Expected HH:MM'),
+})
 import { residentInvoiceRoutes } from './invoices.js'
 import { residentAttendance } from '../services/schedule/read.js'
 // Aliased: the ledger exports a listEntries too, and this file imports both.
@@ -365,6 +378,25 @@ router.get(
         limit: limit ? Math.min(Math.max(parseInt(limit, 10) || 0, 1), 100) : undefined,
       }),
     )
+  }),
+)
+
+// ── Travel passes ─────────────────────────────────────────────────────────
+// The record's section: this resident's passes and, alongside them, WHY a
+// request would be refused if it would — so somebody can see "Phase 1 · day 12
+// of 90" without filing one to find out.
+router.get(
+  '/:id/passes',
+  handler(async (req, res) => res.json(await residentPasses(req.params.id))),
+)
+
+// Filing is ALL-STAFF and addressed by resident, because eligibility is a fact
+// about their stay and their program — the service resolves both.
+router.post(
+  '/:id/passes',
+  handler(async (req, res) => {
+    const data = parseBody(passRequestBody, req.body)
+    res.status(201).json(await requestPass(req.params.id, data, req.session.userId))
   }),
 )
 

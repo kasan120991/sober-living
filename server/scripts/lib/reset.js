@@ -56,6 +56,7 @@ export async function resetFacilityData(prisma, { quiet = false } = {}) {
 
   // Before stays, which it references. Plain DELETE: sign_outs revokes DELETE
   // from the app role, but this runs as the owner.
+  await sql('DELETE FROM "travel_passes"')
   await sql('DELETE FROM "sign_outs"')
   await sql('DELETE FROM "documents"')
   await sql('DELETE FROM "emergency_contacts"')
