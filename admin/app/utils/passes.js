@@ -7,11 +7,17 @@
  * is no write, so no socket event will come, and the page's clock tick has to
  * re-derive it locally. The SERVER's figure is authoritative.
  *
- * It is DEFINED in utils/facilityTime.js beside the sign-out and check graces —
- * presenceState() there needs it — and re-exported here so a pass screen can
- * import it from the module it belongs to without there being two copies.
+ * It is DEFINED in utils/facilityTime.js beside the sign-out and check graces,
+ * because presenceState() there needs it. This file only imports it.
+ *
+ * It is deliberately NOT re-exported from here, which it briefly was: Nuxt
+ * auto-imports every name `utils/` exports, so two modules exporting one name
+ * is a registry collision — the build warns "Duplicated imports PASS_GRACE_MS"
+ * and silently picks a winner. Harmless while both are the same number, and
+ * exactly the kind of thing that stops being harmless later. Nothing outside
+ * this file wanted the re-export anyway; auto-import already gives every screen
+ * the constant from its one home.
  */
-export { PASS_GRACE_MS } from '~/utils/facilityTime.js'
 import { PASS_GRACE_MS } from '~/utils/facilityTime.js'
 
 /** Mirrors the server: an approved pass past its return time plus the grace. */

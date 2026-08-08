@@ -9,6 +9,10 @@
 import { BedDouble } from '@lucide/vue'
 
 const { sections } = useNavigation()
+// Counts on five of the nav entries, derived from the bell's own action items.
+// No request is added — see useNavBadges, which reads the useState the bell
+// already fills on every navigation and on every realtime `changed`.
+const { badges, labelFor } = useNavBadges()
 const route = useRoute()
 
 const isActive = (to) => (to === '/' ? route.path === '/' : route.path.startsWith(to))
@@ -47,13 +51,26 @@ const isActive = (to) => (to === '/' ? route.path === '/' : route.path.startsWit
             <SidebarMenu>
               <SidebarMenuItem v-for="item in group.items" :key="item.to">
                 <!-- `tooltip` is what surfaces the label once collapsed to the
-                     icon rail; shadcn renders it as a Tooltip automatically. -->
-                <SidebarMenuButton as-child :is-active="isActive(item.to)" :tooltip="item.label">
-                  <NuxtLink :to="item.to">
+                     icon rail; shadcn renders it as a Tooltip automatically. It
+                     carries the COUNT too, because the badge itself cannot
+                     survive the icon rail — see AppNavBadge. -->
+                <SidebarMenuButton
+                  as-child
+                  :is-active="isActive(item.to)"
+                  :tooltip="labelFor(item.label, badges[item.to])"
+                >
+                  <!-- The badge is pointer-events-none and sits outside this
+                       anchor, so the count has to reach the accessible name
+                       here or a screen reader never hears it. An unbadged item
+                       gets its own label back, unchanged. -->
+                  <NuxtLink :to="item.to" :aria-label="labelFor(item.label, badges[item.to])">
                     <component :is="item.icon" class="size-4" />
                     <span>{{ item.label }}</span>
                   </NuxtLink>
                 </SidebarMenuButton>
+                <!-- A badge can only ever render on an item this role can see:
+                     `group.items` is already role-filtered by itemsFor(). -->
+                <AppNavBadge v-if="badges[item.to]" :badge="badges[item.to]" />
               </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
