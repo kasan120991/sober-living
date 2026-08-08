@@ -98,6 +98,42 @@ const overdueCount = computed(() => signedOut.value.filter(isOverdue).length)
 
 const outIds = computed(() => signedOut.value.map((s) => s.resident.id))
 
+// ── The hourly round ────────────────────────────────────────────────────────
+// BOTH of these were on the wire from the day the dashboard shipped and were
+// rendered NOWHERE. They feed the bell at severity CRITICAL, and module 1 calls
+// unaccounted-for "the record's loudest fact" — so the screen that greets every
+// unlock was silent about the loudest thing the facility can be told.
+//
+// DO NOT RE-DERIVE MEMBERSHIP HERE. /checks re-filters its full apartment list
+// through checkState(); this page receives the already-filtered subset, so
+// re-filtering could only shorten it and would let the two screens disagree
+// about who is overdue. Only the elapsed LABEL ticks — an apartment crossing
+// into overdue between refetches surfaces on the next realtime event or the
+// next 30-second tick, which is the same staleness bound this page already
+// accepts for the roll queue.
+const notAccounted = computed(() =>
+  // Longest missing first — the same rule checksOverdue.since already follows.
+  [...(data.value?.attention?.notAccounted ?? [])].sort((a, b) => new Date(a.at) - new Date(b.at)),
+)
+const checksOverdue = computed(() => data.value?.attention?.checksOverdue ?? [])
+
+// The qualifier under the round figure. `lastCheckAt` is legitimately NULL for
+// an apartment nobody has ever walked — module 4: "an apartment never checked
+// reads OVERDUE, not blank" — so it is branched on, never defaulted into a
+// formatter.
+const roundQualifier = computed(() => {
+  const [first, ...rest] = checksOverdue.value
+  if (!first) return null
+  // The last-checked time is stated only when ONE apartment is overdue. With
+  // several it belongs to just the first, and a time sitting beside "and 2
+  // more" reads as describing all of them. The count is the fact; /checks has
+  // the per-apartment detail, which is what the link is for.
+  if (rest.length) return `${first.apartment.name} and ${rest.length} more`
+  return first.lastCheckAt
+    ? `${first.apartment.name} · last checked ${formatFacilityTime(first.lastCheckAt)}`
+    : `${first.apartment.name} · never checked`
+})
+
 // ── Status cards ────────────────────────────────────────────────────────────
 const capacity = computed(() => data.value?.capacity ?? null)
 // One figure with the split beside it — never a bare total, because a free
@@ -264,9 +300,26 @@ const serviceOpen = ref(false)
 const intakeOpen = ref(false)
 const paymentOpen = ref(false)
 
+// Every queue empty — INCLUDING the round. Without the last two clauses this
+// sentence prints directly above a box saying one apartment is overdue, which
+// is the same self-contradiction module 15 records for the "$150 waiting /
+// Send $250" card: two true figures on one screen that read as a disagreement.
 const quietDay = computed(
-  () => !attention.value.length && !signedOut.value.length && !balances.value.owing.length,
+  () =>
+    !attention.value.length &&
+    !signedOut.value.length &&
+    !balances.value.owing.length &&
+    !notAccounted.value.length &&
+    !checksOverdue.value.length,
 )
+
+// Where the money figure takes you. /billing is the page that explains it, and
+// it shipped the day AFTER the rule that says a card should take you where you
+// act on its number — so /residents had quietly become the wrong answer.
+//
+// ROLE-AWARE, not a swap: /billing is manager-gated and its route guard
+// redirects a tech to /, so sending one there would be a card that bounces.
+const balancesTo = computed(() => (canManage.value ? '/billing' : '/residents'))
 </script>
 
 <template>
@@ -310,12 +363,97 @@ const quietDay = computed(
     <p v-if="pending" class="text-muted-foreground text-sm">Loading…</p>
 
     <div v-else class="flex min-w-0 flex-col gap-4">
-      <!-- ── Status cards ─────────────────────────────────────────────────
-           Each card is a LINK to the page that explains its figure — a card
-           that names a number should take you to where you act on it. The
-           shape lives in AppStatCard; this block only says what the numbers
-           are and where each one goes. -->
-      <div class="grid gap-3 sm:grid-cols-3">
+      <!-- ── Not accounted for ────────────────────────────────────────────
+           THE PAGE'S ONE INSET, and it moved here (2026-08-08) off the overdue
+           sign-out row. Module 1 settles the tie in its own words: "where
+           anything ever needs a single answer, unaccounted-for outranks
+           overdue, because one is a person nobody can find and the other is
+           money." The sign-out row keeps its destructive badge and its red due
+           time, so it loses styling and NO information — the same trade the
+           balances panel and the overdue-pass row each made when they
+           considered the inset and declined it.
+
+           NEVER CAPPED. It is people, and the cap rule already refuses to hide
+           one: "hiding either is hiding a person or a hazard." -->
+      <section
+        v-if="notAccounted.length"
+        class="bg-card border-destructive rounded-md border shadow-[inset_3px_0_0_var(--destructive)]"
+      >
+        <div class="flex items-center gap-2 px-4 pt-3 pb-2">
+          <span class="bg-destructive size-1.5 shrink-0 rounded-full" aria-hidden="true" />
+          <h2 class="text-destructive text-[10.5px] font-semibold tracking-[0.1em] uppercase">
+            Not accounted for
+          </h2>
+          <span class="text-xs font-semibold tabular-nums">{{ notAccounted.length }}</span>
+          <NuxtLink
+            to="/checks"
+            class="text-primary ms-auto text-xs font-medium underline-offset-2 hover:underline"
+          >
+            Apartment checks →
+          </NuxtLink>
+        </div>
+        <NuxtLink
+          v-for="r in notAccounted"
+          :key="r.stayId"
+          :to="`/residents/${r.residentId}`"
+          class="hover:bg-muted/50 flex min-h-12 flex-wrap items-center gap-x-3 gap-y-0.5 border-t px-4 py-2.5 transition-colors"
+        >
+          <span class="min-w-0 flex-1 basis-40 truncate text-sm font-medium">{{ r.fullName }}</span>
+          <Badge
+            variant="outline"
+            class="border-destructive/40 bg-destructive/10 text-destructive text-[10px] tracking-wider uppercase"
+          >
+            Not found
+          </Badge>
+          <span class="text-muted-foreground ms-auto shrink-0 text-xs tabular-nums">
+            {{ r.apartmentName }} · {{ formatFacilityTime(r.at) }} round · {{ r.byName }}
+          </span>
+        </NuxtLink>
+      </section>
+
+      <!-- ── Status strip ─────────────────────────────────────────────────
+           Four boxes since 2026-08-08, not three. Each is a LINK to the page
+           that explains its figure — a card that names a number should take
+           you to where you act on it. The shape lives in AppStatCard; this
+           block only says what the numbers are and where each one goes.
+
+           The HOURLY ROUND box is new, and it is the only place on this page
+           that states a POSITIVE. "Everyone accounted for" is the answer this
+           facility most wants, and the absence of an alarm is not the same as
+           its presence — on the screen that greets every unlock, saying so is
+           worth a box. -->
+      <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <!-- THE FIGURE ALWAYS MEANS ONE THING: apartments past their round.
+             It is deliberately not overloaded with the unaccounted count — two
+             different facts sharing one number is how a reader learns to
+             distrust it, and the people have their own band above. Not hidden
+             at zero, /billing's rule: staff need to see that the answer IS
+             zero. The qualifier carries the people fact when there is one,
+             because "Everyone accounted for" while somebody is missing would
+             be the page contradicting itself. -->
+        <AppStatCard
+          to="/checks"
+          :icon="ClipboardCheck"
+          :figure="checksOverdue.length"
+          :tone="checksOverdue.length || notAccounted.length ? 'destructive' : 'default'"
+        >
+          <template #qualifier>
+            <template v-if="checksOverdue.length">
+              {{ checksOverdue.length === 1 ? 'round overdue' : 'rounds overdue' }} ·
+              {{ roundQualifier }}
+            </template>
+            <template v-else-if="notAccounted.length">
+              rounds current ·
+              <span class="text-destructive font-semibold">
+                {{ notAccounted.length }} not accounted for
+              </span>
+            </template>
+            <template v-else>
+              <span class="text-success font-medium">Everyone accounted for</span>
+            </template>
+          </template>
+        </AppStatCard>
+
         <AppStatCard
           to="/sign-outs"
           :icon="DoorOpen"
@@ -337,7 +475,7 @@ const quietDay = computed(
           </template>
         </AppStatCard>
 
-        <AppStatCard to="/residents" :icon="CircleDollarSign" :figure="money(balances.totalCents)">
+        <AppStatCard :to="balancesTo" :icon="CircleDollarSign" :figure="money(balances.totalCents)">
           <!-- The beds-free card's split treatment: the total, then the part of
                it that is past due. A bare total hides the difference between
                owing and being late, which is the whole judgement. -->
@@ -357,12 +495,10 @@ const quietDay = computed(
         </AppStatCard>
       </div>
 
-      <!-- ── Two columns, left wider ──────────────────────────────────────── -->
-      <div class="grid items-start gap-4 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
-        <div class="flex min-w-0 flex-col gap-4">
-          <p v-if="quietDay" class="text-muted-foreground text-sm">
-            Nothing needs attention. Everyone is on property and paid up.
-          </p>
+      <p v-if="quietDay" class="text-muted-foreground text-sm">
+        Nothing needs attention. Everyone is on property, every round is current, and
+        everybody is paid up.
+      </p>
 
           <!-- Needs attention: the bell's action items, priority-ordered.
                ONE amber signal, on the panel eyebrow — an inset rule on every
@@ -370,22 +506,33 @@ const quietDay = computed(
                already says "needs attention" does not need each row shouting
                it again. The destructive inset below keeps its meaning by
                being the only inset left on the page. -->
-          <section v-if="attention.length" class="bg-card rounded-md border">
-            <div class="flex items-center gap-2 px-4 pt-3 pb-2">
-              <span class="bg-warning size-1.5 shrink-0 rounded-full" aria-hidden="true" />
-              <h2 class="text-muted-foreground text-[10.5px] font-semibold tracking-[0.1em] uppercase">
-                Needs attention
-              </h2>
-              <span class="text-xs font-semibold tabular-nums">{{ attentionCount }}</span>
-            </div>
-            <!-- flex-wrap + a basis on the title: on a phone the meta drops to
-                 its own line instead of crushing the title to one letter. -->
-            <NuxtLink
-              v-for="row in attention"
-              :key="row.key"
-              :to="row.to"
-              class="hover:bg-muted/50 flex min-h-12 flex-wrap items-center gap-x-3 gap-y-0.5 border-t px-4 py-2.5 transition-colors"
-            >
+      <section v-if="attention.length" class="bg-card rounded-md border">
+        <div class="flex items-center gap-2 px-4 pt-3 pb-2">
+          <span class="bg-warning size-1.5 shrink-0 rounded-full" aria-hidden="true" />
+          <h2 class="text-muted-foreground text-[10.5px] font-semibold tracking-[0.1em] uppercase">
+            Needs attention
+          </h2>
+          <span class="text-xs font-semibold tabular-nums">{{ attentionCount }}</span>
+        </div>
+        <!-- TWO-UP at xl (2026-08-08). The panel is full width now, and one
+             file of rows across 1,150px left most of each row empty while the
+             panel itself ran to 422px. Priority still reads left-to-right then
+             down, which is the natural order — the rows' SEQUENCE is what makes
+             this a queue rather than a list, so it is preserved rather than
+             gridded into a serpentine.
+
+             The cost, accepted: an odd number of situations leaves a hole at
+             the end of the last row. -->
+        <div class="xl:grid xl:grid-cols-2">
+          <!-- flex-wrap + a basis on the title: on a phone the meta drops to
+               its own line instead of crushing the title to one letter. -->
+          <NuxtLink
+            v-for="(row, i) in attention"
+            :key="row.key"
+            :to="row.to"
+            class="hover:bg-muted/50 flex min-h-12 flex-wrap items-center gap-x-3 gap-y-0.5 border-t px-4 py-2.5 transition-colors"
+            :class="i % 2 === 0 && 'xl:border-e'"
+          >
               <span
                 class="text-muted-foreground w-14 shrink-0 text-[10.5px] font-semibold tracking-[0.06em] uppercase"
               >
@@ -408,12 +555,43 @@ const quietDay = computed(
               <span class="text-muted-foreground ms-auto shrink-0 text-xs tabular-nums">
                 {{ row.meta }}
               </span>
-            </NuxtLink>
-          </section>
+          </NuxtLink>
+        </div>
+      </section>
 
-          <!-- Signed out. Overdue re-derived each tick, so a card crosses the
+      <!-- ── The foot ─────────────────────────────────────────────────────
+           THREE panels in one row, and the number was measured rather than
+           chosen. The old 1.55/1 split left the schedule alone in a rail
+           beside three stacked panels and 537px of nothing; two-up here was
+           better but still 138px ragged, and stretching the cells to fix that
+           put 140px of blank inside the Today card, which reads as a bug
+           rather than as breathing room. Three panels of their natural height
+           come out within 78px of each other with no stretch at all — and the
+           whole page then fits a 900px viewport, alarm band included.
+
+           `items-start` is back for that reason: nothing needs to stretch when
+           the heights already agree. -->
+      <div class="grid items-start gap-4 lg:grid-cols-3">
+        <section class="bg-card min-w-0 rounded-md border">
+          <div class="flex items-baseline gap-2 px-4 pt-3 pb-2">
+            <h2 class="text-muted-foreground text-[10.5px] font-semibold tracking-[0.1em] uppercase">
+              Today
+            </h2>
+            <NuxtLink
+              to="/schedule"
+              class="text-primary ms-auto text-xs font-medium underline-offset-2 hover:underline"
+            >
+              Schedule →
+            </NuxtLink>
+          </div>
+          <div class="border-t">
+            <AppTodaySchedule :shared="data.upcoming.shared" :lanes="data.upcoming.lanes" />
+          </div>
+        </section>
+
+          <!-- Signed out. Overdue re-derived each tick, so a row crosses the
                grace window without a refetch — the census tile's pattern. -->
-          <section v-if="signedOut.length" class="bg-card rounded-md border">
+          <section v-if="signedOut.length" class="bg-card min-w-0 rounded-md border">
             <div class="flex items-baseline gap-2 px-4 pt-3 pb-2">
               <h2 class="text-muted-foreground text-[10.5px] font-semibold tracking-[0.1em] uppercase">
                 Signed out
@@ -430,7 +608,6 @@ const quietDay = computed(
               v-for="s in signedOut"
               :key="s.id"
               class="flex min-h-14 flex-wrap items-center gap-x-3 gap-y-1 border-t px-4 py-2.5"
-              :class="isOverdue(s) && 'border-s-destructive shadow-[inset_3px_0_0_var(--destructive)]'"
             >
               <div class="min-w-0 flex-1">
                 <NuxtLink
@@ -469,17 +646,17 @@ const quietDay = computed(
                the Signed-out panel's destructive BADGE, deliberately not its
                inset rule: the 2026-08-06 polish pass left exactly one inset on
                this page so that inset means something. Considered, declined. -->
-          <section v-if="balances.owing.length" class="bg-card rounded-md border">
+          <section v-if="balances.owing.length" class="bg-card min-w-0 rounded-md border">
             <div class="flex items-baseline gap-2 px-4 pt-3 pb-2">
               <h2 class="text-muted-foreground text-[10.5px] font-semibold tracking-[0.1em] uppercase">
                 Outstanding balances
               </h2>
               <span class="text-xs font-semibold tabular-nums">{{ money(balances.totalCents) }}</span>
               <NuxtLink
-                to="/residents"
+                :to="balancesTo"
                 class="text-primary ms-auto text-xs font-medium underline-offset-2 hover:underline"
               >
-                Residents →
+                {{ canManage ? 'Billing →' : 'Residents →' }}
               </NuxtLink>
             </div>
             <NuxtLink
@@ -512,25 +689,6 @@ const quietDay = computed(
               <span class="text-sm font-semibold tabular-nums">{{ money(r.balanceCents) }}</span>
             </NuxtLink>
           </section>
-        </div>
-
-        <!-- ── Today's schedule ───────────────────────────────────────────── -->
-        <section class="bg-card min-w-0 rounded-md border">
-          <div class="flex items-baseline gap-2 px-4 pt-3 pb-2">
-            <h2 class="text-muted-foreground text-[10.5px] font-semibold tracking-[0.1em] uppercase">
-              Today
-            </h2>
-            <NuxtLink
-              to="/schedule"
-              class="text-primary ms-auto text-xs font-medium underline-offset-2 hover:underline"
-            >
-              Schedule →
-            </NuxtLink>
-          </div>
-          <div class="border-t">
-            <AppTodaySchedule :shared="data.upcoming.shared" :lanes="data.upcoming.lanes" />
-          </div>
-        </section>
       </div>
     </div>
 
