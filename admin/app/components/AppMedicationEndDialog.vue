@@ -59,8 +59,9 @@ async function submit() {
       <DialogHeader>
         <DialogTitle>Discontinue {{ medication?.name }}</DialogTitle>
         <DialogDescription>
-          It stops appearing on the med pass from this date. It stays on the record with
-          the reason, and every dose already recorded against it is unaffected.
+          Anything already given on the last day is kept. Anything not yet given stops
+          straight away — it will never show as due or missed. The medication stays on
+          the record with the reason.
         </DialogDescription>
       </DialogHeader>
 

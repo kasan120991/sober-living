@@ -519,6 +519,68 @@ async function main() {
     ? ok('discontinuing with no reason is refused')
     : bad('end reason', noEndReason.status)
 
+  // ── The day a medication is discontinued ─────────────────────────────────
+  // BOTH halves, because either alone passes a broken implementation: "the
+  // unrecorded dose is gone" passes if every dose was dropped, and "the
+  // recorded dose survives" passes if nothing was filtered at all.
+  console.log('\n\x1b[1mOn its final day, only recorded doses of a medication remain\x1b[0m')
+
+  const todayKey = new Intl.DateTimeFormat('en-CA', {
+    timeZone: process.env.FACILITY_TIMEZONE ?? 'America/New_York',
+    }).format(new Date())
+  const nowHour = Number(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: process.env.FACILITY_TIMEZONE ?? 'America/New_York',
+      hour: '2-digit',
+      hourCycle: 'h23',
+    }).format(new Date()),
+  )
+  const past = `${String(Math.max(nowHour - 1, 0)).padStart(2, '0')}:00`
+  const ahead = `${String(Math.min(nowHour + 2, 23)).padStart(2, '0')}:00`
+
+  if (past !== ahead) {
+    const ending = await manager(`/residents/${resident.residentId}/medications`, {
+      method: 'POST',
+      body: JSON.stringify({
+        name: 'Endingprobe',
+        dosage: '1 tablet',
+        times: [past, ahead],
+        startsOn: '2026-05-01',
+      }),
+    })
+    // Record only the earlier of its two doses, then stop the medication today.
+    await tech('/meds/logs', {
+      method: 'POST',
+      body: JSON.stringify({
+        stayId: resident.id,
+        observedById: techUser.id,
+        entries: [{ medicationId: ending.body.id, time: past, status: 'GIVEN' }],
+      }),
+    })
+    const stopped = await manager(`/meds/medications/${ending.body.id}/discontinue`, {
+      method: 'POST',
+      body: JSON.stringify({ endsOn: todayKey, endReason: 'Prescriber stopped it.' }),
+    })
+    stopped.status === 200
+      ? ok('a medication can be discontinued on a day it already has a dose')
+      : bad('discontinue today', stopped.status)
+
+    const boardAfterStop = await tech('/meds')
+    const slots = boardAfterStop.body.passes.flatMap((p) =>
+      p.residents.some((r) => r.stayId === resident.id) ? [p.time] : [],
+    )
+    const stillOpen = await tech(`/meds/pass/${resident.id}`)
+    const mine = stillOpen.body.doses.filter((d) => d.medicationId === ending.body.id)
+
+    mine.some((d) => d.time === past && d.log)
+      ? ok('the dose already given that day is KEPT — the record survives')
+      : bad('kept recorded', JSON.stringify(mine.map((d) => d.time)))
+    !mine.some((d) => d.time === ahead)
+      ? ok('…and the one never given is gone, so it can never read MISSED')
+      : bad('dropped unrecorded', 'a discontinued medication still has a dose pending')
+    void slots
+  }
+
   // ── A discharge costs no write ───────────────────────────────────────────
   // The property that stay-scoping buys, and the reason a med list hangs off
   // Stay rather than Resident.

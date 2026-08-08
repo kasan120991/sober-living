@@ -93,9 +93,31 @@ function expandDoses(medications, dateKey, logsByKey, now) {
   const out = []
   for (const med of medications) {
     if (med.isPrn) continue
+
+    // The day a medication is discontinued is the one day its schedule is only
+    // half true, and the two wrong answers are worth naming because each loses
+    // something real:
+    //
+    //   Keep every dose — what this did until 2026-08-08 — and a medication
+    //   somebody deliberately stopped goes on reading DUE, then MISSED. That
+    //   second one is a FALSE RECORD: it asserts the facility failed to give a
+    //   dose it had decided not to give, in a module whose whole posture is
+    //   that records are evidence.
+    //
+    //   Drop every dose and this morning's, which really was handed over and
+    //   observed, disappears with it. That is evidence loss, and worse.
+    //
+    // So on the final day only doses that were ACTUALLY RECORDED survive. What
+    // happened stands; what was never going to happen never appears. `endsOn`
+    // stays inclusive — the medication was in effect that day — and the guard
+    // refusing an end date before the last recorded dose keeps working
+    // unchanged, because a recorded dose is exactly what still shows.
+    const finalDay = med.endsOn && utcToDateKey(med.endsOn) === dateKey
+
     for (const time of med.times) {
       const scheduledFor = facilityWallClockToUtc(dateKey, time)
       const log = logsByKey.get(doseKey(med.id, scheduledFor)) ?? null
+      if (finalDay && !log) continue
       out.push({
         medicationId: med.id,
         stayId: med.stayId,
