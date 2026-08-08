@@ -1,7 +1,17 @@
 <script setup>
-// The dashboard's "Today" — FullCalendar's one-day list view over the same
-// { shared, lanes } bands GET /schedule returns. It was a rolling 7-day list
-// first; narrowed to the current day on 2026-08-06, by request.
+// The dashboard's "Today" — a plain list of the day's sessions.
+//
+// It was FullCalendar's `listDay` view until 2026-08-08. Nothing was wrong with
+// it; a five-row read-only list is simply not what a calendar library is for,
+// and this is the app's most-refetched page. Dropping it here takes a
+// FullCalendar instance off the screen that every realtime invalidation lands
+// on, and hands the row shape back to the same `border-t` idiom the Signed out
+// and Outstanding balances panels beside it already use — which is why the
+// three now read as one row of panels rather than two panels and a widget.
+//
+// FullCalendar stays where it earns its keep: /schedule, which needs Day, Week
+// and Month, drag-to-reschedule and a now-indicator. This panel needs none of
+// that.
 //
 // The flat array below is the deliberate concatenation of two provably
 // disjoint bands, the same rule AppScheduleCalendar documents: the server
@@ -16,21 +26,13 @@
 // is happening, and a cancelled meeting is not happening.
 //
 // READ-ONLY. A row navigates to /schedule, where rolls and edits live.
-//
-// NAIVE WALL-CLOCK STRINGS, never `startsAt` — the rule from FcCalendar.vue's
-// header. `startsAtLocal` already carries any per-date override.
 import {
   SESSION_STATE,
   addMinutesToWallClock,
   cohortsLabel,
   sessionEventId,
 } from '~/utils/schedule.js'
-import {
-  facilityDateNow,
-  facilityNowAsLocal,
-  humanDate,
-  localDateKeyOf,
-} from '~/utils/facilityTime.js'
+import { formatWallClock } from '~/utils/facilityTime.js'
 
 const props = defineProps({
   /** The `{ shared, lanes }` bands straight off GET /dashboard's `upcoming`. */
@@ -38,86 +40,77 @@ const props = defineProps({
   lanes: { type: Array, default: () => [] },
 })
 
-const router = useRouter()
-
-const allSessions = computed(() => [
-  ...(props.shared.days ?? []).flatMap((d) => d.sessions),
-  ...props.lanes.flatMap((l) => l.days.flatMap((d) => d.sessions)),
-])
-
-const events = computed(() =>
-  allSessions.value
+/**
+ * SORTED, and that is not decoration — it is the one thing FullCalendar was
+ * doing for us that a list has to do for itself. `shared` and `lanes` are each
+ * ordered, but concatenating them interleaves two ordered runs into an
+ * unordered one: a 7:30 women's session in `lanes` would have printed above a
+ * 9:00 shared house meeting purely because of which band it came from.
+ *
+ * Sorted on the WALL-CLOCK STRING, which is safe precisely because it is
+ * zero-padded 'HH:MM' — so lexical order is chronological order, and no Date
+ * is constructed. `startsAtLocal` already carries any per-date override.
+ */
+const sessions = computed(() =>
+  [
+    ...(props.shared.days ?? []).flatMap((d) => d.sessions),
+    ...props.lanes.flatMap((l) => l.days.flatMap((d) => d.sessions)),
+  ]
     .filter((s) => s.state !== SESSION_STATE.CANCELLED)
+    .sort((a, b) => a.startsAtLocal.localeCompare(b.startsAtLocal))
     .map((s) => ({
-      id: sessionEventId(s),
+      // sessionEventId(), not a second copy of the same expression — the
+      // cohort segment is what keeps a refuse-to-merge pair distinct.
+      key: sessionEventId(s),
       title: s.title,
-      start: `${s.date}T${s.startsAtLocal}`,
-      end: `${s.date}T${addMinutesToWallClock(s.startsAtLocal, s.durationMinutes)}`,
-      extendedProps: {
-        // The cohort WORD, never a hue — it is the only thing on this panel
-        // distinguishing a men's session from a women's.
-        cohortLabel: cohortsLabel(s.cohorts),
-        location: s.location,
-      },
+      // The cohort WORD, never a hue — the only thing on this panel
+      // distinguishing a men's session from a women's.
+      cohort: cohortsLabel(s.cohorts),
+      time: timeRange(s.startsAtLocal, s.durationMinutes),
     })),
 )
 
-const options = computed(() => ({
-  // The shipped one-day list view; the window the server sends is one day too.
-  initialView: 'listDay',
-  initialDate: facilityDateNow(),
-  events: events.value,
-  now: () => facilityNowAsLocal(),
-  // A single day is a handful of rows — no bound needed, unlike the old
-  // 7-day view that a daily event could fill.
-  height: 'auto',
-  editable: false,
-  selectable: false,
-  listDayAltFormat: false,
-  noEventsText: 'Nothing scheduled today.',
-  eventClick: () => router.push('/schedule'),
-}))
+/**
+ * "7:00 – 7:30 AM", dropping the repeated meridiem — what the list view
+ * rendered, and it matters because this panel is a third of the foot's width.
+ *
+ * formatWallClock is a PURE STRING TRANSFORM with no Date and no timezone: a
+ * wall clock is already facility time, and running it through `new Date()` to
+ * format it would re-interpret it as an instant, which is the bug class
+ * expand.js warns about.
+ */
+function timeRange(startsAtLocal, durationMinutes) {
+  const from = formatWallClock(startsAtLocal)
+  const to = formatWallClock(addMinutesToWallClock(startsAtLocal, durationMinutes))
+  const [fromTime, fromSuffix] = from.split(' ')
+  return to.endsWith(fromSuffix) ? `${fromTime} – ${to}` : `${from} – ${to}`
+}
 </script>
 
 <template>
-  <FcCalendar :options="options">
-    <!-- Pulse highlights TODAY's list day-header with its own cushion, so the
-         label leans into that rather than fighting it: "Today" in primary, with
-         the date as the quiet trailing cell.
+  <p v-if="!sessions.length" class="text-muted-foreground border-t px-4 py-3 text-sm">
+    Nothing scheduled today.
+  </p>
 
-         THE `level` BRANCH IS REQUIRED. A FullCalendar list day header renders
-         TWO cells — level 0 leading and level 1 trailing — and a content
-         generator replaces the text of BOTH, so overriding without branching
-         prints the label twice, once at each end of the row.
-         `listDayAltFormat: false` does not help: it suppresses the alt FORMAT,
-         not the alt CELL. (This reasoning used to live in
-         AppResidentSchedule, which was deleted on 2026-08-08 when the record's
-         diary was replaced by the Attendance section.) -->
-    <template #listDayHeaderContent="arg">
-      <span v-if="!arg.level" :class="arg.isToday && 'text-primary font-semibold'">
-        {{ humanDate(localDateKeyOf(arg.date), { short: true }) }}
-      </span>
-      <span v-else class="text-muted-foreground text-[11px]">
-        {{ humanDate(localDateKeyOf(arg.date), { short: true, relative: false }) }}
-      </span>
-    </template>
+  <!-- The row shape is the Signed-out panel's, deliberately: min-h-12, the same
+       padding, the same hover. flex-wrap with a basis on the title is what lets
+       the cohort word drop to its own line in a narrow column instead of
+       crushing the title — the attention panel's own rule.
 
-    <!-- The cohort word rides INSIDE the title span rather than as a third
-         child — a separate span wraps above the title when the column is
-         narrow, which read as a floating label. Inline, it truncates with
-         the title as one line. -->
-    <!-- INLINE style, not a utility class: pulse's stylesheets are unlayered
-         and beat Tailwind's layered rules (see nuxt.config), so its nowrap
-         wins over `whitespace-normal`. Wrapping matters here — this column is
-         narrow and a clipped title is worse than a second line. -->
-    <template #eventContent="arg">
-      <span :class="arg.timeClass" class="tabular-nums">{{ arg.timeText }}</span>
-      <span :class="arg.titleClass" style="white-space: normal">
-        {{ arg.event.title }}
-        <span class="text-muted-foreground text-[11px]" style="white-space: nowrap">
-          · {{ arg.event.extendedProps.cohortLabel }}
-        </span>
-      </span>
-    </template>
-  </FcCalendar>
+       THE TITLE WRAPS RATHER THAN TRUNCATING, which the list view also did:
+       this panel is a third of the foot's width and the whole width of a phone
+       row, and a clipped group name is worse than a second line. The list view
+       needed an INLINE style to win that, because pulse's stylesheets are
+       unlayered and beat Tailwind's layered rules; with FullCalendar gone a
+       plain class does it, which is a small dividend of the change. -->
+  <NuxtLink
+    v-for="s in sessions"
+    :key="s.key"
+    to="/schedule"
+    class="hover:bg-muted/50 flex min-h-12 flex-wrap items-center gap-x-3 gap-y-0.5 border-t px-4 py-2.5 transition-colors"
+  >
+    <span class="text-muted-foreground w-[7.5rem] shrink-0 text-xs tabular-nums">{{ s.time }}</span>
+    <span class="min-w-0 flex-1 basis-32 text-sm font-medium">{{ s.title }}</span>
+    <span class="text-muted-foreground ms-auto shrink-0 text-[11px]">{{ s.cohort }}</span>
+  </NuxtLink>
 </template>

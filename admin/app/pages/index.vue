@@ -584,9 +584,10 @@ const balancesTo = computed(() => (canManage.value ? '/billing' : '/residents'))
               Schedule →
             </NuxtLink>
           </div>
-          <div class="border-t">
-            <AppTodaySchedule :shared="data.upcoming.shared" :lanes="data.upcoming.lanes" />
-          </div>
+          <!-- No border-t wrapper: the rows carry their own, exactly like the
+               Signed out and Outstanding balances panels beside it. A wrapper
+               would double the rule above the first row. -->
+          <AppTodaySchedule :shared="data.upcoming.shared" :lanes="data.upcoming.lanes" />
         </section>
 
           <!-- Signed out. Overdue re-derived each tick, so a row crosses the

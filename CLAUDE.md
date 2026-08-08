@@ -278,8 +278,10 @@ Three things went with it, and each was load-bearing while it lasted, so they ar
 rather than deleted: the FullCalendar **list view** and its 14-day custom duration; the
 `height: 420` that kept three bands visible together; and the day-header `level` branch, whose
 lesson — a list day header has TWO cells and a content generator replaces the text of BOTH —
-now lives in `AppTodaySchedule.vue`, which still renders one. The board keeps its own list
-view; only the record's copy is gone.
+is recorded **here and nowhere else in code** as of 2026-08-08: it lived on in
+`AppTodaySchedule.vue`, and that component stopped being a FullCalendar view the same day.
+The lesson still holds for any list view the board grows. The board keeps its own list view;
+only the record's copy is gone.
 
 **The section is a counts band over a day-grouped trail** (variant A, chosen 2026-08-08 from
 three rendered variants; a per-group breakdown and an eight-week grid were the others). It is
@@ -2185,8 +2187,9 @@ exactly what the dashboard's panels answer.
 header → **unaccounted band** → **strip of four status cards** → **Needs attention** full
 width → a **three-panel foot** (Today · Signed out · Outstanding balances). The greeting
 still reads on the **facility clock**, never the browser's, with **Quick actions** on the
-right; `AppTodaySchedule` is still FullCalendar's one-day list view (a rolling 7-day list
-first, narrowed 2026-08-06), and the whole day still shows including sessions already over
+right; `AppTodaySchedule` is a **plain list** since 2026-08-08 (FullCalendar's one-day list
+view before that, and a rolling 7-day list before *that*, narrowed 2026-08-06), and the whole
+day still shows including sessions already over
 — the panel answers "what is today's schedule", and un-taken rolls are the queue's business.
 
 **What was wrong, measured rather than felt.** The old 1.55 : 1 split gave the right column
@@ -2347,8 +2350,16 @@ Decisions with teeth, each chosen explicitly:
 - **`upcoming` crosses the wire in band form**, `{ shared, lanes }` like `GET /schedule`
   and produced by the same merge — there is still no server endpoint returning a flat
   schedule list. `AppTodaySchedule` concatenates the provably-disjoint bands
-  client-side (the board's own sanctioned pattern) and renders FullCalendar's shipped
-  `listDay` view. Read-only; a row navigates to `/schedule`.
+  client-side (the board's own sanctioned pattern) and renders them as a **plain list**
+  (2026-08-08, by request — a five-row read-only list is not what a calendar library is
+  for, and this is the app's most-refetched page). Read-only; a row navigates to
+  `/schedule`.
+  **IT MUST SORT.** That is the one thing FullCalendar was quietly doing for us:
+  `shared` and `lanes` are each ordered, but concatenating them interleaves two ordered
+  runs into an unordered one, so a 7:30 women's session would print above a 9:00 shared
+  house meeting purely because of which band it came from. It sorts on the wall-clock
+  string, which is safe *because* `'HH:MM'` is zero-padded — lexical order is
+  chronological order and no Date is constructed.
 - **Overdue is re-derived client-side on a 30-second tick** against `signedOut` rows
   the server sends un-filtered — the census pattern, so a resident crosses the grace
   window without a refetch. The needsRoll queue does NOT get the schedule board's 60s
@@ -2372,9 +2383,14 @@ now the only inset on the page, which is what gives it meaning. And the status c
 explains their figure — a card that names a number should take you where you act on it.
 **There are FOUR since 2026-08-08** (hourly round, sign-outs, census, money), and the money
 one now resolves per role: it pointed at `/residents` for a year after `/billing` became
-the page that explains it. One trap hit in
+the page that explains it. One trap **that used to be hit** in
 `AppTodaySchedule`: pulse's stylesheets are unlayered and beat Tailwind utilities, so
-overriding its nowrap on event titles takes an inline style, not a class.
+overriding its nowrap on event titles took an inline style rather than a class. That is
+no longer live on this page — the plain list wraps its titles with an ordinary class —
+but **the trap itself still applies anywhere FullCalendar renders**, which is `/schedule`.
+The title still wraps rather than truncating, and for the original reason: this panel is a
+third of the foot's width and the whole width of a phone row, and a clipped group name is
+worse than a second line.
 
 **Deliberately excluded, so they are not "added later" casually:** an occupancy-over-time
 trend (needs replaying `bed_assignments` history per day — a report, not a page read) and
