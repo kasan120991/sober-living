@@ -2,6 +2,7 @@ import { prisma } from '../db/client.js'
 import { HttpError } from '../middleware/authorize.js'
 import { PRISMA } from '../lib/http.js'
 import { PRESENCE, STAY_STATUS } from '../domain/constants.js'
+import { passOverdueCutoff } from './passes.js'
 import { facilityToday, facilityWallClockToUtc } from '../lib/facilityTime.js'
 import { activeStayIdFor } from './ledger.js'
 
@@ -29,8 +30,33 @@ export function overdueCutoff(now = new Date()) {
   return new Date(now.getTime() - OVERDUE_GRACE_MS)
 }
 
-/** Presence of an occupied bed given its open sign-out (or none). */
-export function presenceOf(openSignOut, now = new Date()) {
+/**
+ * Presence of an occupied bed, given its open sign-out and its covering travel
+ * pass (either or both may be absent).
+ *
+ * THE one derivation, and it stays one on purpose: it has exactly two callers —
+ * `rosterFor()` in checks and the census — and a second, parallel "are they
+ * here" function is how those two screens come to disagree about a resident.
+ * Module 9 extended this rather than adding `passPresenceOf()` beside it.
+ *
+ * A PASS OUTRANKS A SIGN-OUT when somehow both are open. That ordering is
+ * deliberate: a multi-day sanctioned absence is the larger fact, and a stale
+ * sign-out left open underneath one should not downgrade the display to "out
+ * for the afternoon". The service refuses to open a sign-out during a pass, so
+ * this is a belt-and-braces ordering rather than an expected state.
+ */
+export function presenceOf(openSignOut, now = new Date(), activePass = null) {
+  if (activePass) {
+    return {
+      state:
+        activePass.returnBy < passOverdueCutoff(now) ? PRESENCE.PASS_OVERDUE : PRESENCE.ON_PASS,
+      // Dates, never the destination — the census tile is read over a
+      // resident's shoulder. Whoever must CHASE an overdue pass gets the
+      // destination from the bell and /passes, which are work queues.
+      departAt: activePass.departAt,
+      returnBy: activePass.returnBy,
+    }
+  }
   if (!openSignOut) return { state: PRESENCE.IN }
   return {
     state:

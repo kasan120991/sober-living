@@ -41,16 +41,7 @@ export const RESIDENT_SECTIONS = Object.freeze([
     group: 'Record',
     built: true,
   },
-  {
-    key: 'passes',
-    label: 'Travel passes',
-    group: 'Record',
-    built: false,
-    module: 'Module 9 — Travel passes',
-    summary:
-      'Multi-day approved absences, request → review → approve or deny with a reason. The ' +
-      'bed is held rather than freed, and the census will show "on pass" instead of empty.',
-  },
+  { key: 'passes', label: 'Travel passes', group: 'Record', built: true },
   { key: 'checks', label: 'Apartment checks', group: 'Record', built: true },
 
   // ── Clinical ──────────────────────────────────────────────────────────────

@@ -41,7 +41,7 @@ Use these terms in code, schema, and UI. Do not invent synonyms.
 | **Program** | The track a resident is on (e.g. Phase 1 / 2 / 3). Drives privileges: curfew time, pass eligibility, required service hours. |
 | **Census** | Who is in which bed right now. The single most-viewed board. It lives at `/census` — it was the landing page until **2026-08-05**, when the dashboard (module 14) took `/`; the sidebar still names it **Census**, because naming the destination by the domain term is what keeps the glossary honest in the UI. |
 | **Sign-out** | A resident leaving the property and returning the same day. Has an expected return time. |
-| **Travel pass** | An overnight or multi-day approved absence. Requires approval; bed is held. |
+| **Travel pass** | An overnight or multi-day approved absence. Requires **manager** approval; **the bed is held** and the census reads "on pass" rather than free. Eligibility is a **program** privilege — Orientation never, Phase 1 and above after 90 days. Distinct from a sign-out, which is same-day; the two are never merged and `ON_PASS` is its own status everywhere it appears. |
 | **Apartment check** | One **hourly round** of an apartment: staff account for every resident who should be on site and note what each present resident is doing. Redefined by the facility 2026-08-06 — not an inspection checklist. Append-only; corrected by amendment. |
 | **Maintenance request** | Work needed on an **apartment** — never a bed. Has a reporter, a priority and a lifecycle; closing one requires a note saying what was done. Whether a specific bed is usable is a separate fact on the bed itself. |
 | **Stay** | One episode of residency, intake → discharge. A resident who returns gets a new Stay; the Resident record is the person and persists across both. |
@@ -185,10 +185,18 @@ occupied (name, program, since), free, out of service with its note. Staff-only,
 chip, a destructive "Overdue 2h 41m" chip with a red-striped tile, and deliberately no
 chip when in house — absence of a chip means present, which keeps a quiet board quiet.
 The figures row counts signed-out and overdue (hidden at zero), re-derived client-side
-against the page's 30-second tick. Still deferred: **bed holds** arrive with travel
-passes (module 9), and the "on pass" chip with them. If the facility outgrows a
-screenful of tiles, the fallback is the table variant; the figures row carries over
-unchanged.
+against the page's 30-second tick.
+
+**The "on pass" chip arrived with module 9 (2026-08-08), and the bed hold with it —
+which cost nothing, because a pass never touches `bed_assignments` at all.** An on-pass
+tile keeps its name and its occupied styling and gains a **muted** chip carrying a
+**date** ("On pass · back Sun 10 Aug"), not a clock time: a pass spans days, and "back
+5:30 PM" on a Thursday pass reads as today. Late reads "Overdue back 2h 41m" in
+destructive with the inset. `onPass` and `passOverdue` are counted **beside** `occupied`
+rather than instead of it — that is the hold made visible, and it is what stops the board
+reading as though a bed came free. The tile still carries **no destination**, on any of
+the states. If the facility outgrows a screenful of tiles, the fallback is the table
+variant; the figures row carries over unchanged.
 
 **A free tile is the placement affordance** (built 2026-08-02). `unhoused` had been in the
 census response since the start and rendered nowhere; the tile is what uses it. A free bed
@@ -725,8 +733,13 @@ sign-outs, so a discharge drops someone from future rosters with no write.
 
 **The roster is derived, then snapshotted.** Who should be on site = occupants of the
 apartment's beds; an open sign-out **pre-accounts** its resident as `SIGNED_OUT` (no tap —
-the sign-out is the record), everyone else is marked present-with-note or not found. The
-rules at the boundary, each enforced in the service AND asserted in the suite:
+the sign-out is the record), everyone else is marked present-with-note or not found. **A
+travel pass pre-accounts the same way, as `ON_PASS`** (module 9, 2026-08-08) — its own
+status rather than an overload of `SIGNED_OUT`, because a pass is not a sign-out and the
+glossary forbids synonyms; `NOT_FOUND` is refused for somebody on one, and the bell's
+RESIDENT_NOT_ACCOUNTED does not fire, since an approved absence is accounted for by
+definition. The rules at the boundary, each enforced in the service AND asserted in the
+suite:
 
 - **The submission must cover the live roster exactly**, re-derived inside the
   transaction — an assignment or sign-out that changed between sheet-load and Save is a
@@ -738,6 +751,16 @@ rules at the boundary, each enforced in the service AND asserted in the suite:
   signed-out resident found on site may be `PRESENT`: truth wins.
 - An empty apartment is an empty roster; a zero-line check is legal — the walk still
   counts, and completeness holds vacuously.
+
+**"On site" excludes a travel pass, and it did not at first** (fixed 2026-08-08). The
+board's headline figure — "1 of 3 on site" — was derived as *occupants with no open
+sign-out*, so a resident away for the weekend was counted as being in the building, which
+is precisely the claim this module exists to make false. It now reads through the same
+`passesCovering()` the roster does. The check SHEET had the matching fault and a worse
+symptom: it pre-accounted every non-IN presence as `SIGNED_OUT`, which the service refuses
+with a 409 for somebody on a pass — so while anyone was away, **no round in that apartment
+could be saved at all**. `!== 'IN'` was the whole bug in both places: two different facts
+satisfy "not in the building", and only one of them is a sign-out.
 
 **`checkedAt` is always the server clock.** A client-supplied time is an invitation to
 back-fill the 2 PM round at 4; a round genuinely saved late lands in the hour it was
@@ -1045,6 +1068,13 @@ hard way:
   exactly what still shows. Found in the seeded data as a discontinued Trazodone still
   showing a dose due that evening.
 
+**A dose inside a TRAVEL PASS is skipped, not missed** (module 9, 2026-08-08) — the
+identical shape as the `endsOn` filter above, and for the identical reason. Without it a
+three-day pass reads as a run of MISSED doses: a false record asserting the facility failed
+to medicate somebody who was not in the building. `expandDoses()` takes the passes
+overlapping the window from `passesOverlapping()`, the same one query the check roster and
+the roll sheet read, so none of the three can disagree about who is away.
+
 **MISSED is derived and must never become storable.** CLAUDE.md's own sketch said the log
 was "given / refused / missed / held"; three of those four are stored. `MedLogStatus` is
 `GIVEN | REFUSED | HELD`, and `MED_DOSE_STATE` adds `UPCOMING`, `DUE` and `MISSED` as a
@@ -1283,7 +1313,10 @@ The rules that hold it together:
 - **Crossing into overdue mutates nothing** — no write, no socket event — so the census
   and sign-outs pages keep a 30-second client tick that re-derives chip state and nudges
   the pill and bell. Any state that crosses a threshold on the clock alone needs this
-  pattern; module 9's pass expiries will too.
+  pattern; **module 9's pass expiries do too** (built 2026-08-08) — `/passes` and the
+  census both tick, against `PASS_GRACE_MS`, which is **one hour and its own knob**: an
+  hour late back from a weekend away is not the same event as an hour late back from the
+  shop.
 - The census tile carries presence **state and times only, never the destination** —
   where somebody went is for the sign-outs page, not a board glanced at with residents
   around. The bell's overdue item does carry it: whoever acts on an overdue return needs
@@ -1304,8 +1337,156 @@ answers the second); and `recordedById` already handles attribution, since a res
 User links to their Resident row.
 
 ### 9. Travel passes
-Multi-day, approval-gated. Request → review → approve/deny with a reason. Blackout rules
-by program phase. Bed is held, and the census reflects "out on pass" rather than empty.
+**Built (2026-08-08).** The last operational module, and the one three built modules had
+already promised by name. An overnight or multi-day approved absence: request → review →
+approve or deny with a reason → acknowledge the return. **The bed is held throughout** —
+the census shows "on pass", never an empty tile.
+
+**Facility decisions (2026-08-08):** managers and admins approve, **filing stays
+all-staff**; eligibility is enforced **per phase** — Orientation is not eligible at all,
+**Phase 1 and above need 90 days** in the programme; **Phase 3 was added** (level 3, 60
+service hours), because the glossary has said "Phase 1 / 2 / 3" since the beginning and
+the seed only ever had two; the overdue grace is **1 hour**; and a pass satisfies
+**apartment checks, med doses and group attendance**.
+
+**The bed hold cost nothing to build, and that is the schema being right two modules
+early.** `BedAssignment`'s own comment already said *"a resident out on a travel pass still
+holds their bed. Presence is a separate question answered by sign-outs and passes."* So
+nothing in this module touches bed history — and because a reader is more likely to assume
+that than check it, `verify-passes.js` asserts it on the **row**: the same assignment id,
+the same `startedAt`, still open. An assignment ended and re-created would leave the census
+looking identical while rewriting permanent evidence.
+
+**One table, and the review is an ARC rather than an amendment.** `travel_passes`, with the
+`drug_screens` posture: the request half — destination, purpose, dates, who asked — is
+immutable, and approving is a **later fact about** the request rather than an edit to it.
+The trigger is a **whole-row jsonb whitelist**, so a column added in six months is immutable
+by default; the arc runs `REQUESTED → APPROVED|DENIED → CANCELLED|RETURNED`, **once and
+forwards**. Append-only is enforced at **both layers and asserted separately** — `REVOKE
+UPDATE, DELETE` stops the app role on privilege, the trigger stops a superuser.
+
+**A denial requires a reason, in the route, the service AND a CHECK.** A refusal with
+nothing stated is what a resident appeals and the facility cannot defend. Cancelling an
+approved pass is the same act from the other direction and carries the same requirement.
+Every paired CHECK spells out `IS NOT NULL`, the issue #1 rule.
+
+**Withdrawing is soft and only while UNDECIDED** — the sign-outs shape: fixable in error,
+but only while nothing has been recorded against it. Once a manager has decided, the
+decision is what an auditor reads and it stays.
+
+**`passEligibility(stay)` is a PURE predicate returning `{ eligible, reason }`**, checked in
+the service rather than in middleware, because it depends on the resident's program and
+their days in the programme — not on the actor. It returns the *rule*, not just a refusal,
+which is why the request dialog and the record's Eligibility band can show "Phase 1 needs 90
+days in the programme — this is day 12" **before** somebody types a destination. A **null**
+`passEligible` reads as *not granted* — the conservative posture, the same as a null
+service-hours target meaning no target. Eligibility is **re-checked at review**, since a
+request can sit in the queue across a phase change.
+
+**`PASS_GRACE_MS` is one hour and is its own knob**, beside `OVERDUE_GRACE_MS` (15m) and
+`CHECK_GRACE_MS` (15m). An hour late back from a weekend away is not the same event as an
+hour late back from the shop, and `passOverdueCutoff()` is THE cutoff the page, the census,
+the bell and the dashboard all derive through.
+
+**THE BOUND THAT MATTERS: an overdue pass is still an absence.** `coversInstant()` is
+bounded by the **departure only** — `returnBy` does not close it. This was shipped the other
+way first and caught before merge, and the failure is worth recording because every symptom
+was somewhere else: with `returnBy >= at`, the moment somebody became overdue the census
+dropped them back to "in", the hourly round stopped pre-accounting them, and their doses
+came due and began reading MISSED. The app would have asserted a resident was home *because
+they had failed to come home*. An APPROVED pass is in force until it is returned or
+cancelled, however late it runs, and there is an assertion pinning it.
+
+**Presence is ONE derivation, extended rather than duplicated.** `PRESENCE` gains `ON_PASS`
+and `PASS_OVERDUE`, and `presenceOf()` in `services/signOuts.js` — which has exactly two
+callers, `rosterFor()` and the census — takes the covering pass alongside the open sign-out.
+A second `passPresenceOf()` beside it is how the census tile, the check roster and the
+record come to disagree about whether somebody is in the building. **A pass OUTRANKS a
+sign-out** when both somehow exist: the multi-day sanctioned absence is the larger fact, and
+a stale open sign-out underneath one must not downgrade the display to "out for the
+afternoon".
+
+**The three integrations, all DERIVED — nothing is written ahead:**
+
+- **Apartment checks.** `CheckResidentStatus` gains **`ON_PASS`** rather than overloading
+  `SIGNED_OUT`: a pass is not a sign-out and the glossary forbids synonyms. The roster
+  pre-accounts them (no tap — the pass is the record), `NOT_FOUND` is refused for somebody
+  on one, and the bell's `RESIDENT_NOT_ACCOUNTED` does not fire, because an approved absence
+  is accounted for by definition.
+- **Med pass.** `expandDoses()` skips doses falling inside an active pass — the same shape
+  as the discontinued-medication filter, and for the same reason: without it a three-day
+  pass reads as a run of MISSED doses, a false record of the facility failing to medicate
+  somebody who was not there.
+- **Group attendance.** `sessionRoll` flags an on-pass attendee and **`AppRollSheet`
+  pre-selects EXCUSED, muted, with the pass as the reason** — the check sheet's signed-out
+  row pattern. **"Mark all attended" skips them**, or one tap would record a resident as
+  present at a group they are two hundred miles from.
+
+**Writing EXCUSED marks at approval was in the plan and was rejected**, and the reason is
+structural rather than aesthetic: `recordedAgainst()` in `schedule/write.js` counts
+attendance rows, so approving a five-day pass for somebody on a daily group would **freeze
+that event's shape** and refuse a manager's reschedule with a 409 giving no hint why.
+Pre-selecting instead keeps the mark real and human-authored — a person opened the roll and
+saved it — and `verify-passes.js` asserts the attendance count does not move when a pass is
+approved.
+
+**Roles follow one line: FILING IS A HALLWAY ACT, DECIDING IS A JUDGEMENT.** A tech is who a
+resident actually asks, and making them find a manager to type it is how a request never
+gets filed — the sign-out, roll-taking and hourly-round reasoning. **Acknowledging a return
+is all-staff** for the same reason a sign-out's return is: the person at the door sees them
+walk in. `returnedAt` is the **server clock**, since a client-supplied time is an invitation
+to back-date a late return into an on-time one.
+
+**`/passes` is a REVIEW QUEUE over who is away, then history** (variant A, chosen 2026-08-08
+from three rendered variants; a fortnight calendar and a filterable table were the others).
+A request is the only thing on the page with somebody waiting on it — a resident who does
+not yet know whether they can go — so it leads even on the days it is empty. It **names
+residents and carries destinations**, like `/sign-outs` and unlike the census: it is a work
+queue read by one person deciding what to do. **A 30-second clock tick**, the census pattern,
+because a pass crossing into overdue is no write and no socket event will come.
+
+The calendar is the fallback, recorded so it is not re-proposed as new: it becomes the right
+layout once passes are frequent enough that **overlap** is the question, which no other
+framing answers. The table lost for the reason the maintenance table won on its own page —
+there is one urgent act here, and a filterable list buries it.
+
+**Approving has no dialog; denying does.** Approval needs nothing from the reviewer, and a
+confirm that asks for nothing is a click that teaches people to click. Denial gets a dialog
+because denial has a cost and needs its reason.
+
+**On the resident record** the Travel passes section leads with an **Eligibility band**,
+which no other rail section does. A pass is the one thing on the record somebody is refused
+by *rule* rather than by judgement, so the band states the rule; the Request button renders
+only when they are eligible, and its absence is not silent because the band beside it says
+why. The section carries **no dot** — a pass is not a thing going wrong.
+
+**The census tile keeps its name and its occupied styling** and gains a muted "On pass ·
+back <date>" chip; late reads "Overdue back 2h 41m" in destructive with the inset. **Dates,
+never a clock time**, because a pass spans days and "back 5:30 PM" on a Thursday pass reads
+as today. **Never a destination**, on the tile or the roll sheet or the check roster — that
+board is glanced at over a resident's shoulder. The **bell's overdue item DOES carry it**,
+the same exception the overdue sign-out has: whoever chases somebody needs a place to start.
+
+**The figures count `onPass` BESIDE `occupied`, never instead of it** — that is the bed hold
+made visible, and it is what stops the board reading as though a bed came free. The tile's
+three tones are the urgency: destructive when somebody is late (either kind), warning when
+they are out and due back within hours, muted for an approved multi-day absence, which is
+not a thing to act on.
+
+**A gap this module's own suite caught on its first run, recorded because it is the exact
+failure this file exists to warn about:** `ON_PASS` shipped in the schema, in
+`validateLines()` and in the check sheet — while `routes/checks.js` still typed its status
+enum as three literal strings. So the one path that could ever set it answered **400**, and
+every screen looked plausible. It is module 10's `vendorName` in a different costume, and
+the fix is the general one: the route derives its enum from `CHECK_RESIDENT_STATUS` rather
+than re-typing it, so a status added to the domain constant cannot be one the route silently
+refuses.
+
+**Still to build:** **blackout rules by date** — CLAUDE.md's original sketch said "blackout
+rules by program phase", the phase half is built, and a facility-wide blackout calendar is
+not, because nobody has been asked for one; resident **self-request** from the portal, which
+is the same INSERT-only RLS relaxation modules 7 and 8 both plan; and whether a pass should
+suppress the **curfew** check, which is not built either.
 
 ### 10. Maintenance
 **Built 2026-08-02, planned out properly 2026-08-07.** Requests raised against an
@@ -2005,6 +2186,16 @@ Decisions with teeth, each chosen explicitly:
   **Minus overdue sign-outs** (the Signed out panel is directly beneath; one situation
   should not be two rows) and **minus community service** (left out by request — the
   verification queue stays on `/service` and the rail's amber dot).
+  **An OVERDUE TRAVEL PASS is a row here (2026-08-08), and it leads the panel** — the
+  one addition since, and it is deliberately not the exclusion above. Overdue sign-outs
+  are left out because the Signed out panel sits directly beneath and one situation
+  should not be two rows; there is no passes panel on this page, so without this row a
+  resident nobody can find is invisible on the screen that greets every unlock. It
+  carries the destination, like the sign-out rows, and is **never capped** — hiding a
+  person is what the cap rule already refuses to do. It takes a **destructive badge and
+  no inset**, the balances panel's own trade, so this page keeps exactly one inset.
+  `overduePasses()` is shared with the bell, and `verify-passes.js` asserts the two name
+  the same passes.
   **Rolls are the one kind capped — at THREE (2026-08-06)**, with an overflow row
   ("30 more rolls due → Schedule") carrying the rest. A house that has never taken a
   roll owes a fortnight × two cohorts of them, and thirty roll rows bury the one urgent
@@ -2814,6 +3005,35 @@ Two verification suites, both run against a live database:
   is gone" passes if every dose was dropped, and "the recorded one survives" passes if
   nothing was filtered at all.
   Posts doses and medications — reseed after.
+- `node scripts/verify-passes.js` — **55 assertions** on travel passes, and the suite
+  **owns its own away fixture** because the seed deliberately has none: a pass outranks a
+  sign-out in `presenceOf()`, so seeding an active one on any housed resident silently
+  rewrote a fixture verify-signouts or verify-checks depends on. Eligibility is proved
+  **with no database** in both directions — Orientation refused however long somebody has
+  been here, Phase 1 refused at **day 89** and allowed at **day 90** (the boundary is
+  inclusive), a null policy refused, a discharged stay refused — and then proved to be the
+  rule actually in force, through a **route** 409 naming the day count. **The overdue bound
+  gets its own pair**, because it is the one a reader gets backwards: a pass five hours past
+  its return **still covers** the resident, and an approved pass for next week does **not**
+  cover today. **The bed is asserted on the ROW** — same assignment id, same `startedAt`,
+  still open — since an assignment ended and re-created would leave the census looking
+  identical while rewriting permanent history. The arc is proved once and forwards
+  (approved-then-denied refused, withdrawal after review refused, and the trigger refusing
+  to run it backwards for a superuser); a denial with no reason is refused **at the route
+  and by the CHECK**; append-only is asserted at **both layers separately**, including a
+  column in no whitelist being immutable by default. Then the four integrations, each with
+  the negative that a cheap assertion would miss: the tile still **names her** and counts
+  `passOverdue` while carrying **no destination**, and the bell's item **does** carry one;
+  the round accepts `ON_PASS`, refuses `NOT_FOUND`, and the bell does **not** then call her
+  unaccounted for; the dashboard's own row appears **and the bell and the panel are asserted
+  to name exactly the same passes**, which is the point of `overduePasses()` being one
+  helper — and that pair lives here rather than in `verify-dashboard.js` for the same
+  fixture reason; her doses vanish from the board, asserted **after** proving she has a
+  medication at all so it cannot pass vacuously; every roll flags `onPass` and the
+  attendance count **does not move**, which is the whole no-writing-ahead decision. Finally
+  the return clears the bell and the tile, a second return is refused, and RLS is asserted
+  both ways plus a resident's write refused. Posts a check and reviews passes — reseed
+  after.
 - `npm run verify:rls` — 28 assertions proving a resident actor cannot read, count or
   write another resident's rows — including their ledger and sign-outs — and that the
   app role cannot bypass the policies
@@ -2837,6 +3057,7 @@ npm run verify:constraints && node scripts/seed.js \
   && node scripts/verify-checks.js && node scripts/seed.js \
   && node scripts/verify-screens.js && node scripts/seed.js \
   && node scripts/verify-meds.js && node scripts/seed.js \
+  && node scripts/verify-passes.js && node scripts/seed.js \
   && npm run verify:rls
 ```
 
@@ -2989,7 +3210,18 @@ no longer the default.
   off, which is what makes this worth stating rather than deriving.
 - Mobile-first CSS for anything a tech touches in the hallway.
 - Seed data should look like a real facility: several apartments across both cohorts, a
-  full census, a few residents out on pass, one overdue sign-out.
+  full census, one overdue sign-out, and travel passes in every state.
+
+  **But a fixture belongs to whichever suite proves the hardest thing about it**, and
+  module 9 is where that stopped being obvious. "A few residents out on pass" is what this
+  line asked for and it cannot be seeded: a pass **outranks a sign-out** in `presenceOf()`
+  and pre-accounts its resident on the round, so an active pass on any housed resident
+  silently rewrites a fixture another suite depends on — and every housed resident is
+  already one (Ocampo and Boone carry the open sign-outs, Ferrer is verify-signouts'
+  grace-window case, Castillo is verify-checks' NOT_FOUND). Three attempts each broke a
+  different suite. So the seed shows the arc **up to departure** — two awaiting review, one
+  approved for next week, one returned, one denied — and `verify-passes.js` creates and owns
+  the away and overdue states itself.
 
 ---
 

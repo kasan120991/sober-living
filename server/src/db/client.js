@@ -124,6 +124,7 @@ const RLS_MODELS = new Set([
   'DrugScreen',
   'Medication',
   'MedLog',
+  'TravelPass',
   'Invoice',
   'InvoiceLine',
   'StripeEvent',

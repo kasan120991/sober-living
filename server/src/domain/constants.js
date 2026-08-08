@@ -165,6 +165,7 @@ export const AUDITED_MODELS = Object.freeze([
   'DrugScreen',
   'Medication',
   'MedLog',
+  'TravelPass',
   'Invoice',
   'InvoiceLine',
   // Facility configuration
@@ -195,6 +196,9 @@ export const SOFT_DELETE_MODELS = Object.freeze([
   'User',
   'MaintenanceRequest',
   'SignOut',
+  // A request filed in error is WITHDRAWN, not edited — the sign-out shape,
+  // and only while nothing has been decided. Once reviewed it is history.
+  'TravelPass',
   'ScheduleEvent',
   'ScheduleOccurrence',
   'ScheduleAttendee',
@@ -244,6 +248,13 @@ export const PRESENCE = Object.freeze({
   IN: 'IN',
   OUT: 'OUT',
   OVERDUE: 'OVERDUE',
+  /// Away on an approved travel pass — an overnight or multi-day absence,
+  /// added with module 9. Distinct from OUT because the two are different
+  /// facts with different alarms: OUT is a same-day errand due back in hours,
+  /// ON_PASS is a sanctioned absence with its own grace and its own bed hold.
+  ON_PASS: 'ON_PASS',
+  /// Away on a pass and past its return time plus PASS_GRACE_MS.
+  PASS_OVERDUE: 'PASS_OVERDUE',
 })
 
 /// How one resident was accounted for on one apartment check. Matches the
@@ -251,6 +262,9 @@ export const PRESENCE = Object.freeze({
 export const CHECK_RESIDENT_STATUS = Object.freeze({
   PRESENT: 'PRESENT',
   SIGNED_OUT: 'SIGNED_OUT',
+  /// Accounted for by an approved travel pass. Deliberately not folded into
+  /// SIGNED_OUT — see the enum's own note in schema.prisma.
+  ON_PASS: 'ON_PASS',
   NOT_FOUND: 'NOT_FOUND',
 })
 
@@ -315,6 +329,31 @@ export const MED_DOSE_STATE = Object.freeze({
  * on a house doing nothing wrong, which is how a signal stops being read.
  */
 export const MED_PASS_GRACE_MS = 2 * 60 * 60_000
+
+/// A travel pass's arc. Matches `PassStatus` in schema.prisma, and runs once
+/// and forwards — the trigger enforces the direction, not just the values.
+export const PASS_STATUS = Object.freeze({
+  REQUESTED: 'REQUESTED',
+  APPROVED: 'APPROVED',
+  DENIED: 'DENIED',
+  CANCELLED: 'CANCELLED',
+  RETURNED: 'RETURNED',
+})
+
+/**
+ * How late a resident may be back from a travel pass before the app calls it
+ * overdue (facility policy, chosen 2026-08-08): ONE HOUR.
+ *
+ * THE one knob — the passes page, the bell and the dashboard all derive through
+ * passOverdueCutoff() in services/passes.js.
+ *
+ * Its own figure rather than reusing OVERDUE_GRACE_MS, and the difference is
+ * the point. A sign-out's fifteen minutes lags an afternoon errand whose
+ * return time the resident controls; a multi-day absence ends with travel that
+ * they mostly do not. An hour absorbs a delayed bus without letting a genuine
+ * no-show sit unnoticed overnight.
+ */
+export const PASS_GRACE_MS = 60 * 60_000
 
 /// An invoice's state, mirroring Stripe's. Matches `InvoiceStatus` in
 /// schema.prisma. There is deliberately no OVERDUE: that is `dueAt` against a

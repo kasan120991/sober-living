@@ -13,6 +13,14 @@ export const FACILITY_TIMEZONE = 'America/New_York'
 /** Mirrors OVERDUE_GRACE_MS in server/src/services/signOuts.js. */
 export const OVERDUE_GRACE_MS = 15 * 60_000
 
+/**
+ * Mirrors PASS_GRACE_MS in server/src/domain/constants.js. It lives HERE rather
+ * than in utils/passes.js, beside the other two graces, because presenceState()
+ * below needs it and the alternative is a util importing a sibling util for one
+ * number. utils/passes.js re-exports it, so there is still exactly one copy.
+ */
+export const PASS_GRACE_MS = 60 * 60_000
+
 /** Mirror CHECK_INTERVAL_MS / CHECK_GRACE_MS in server/src/services/checks.js. */
 export const CHECK_INTERVAL_MS = 60 * 60_000
 export const CHECK_GRACE_MS = 15 * 60_000
@@ -216,9 +224,25 @@ export function overdueLabel(expectedReturnAt, nowMs = Date.now()) {
   return h ? `${h}h ${m}m` : `${m}m`
 }
 
-/** Presence against a moving clock. Grace delays the alarm, not the label. */
+/**
+ * Presence against a moving clock. Grace delays the alarm, not the label.
+ *
+ * Mirrors `presenceOf()` in the server's services/signOuts.js, including its
+ * ordering: A PASS OUTRANKS A SIGN-OUT. The server has already decided which
+ * one applies — a presence object carries either `returnBy` (a pass) or
+ * `expectedReturnAt` (a sign-out), never both — so the branch here is on which
+ * field arrived, and the two graces are separate knobs because the deadlines
+ * are different promises: an hour late back from a weekend away is not the same
+ * event as an hour late back from the shop.
+ */
 export function presenceState(presence, nowMs = Date.now()) {
-  if (!presence || !presence.expectedReturnAt) return 'IN'
+  if (!presence) return 'IN'
+  if (presence.returnBy) {
+    return nowMs - new Date(presence.returnBy).getTime() > PASS_GRACE_MS
+      ? 'PASS_OVERDUE'
+      : 'ON_PASS'
+  }
+  if (!presence.expectedReturnAt) return 'IN'
   return nowMs - new Date(presence.expectedReturnAt).getTime() > OVERDUE_GRACE_MS
     ? 'OVERDUE'
     : 'OUT'

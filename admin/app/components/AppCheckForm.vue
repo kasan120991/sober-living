@@ -12,7 +12,7 @@
 //
 // Two copies of this markup is how the drawer comes to require a note that
 // the full-screen step lets through.
-import { formatFacilityTime } from '~/utils/facilityTime.js'
+import { facilityDateOf, formatFacilityTime, humanDate } from '~/utils/facilityTime.js'
 
 const props = defineProps({
   /** `{ id, name }` — record mode's subject. */
@@ -68,9 +68,16 @@ watch(
       } else {
         const data = await getRoster(props.apartment.id)
         roster.value = data
-        // Open sign-outs pre-account their people; nothing else is presumed.
+        // Open sign-outs and travel passes pre-account their people; nothing
+        // else is presumed. WHICH status matters — the server refuses
+        // SIGNED_OUT for somebody away on a pass with a 409, and a sheet that
+        // could only ever send SIGNED_OUT made the round unsavable while
+        // anybody was away. `!== 'IN'` was the whole bug: two different facts
+        // both satisfy "not in the building".
         for (const p of data.people) {
-          if (p.presence.state !== 'IN') marks[p.stayId] = 'SIGNED_OUT'
+          const s = p.presence.state
+          if (s === 'ON_PASS' || s === 'PASS_OVERDUE') marks[p.stayId] = 'ON_PASS'
+          else if (s !== 'IN') marks[p.stayId] = 'SIGNED_OUT'
         }
       }
     } catch (err) {
@@ -90,13 +97,21 @@ const people = computed(() => {
       out: false,
     }))
   }
-  return (roster.value?.people ?? []).map((p) => ({
-    stayId: p.stayId,
-    fullName: p.fullName,
-    bedLabel: p.bedLabel,
-    out: p.presence.state !== 'IN',
-    expectedReturnAt: p.presence.expectedReturnAt ?? null,
-  }))
+  return (roster.value?.people ?? []).map((p) => {
+    const onPass = p.presence.state === 'ON_PASS' || p.presence.state === 'PASS_OVERDUE'
+    return {
+      stayId: p.stayId,
+      fullName: p.fullName,
+      bedLabel: p.bedLabel,
+      // Pre-accounted either way, which is what removes the buttons…
+      out: p.presence.state !== 'IN',
+      // …but the row has to say WHICH, or it tells a tech that a resident away
+      // for the weekend has signed out for the afternoon.
+      onPass,
+      expectedReturnAt: p.presence.expectedReturnAt ?? null,
+      returnBy: p.presence.returnBy ?? null,
+    }
+  })
 })
 
 const title = computed(
@@ -149,11 +164,11 @@ async function submit() {
   }
 }
 
-/** In amend mode SIGNED_OUT joins the toggle; recording derives it instead. */
+/** In amend mode the derived statuses join the toggle; recording derives them. */
 const statuses = computed(() =>
-  amending.value ? ['PRESENT', 'SIGNED_OUT', 'NOT_FOUND'] : ['PRESENT', 'NOT_FOUND'],
+  amending.value ? ['PRESENT', 'SIGNED_OUT', 'ON_PASS', 'NOT_FOUND'] : ['PRESENT', 'NOT_FOUND'],
 )
-const STATUS_SHORT = { PRESENT: 'Present', SIGNED_OUT: 'Out', NOT_FOUND: 'Not found' }
+const STATUS_SHORT = { PRESENT: 'Present', SIGNED_OUT: 'Out', ON_PASS: 'On pass', NOT_FOUND: 'Not found' }
 
 const toneFor = (status, active) => {
   if (!active) return 'text-muted-foreground hover:bg-accent/60'
@@ -190,10 +205,21 @@ defineExpose({ submit, canSave, accountedCount, people, ready, loading, pending,
               </p>
             </div>
 
-            <!-- Pre-accounted: the sign-out is the record, so no buttons.
-                 State and time only, never a destination. -->
+            <!-- Pre-accounted: the sign-out or the pass IS the record, so no
+                 buttons. State and time only, never a destination — this sheet
+                 is held up in a hallway. A pass carries a DATE, because it
+                 spans days and a clock time would read as today. -->
             <Badge
-              v-if="p.out && !amending"
+              v-if="p.onPass && !amending"
+              variant="outline"
+              class="text-muted-foreground shrink-0 text-[10px]"
+            >
+              On pass<template v-if="p.returnBy">
+                · back {{ humanDate(facilityDateOf(p.returnBy), { short: true }) }}</template
+              >
+            </Badge>
+            <Badge
+              v-else-if="p.out && !amending"
               variant="outline"
               class="border-warning/40 bg-warning/15 text-warning-foreground shrink-0 text-[10px]"
             >
@@ -219,7 +245,7 @@ defineExpose({ submit, canSave, accountedCount, people, ready, loading, pending,
           </div>
 
           <p v-if="p.out && !amending" class="text-muted-foreground text-[11px]">
-            Accounted for by the sign-out.
+            Accounted for by the {{ p.onPass ? 'travel pass' : 'sign-out' }}.
           </p>
 
           <!-- The required note, one tap away. Chips fill; typing edits. -->

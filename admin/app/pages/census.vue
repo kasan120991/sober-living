@@ -3,6 +3,7 @@ import { UserPlus } from '@lucide/vue'
 import {
   facilityDateOf,
   formatFacilityTime,
+  humanDate,
   overdueLabel,
   presenceState,
 } from '~/utils/facilityTime.js'
@@ -13,9 +14,16 @@ import { STAFF_ROLE } from '~/utils/roles.js'
 // is visible: an empty tile and an out-of-service hole read at a glance, which
 // a thin table row does not.
 //
-// Occupied tiles will grow a presence chip (in house / out until / OVERDUE /
-// on pass) when sign-outs and passes exist. Until then a chip on every tile
-// would say "In house" seven times, so there is none.
+// Occupied tiles carry a presence chip — signed out, overdue back, on pass —
+// and DELIBERATELY NOTHING when the resident is in the house. Absence of a chip
+// means present, which is what keeps a quiet board quiet; a chip on every tile
+// would say "In house" seven times and the two that matter would disappear
+// into the noise.
+//
+// A chip never carries a DESTINATION, on any of the three states. This board is
+// glanced at over a resident's shoulder. Whoever has to chase somebody gets the
+// destination from the bell and from /passes, which are work queues read by one
+// person deciding what to do.
 const { getCensus } = useCensus()
 const { refresh: refreshNotifications } = useNotifications()
 const { refresh: refreshStatus } = useFacilityStatus()
@@ -46,13 +54,36 @@ onMounted(() => {
 })
 onUnmounted(() => clearInterval(tick))
 
-/** Chip for an occupied tile, or null — in-house tiles stay quiet. */
+/**
+ * Chip for an occupied tile, or null — in-house tiles stay quiet.
+ *
+ * The bed is STILL OCCUPIED on a pass: it is held for the whole absence, so an
+ * on-pass tile keeps its name and its occupied styling and only gains a chip.
+ * That is the visible form of module 9's headline claim, and it is why the
+ * figures below count `onPass` beside `occupied` rather than instead of it.
+ */
 function chipFor(bed) {
-  if (!bed.presence || !bed.presence.expectedReturnAt) return null
-  return presenceState(bed.presence, now.value) === 'OVERDUE'
-    ? { state: 'OVERDUE', text: `Overdue ${overdueLabel(bed.presence.expectedReturnAt, now.value)}` }
-    : { state: 'OUT', text: `Out · back ${formatFacilityTime(bed.presence.expectedReturnAt)}` }
+  if (!bed.presence) return null
+  const state = presenceState(bed.presence, now.value)
+  if (state === 'PASS_OVERDUE') {
+    return { state, text: `Overdue back ${overdueLabel(bed.presence.returnBy, now.value)}` }
+  }
+  // A pass spans days, so the chip carries a DATE where a sign-out carries a
+  // clock time: "back 5:30 PM" on a Thursday pass would read as today. Through
+  // humanDate, not the bare key — a chip is the loudest thing on a tile and
+  // "back 2026-08-09" beside "Out · back 3:28 PM" reads like a different app.
+  if (state === 'ON_PASS') {
+    const back = humanDate(facilityDateOf(bed.presence.returnBy), { short: true })
+    return { state, text: `On pass · back ${back}` }
+  }
+  if (!bed.presence.expectedReturnAt) return null
+  return state === 'OVERDUE'
+    ? { state, text: `Overdue ${overdueLabel(bed.presence.expectedReturnAt, now.value)}` }
+    : { state, text: `Out · back ${formatFacilityTime(bed.presence.expectedReturnAt)}` }
 }
+
+/** The two states that mean "somebody is late and nobody knows where". */
+const isLate = (chip) => chip?.state === 'OVERDUE' || chip?.state === 'PASS_OVERDUE'
 
 async function load() {
   // First load only — a realtime refresh must not blank the board it updates.
@@ -74,12 +105,14 @@ onRealtimeChanged(load)
 // Out and overdue are re-counted client-side against the ticking clock, so
 // the figures always agree with the chips below them.
 const liveCounts = computed(() => {
-  const counts = { out: 0, overdue: 0 }
+  const counts = { out: 0, overdue: 0, onPass: 0, passOverdue: 0 }
   for (const a of data.value?.apartments ?? []) {
     for (const b of a.beds) {
       const chip = chipFor(b)
       if (chip?.state === 'OUT') counts.out += 1
       if (chip?.state === 'OVERDUE') counts.overdue += 1
+      if (chip?.state === 'ON_PASS') counts.onPass += 1
+      if (chip?.state === 'PASS_OVERDUE') counts.passOverdue += 1
     }
   }
   return counts
@@ -119,7 +152,18 @@ const figures = computed(() => {
     live.overdue
       ? { key: 'overdue', value: live.overdue, label: 'overdue', tone: 'text-destructive' }
       : null,
+    // Counted separately from a signed-out return, deliberately: they are
+    // different absences with different graces and different people to ring.
+    live.passOverdue
+      ? {
+          key: 'passOverdue',
+          value: live.passOverdue,
+          label: 'overdue back from a pass',
+          tone: 'text-destructive',
+        }
+      : null,
     live.out ? { key: 'out', value: live.out, label: live.out === 1 ? 'signed out' : 'signed out' } : null,
+    live.onPass ? { key: 'onPass', value: live.onPass, label: 'on pass' } : null,
     f.outOfService
       ? { key: 'oos', value: f.outOfService, label: 'out of service' }
       : null,
@@ -171,7 +215,7 @@ const figures = computed(() => {
                 v-if="b.resident"
                 class="bg-background flex min-h-16 flex-col gap-0.5 rounded-md border px-3 py-2.5"
                 :class="
-                  chipFor(b)?.state === 'OVERDUE' &&
+                  isLate(chipFor(b)) &&
                   'border-destructive shadow-[inset_3px_0_0_var(--destructive)]'
                 "
               >
@@ -179,14 +223,21 @@ const figures = computed(() => {
                   <span class="text-muted-foreground text-[10.5px] font-semibold tracking-[0.1em] uppercase">
                     Bed {{ b.label }}
                   </span>
+                  <!-- Three tones, and the scale is the urgency: destructive
+                       when somebody is LATE (either kind), warning when they
+                       are out and due back within hours, and muted for an
+                       approved multi-day pass — which is not a thing to act
+                       on, only a thing to know. -->
                   <Badge
                     v-if="chipFor(b)"
                     variant="outline"
                     class="text-[10px]"
                     :class="
-                      chipFor(b).state === 'OVERDUE'
+                      isLate(chipFor(b))
                         ? 'border-destructive/40 bg-destructive/15 text-destructive'
-                        : 'border-warning/40 bg-warning/15 text-warning'
+                        : chipFor(b).state === 'ON_PASS'
+                          ? 'text-muted-foreground'
+                          : 'border-warning/40 bg-warning/15 text-warning'
                     "
                   >
                     {{ chipFor(b).text }}

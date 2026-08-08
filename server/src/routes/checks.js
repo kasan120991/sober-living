@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { handler, parseBody } from '../lib/http.js'
+import { CHECK_RESIDENT_STATUS } from '../domain/constants.js'
 import { requireAuth, requireStaff } from '../middleware/authorize.js'
 import { amendCheck, getCheck, houseChecks, recordCheck, rosterFor } from '../services/checks.js'
 
@@ -12,9 +13,14 @@ const router = Router()
 // the roll. Never RESIDENT: requireStaff is the boundary.
 router.use(requireAuth, requireStaff)
 
+// Derived from the domain constant rather than re-typed, so a status added to
+// the enum cannot be one the route silently refuses. That is not hypothetical:
+// ON_PASS shipped in the schema, the service and the check sheet while this
+// list still named three, so the one path that could set it answered 400 —
+// module 10's vendorName gap in a different costume.
 const line = z.object({
   stayId: z.string().min(1),
-  status: z.enum(['PRESENT', 'SIGNED_OUT', 'NOT_FOUND']),
+  status: z.enum(Object.values(CHECK_RESIDENT_STATUS)),
   note: z.string().trim().max(280).optional(),
 })
 

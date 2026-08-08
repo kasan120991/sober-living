@@ -2,6 +2,7 @@ import { prisma } from '../db/client.js'
 import { BED_STATUS, PRESENCE } from '../domain/constants.js'
 import { unhousedWithOptions } from './residents.js'
 import { presenceOf } from './signOuts.js'
+import { passesCovering } from './passes.js'
 
 /**
  * The census: who is in which bed right now, as one read.
@@ -51,6 +52,9 @@ export async function census() {
 
   // One `now` for the whole read, so every tile agrees on who is overdue.
   const now = new Date()
+  // One query for the whole board — the same read the check roster and the med
+  // board use, so the three cannot disagree about who is away.
+  const onPass = await passesCovering(now)
   const figures = {
     beds: 0,
     occupied: 0,
@@ -59,6 +63,9 @@ export async function census() {
     awaitingBed: unhoused.length,
     out: 0,
     overdue: 0,
+    // Counted beside `occupied`, never instead of it: the bed is HELD.
+    onPass: 0,
+    passOverdue: 0,
   }
 
   const shaped = apartments.map((a) => ({
@@ -77,9 +84,16 @@ export async function census() {
       // State + times only, deliberately no destination: the board is glanced
       // at with residents around, and where somebody went is for the
       // sign-outs page, not a tile over a tech's shoulder.
-      const presence = live ? presenceOf(live.stay.signOuts[0] ?? null, now) : null
+      const presence = live
+        ? presenceOf(live.stay.signOuts[0] ?? null, now, onPass.get(live.stay.id) ?? null)
+        : null
       if (presence?.state === PRESENCE.OUT) figures.out += 1
       if (presence?.state === PRESENCE.OVERDUE) figures.overdue += 1
+      // The bed is still OCCUPIED while somebody is on a pass — it is held, not
+      // freed — so `onPass` is counted beside the others rather than instead of
+      // `occupied`. A pass that emptied a tile would be a transfer.
+      if (presence?.state === PRESENCE.ON_PASS) figures.onPass += 1
+      if (presence?.state === PRESENCE.PASS_OVERDUE) figures.passOverdue += 1
 
       return {
         id: b.id,

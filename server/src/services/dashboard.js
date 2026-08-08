@@ -5,6 +5,7 @@ import { balancesByStay } from './ledger.js'
 import { overdueByStay } from './invoices.js'
 import { fridayNag } from './billing.js'
 import { bellMaintenanceWhere, requestState } from './maintenance.js'
+import { overduePasses } from './passes.js'
 import { cohortCapacity, unhousedWithOptions } from './residents.js'
 import { scheduleWindow } from './schedule/read.js'
 import { listSignOuts } from './signOuts.js'
@@ -103,6 +104,7 @@ export async function dashboard() {
     checksOverdue,
     notAccounted,
     nag,
+    passesLate,
   ] = await Promise.all([
     listSignOuts(),
     unhousedWithOptions(),
@@ -130,6 +132,16 @@ export async function dashboard() {
     // service were both removed from it — so a row that is only here has
     // precedent. Recorded so it is not "fixed" later.
     fridayNag(),
+    // Overdue travel passes, through the module's own helper — one knob shared
+    // with the bell, so the two cannot name different people.
+    //
+    // Unlike an overdue SIGN-OUT this one does belong here. That exclusion has
+    // a reason — the Signed out panel sits directly beneath, and one situation
+    // should not be two rows — and there is no passes panel on this page, so
+    // without this row an overdue pass is invisible on the screen that greets
+    // every unlock. A person nobody can find is the loudest thing the facility
+    // has, and it should not need a navigation to see.
+    overduePasses(),
   ])
 
   return {
@@ -163,6 +175,17 @@ export async function dashboard() {
       // Null unless a billing day has gone past unbilled — the row is absent
       // rather than false, so the panel's "absence means fine" rule holds.
       billingDue: nag.due ? { waiting: nag.waiting, since: nag.since } : null,
+      // The DESTINATION rides along, as it does on the bell's item and on an
+      // overdue sign-out row here: this page is a work queue, and whoever goes
+      // after somebody needs to know where to start looking. The census tile
+      // still withholds it — that board is glanced at with residents around.
+      passOverdue: passesLate.map((p) => ({
+        id: p.id,
+        residentId: p.residentId,
+        fullName: p.fullName,
+        destination: p.destination,
+        returnBy: p.returnBy,
+      })),
     },
 
     balances,
