@@ -71,11 +71,30 @@ watch(
   { immediate: true },
 )
 
+const WALL_CLOCK = /^([01][0-9]|2[0-3]):[0-5][0-9]$/
+
+/**
+ * Whether there is a complete time waiting to be added.
+ *
+ * A native <input type="time"> reports its value as an EMPTY STRING while the
+ * time is incomplete — type the hour and the field visibly reads "08:--" while
+ * the value is still ''. So "the user has typed something" and "we have a time"
+ * are different questions, and only the second one is answerable here.
+ */
+const validTime = computed(() => WALL_CLOCK.test(newTime.value))
+
+/**
+ * Adds the pending time. Called from the button, from Enter, AND from the
+ * input's own `change` — which native time inputs fire only once the value is
+ * complete, so picking a time commits it without touching the button at all.
+ *
+ * Idempotent by the duplicate check, which is what makes those three triggers
+ * safe together.
+ */
 function addTime() {
+  if (!validTime.value) return
   const t = newTime.value
-  if (!/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(t)) return
-  if (form.times.includes(t)) return
-  form.times = [...form.times, t].sort()
+  if (!form.times.includes(t)) form.times = [...form.times, t].sort()
   newTime.value = ''
 }
 const dropTime = (t) => (form.times = form.times.filter((x) => x !== t))
@@ -199,17 +218,31 @@ async function submit() {
                 </button>
               </span>
             </div>
-            <div class="flex gap-2">
+            <div class="flex flex-wrap items-center gap-2">
               <Input
                 v-model="newTime"
                 type="time"
                 class="w-36"
                 aria-label="Add a time"
+                @change="addTime"
                 @keydown.enter.prevent="addTime"
               />
-              <Button type="button" variant="outline" size="sm" @click="addTime">
+              <!-- Disabled until there is a complete time, so the control's
+                   state says what a click would do. It used to be always
+                   enabled and silently do nothing on an incomplete time, which
+                   reads as a broken button — and was reported as one. -->
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                :disabled="!validTime"
+                @click="addTime"
+              >
                 <Plus class="size-4" /> Add time
               </Button>
+              <span v-if="!validTime" class="text-muted-foreground text-xs">
+                Finish the time to add it{{ form.times.length ? '' : ' — at least one is required' }}.
+              </span>
             </div>
           </div>
         </AppField>
