@@ -375,10 +375,10 @@ async function main() {
   console.log('\n\x1b[1mThe bell\x1b[0m')
 
   const bell = (await tech('/notifications')).body
-  const late1 = bell.items.find((i) => i.kind === 'PASS_OVERDUE' && i.title.includes('Ferrer'))
+  const late1 = bell.situations.find((i) => i.kind === 'PASS_OVERDUE' && i.title.includes('Ferrer'))
   late1
     ? ok('the bell carries an overdue-pass item')
-    : bad('bell item', JSON.stringify(bell.items.map((i) => i.kind)))
+    : bad('bell item', JSON.stringify(bell.situations.map((i) => i.kind)))
 
   late1?.detail?.includes('Columbus')
     ? ok('…and it DOES carry the destination — whoever chases her needs a place to start')
@@ -402,7 +402,7 @@ async function main() {
 
   // The bell and this panel derive through one helper, so they cannot name
   // different people. That is the whole reason overduePasses() exists.
-  const bellIds = bell.items.filter((i) => i.kind === 'PASS_OVERDUE').map((i) => i.id.slice(5))
+  const bellIds = bell.situations.filter((i) => i.kind === 'PASS_OVERDUE').map((i) => i.id.slice(5))
   const dashIds = (dash.attention.passOverdue ?? []).map((p) => p.id)
   JSON.stringify([...bellIds].sort()) === JSON.stringify([...dashIds].sort())
     ? ok('the bell and the panel name exactly the same passes — one knob behind both')
@@ -455,7 +455,7 @@ async function main() {
   // shout that a resident is unaccounted for. A person on an approved pass is
   // accounted for by definition.
   const bell2 = (await tech('/notifications')).body
-  bell2.items.some((i) => i.kind === 'RESIDENT_NOT_ACCOUNTED' && i.title.includes('Ferrer'))
+  bell2.situations.some((i) => i.kind === 'RESIDENT_NOT_ACCOUNTED' && i.title.includes('Ferrer'))
     ? bad('not unaccounted', 'the bell says she is unaccounted for')
     : ok('the bell does NOT call her unaccounted for — an approved absence is accounted for')
 
@@ -518,7 +518,7 @@ async function main() {
     : bad('tech returns', `${returned.status} ${JSON.stringify(returned.body)}`)
 
   const bell3 = (await tech('/notifications')).body
-  bell3.items.some((i) => i.kind === 'PASS_OVERDUE')
+  bell3.situations.some((i) => i.kind === 'PASS_OVERDUE')
     ? bad('bell clears', 'the overdue item is still there')
     : ok('the bell item CLEARS itself on the return — derived, so nothing has to be dismissed')
 

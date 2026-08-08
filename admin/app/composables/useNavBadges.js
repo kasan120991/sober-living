@@ -54,7 +54,10 @@ const BADGED = Object.freeze({
 })
 
 export function useNavBadges() {
-  const { items } = useNotifications()
+  // `situations`, not `events`. The bell renders the events; these badges are
+  // the derived situations' remaining consumer in the UI, which is exactly why
+  // GET /notifications still returns both halves in one response.
+  const { situations } = useNotifications()
 
   /**
    * `{ [navPath]: { count, tone } }` — a destination with nothing wrong is
@@ -64,7 +67,7 @@ export function useNavBadges() {
    */
   const badges = computed(() => {
     const out = {}
-    for (const item of items.value) {
+    for (const item of situations.value) {
       // WATCH items are excluded, exactly as they are from the bell's own
       // count: a bed out of service is worth seeing and is not a number
       // anyone should feel behind on (CLAUDE.md module 12).

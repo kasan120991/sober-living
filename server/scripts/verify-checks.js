@@ -128,7 +128,7 @@ async function main() {
     ? ok("the latest men's check carries one NOT_FOUND")
     : bad('notFound on card', JSON.stringify(mens?.lastCheck))
 
-  const bell0 = (await tech('/notifications')).body.items
+  const bell0 = (await tech('/notifications')).body.situations
   bell0.some((i) => i.kind === 'APARTMENT_CHECK_OVERDUE' && i.title.includes('Apt 14'))
     ? ok('the bell carries the overdue apartment')
     : bad('bell overdue item', JSON.stringify(bell0.map((i) => i.kind)))
@@ -231,7 +231,7 @@ async function main() {
     ? ok('the apartment reads CHECKED for the current facility hour')
     : bad('checked state', JSON.stringify(board1.apartments.find((a) => a.id === mens.id)))
 
-  const bell1 = (await tech('/notifications')).body.items
+  const bell1 = (await tech('/notifications')).body.situations
   !bell1.some((i) => i.kind === 'RESIDENT_NOT_ACCOUNTED')
     ? ok('the not-accounted item cleared itself — the new check accounts for him')
     : bad('notfound cleared', JSON.stringify(bell1.map((i) => i.kind)))
@@ -280,7 +280,7 @@ async function main() {
   w.state === 'DUE'
     ? ok('74 minutes is inside the grace — DUE, not an alarm')
     : bad('74min due', w.state)
-  !(await tech('/notifications')).body.items.some((i) => i.kind === 'APARTMENT_CHECK_OVERDUE')
+  !(await tech('/notifications')).body.situations.some((i) => i.kind === 'APARTMENT_CHECK_OVERDUE')
     ? ok('the overdue bell item cleared itself')
     : bad('bell cleared', 'still present')
 

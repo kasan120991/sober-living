@@ -264,6 +264,40 @@ enum PassStatus {
   RETURNED
 }
 
+/// What kind of thing happened. See NOTIFICATION_ROUTE in services/notify.js —
+/// the kind determines the class, who it reaches and where it points, so this
+/// enum and that table must stay in step.
+///
+/// NOTHING FROM MODULES 5 OR 6 IS HERE, and there must never be: a screen
+/// result or a medication on a bell read over a shoulder is the ambient
+/// disclosure module 13 exists to prevent. verify-notifications.js asserts no
+/// kind matches /^MED/.
+enum NotificationKind {
+  /// Somebody filed something that needs a decision.
+  PASS_REQUESTED
+  MAINTENANCE_FILED
+  SERVICE_HOURS_LOGGED
+  /// Money moved.
+  PAYMENT_RECEIVED
+  INVOICE_SENT
+  /// A resident could not be found on an hourly round.
+  ///
+  /// The ONLY safety event, and deliberately so: an overdue sign-out and an
+  /// overdue pass cross their threshold on the CLOCK with no write, so there
+  /// is nothing to hook a notification to and this app has no scheduler. Both
+  /// stay derived on the dashboard, the sidebar badges and the pill, where
+  /// they also clear themselves. See CLAUDE.md module 12.
+  NOT_FOUND_ON_ROUND
+}
+
+/// The three families, which drive tone and grouping. Deliberately coarse —
+/// six kinds do not need six colours.
+enum NotificationClass {
+  REQUEST
+  MONEY
+  SAFETY
+}
+
 /// What happened at one dose of one medication.
 ///
 /// THREE members, and the absence of MISSED is the design rather than an
@@ -507,6 +541,9 @@ model Resident {
   cohort Cohort
 
   stays             Stay[]
+  /// Events addressed to this resident by name — the portal's half. Empty
+  /// today: every staff event routes by role and leaves residentId null.
+  notifications     Notification[]
   emergencyContacts EmergencyContact[]
   documents         Document[]
   insurance         InsurancePolicy?
@@ -1658,6 +1695,124 @@ model Program {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Notifications — what just happened
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A thing that happened, as opposed to a thing that is true now.
+///
+/// THIS IS THE COMPANION TO services/notifications.js's DERIVED SITUATIONS,
+/// NOT A REPLACEMENT FOR THEM. A situation answers "what is true now" and
+/// clears itself the moment the work is done; an event answers "what just
+/// happened" and is permanent. `GET /notifications` returns both, and the bell
+/// renders only these.
+///
+/// It REVERSES module 12's "There is no Notification table, deliberately" —
+/// for events only, and against the four conditions that section named for its
+/// own reversal: an event has to persist to survive a reconnect (the socket
+/// carries `{ at }` and has no replay, so there is literally no other
+/// mechanism), only an event can meaningfully be unread, per-user dismissal is
+/// decided, and who-receives-what is decided. See CLAUDE.md module 12.
+///
+/// APPEND-ONLY, audit_log's posture: no `deletedAt`, no UPDATE grant, no
+/// DELETE grant. A statement about a moment has nothing to retract — and needs
+/// none, because the SITUATION it describes is still derived elsewhere and
+/// still clears itself.
+///
+/// THE TITLE IS STORED, NOT DERIVED — the ApartmentCheck and ServiceEntry
+/// posture. "Marcus Ferrer requested a travel pass" stays true after he
+/// changes his surname, and storing it keeps the feed one query with no
+/// per-row joins, which is module 14's rule about this endpoint.
+///
+/// WHAT MAY BE IN THAT SENTENCE IS A MODULE 13 QUESTION, decided per kind in
+/// services/notify.js. The general rule: a fixed template plus a name, a
+/// count, a time or a money amount. Free text a human typed crosses ONLY when
+/// it is about a UNIT, never about a PERSON.
+model Notification {
+  id String   @id @default(uuid(7))
+  at DateTime @default(now())
+
+  kind  NotificationKind
+  class NotificationClass
+
+  /// Which staff roles this reaches — a PREDICATE evaluated at read time, not
+  /// a copy per recipient. That is what lets a staff member hired tomorrow see
+  /// today's events with no backfill.
+  ///
+  /// The migration adds SET NOT NULL + SET DEFAULT ARRAY[]::"StaffRole"[]:
+  /// Prisma emits a scalar list as a NULLABLE column with no default, and
+  /// `cardinality(NULL)` is NULL, so any CHECK about it would pass on NULL.
+  /// That is CLAUDE.md's warning about module 5's `substances`, verbatim.
+  roles StaffRole[]
+
+  /// The one recipient role routing cannot express: a named person. For the
+  /// resident portal's "your pass was approved". NULL on every staff event and
+  /// unreachable today, since no RESIDENT account can be created — built now
+  /// because retrofitting a recipient dimension onto a live table is a
+  /// migration over rows that already exist.
+  residentId String?
+  resident   Resident? @relation(fields: [residentId], references: [id])
+
+  /// Who did the thing. NULL when nobody did — the Stripe webhook.
+  ///
+  /// ONE CONSUMER, named so this field is not quietly repurposed: the client
+  /// suppresses a TOAST for the actor's own act. You pressed Save; the dialog
+  /// already told you. The event still appears in the feed — a record of what
+  /// happened includes your own acts.
+  actorId String?
+  actor   User?   @relation("authoredNotifications", fields: [actorId], references: [id])
+
+  title  String
+  detail String?
+
+  /// Where to act on it. It AGREES WITH `roles` BY CONSTRUCTION, because one
+  /// table in services/notify.js sets both: a MONEY event routes to managers
+  /// and points at /billing, whose guard bounces a tech. An event can never
+  /// send somebody to a screen they cannot open — which was a real defect on
+  /// the bell's URGENT_MAINTENANCE item once.
+  to String
+
+  /// The row this is ABOUT — ids and never a payload, the audit_log shape.
+  /// Nothing reads it yet; it is here so "is this still open" is answerable
+  /// later without re-deriving which entity a title referred to.
+  entity   String?
+  entityId String?
+
+  /// The feed is `ORDER BY at DESC` bounded by a window and a limit.
+  @@index([at])
+  @@index([residentId, at])
+  @@map("notifications")
+}
+
+/// How far a user's bell has been read.
+///
+/// A WATERMARK, not a row per (user, event), and the reason is decision-shaped
+/// rather than performance-shaped: because the derived situations stay — on
+/// the dashboard, the sidebar badges and the pill — this feed never has to
+/// answer "does anybody still need to act on this". It only has to answer
+/// "have I seen this", which one row per user answers exactly, with no join on
+/// the app's most frequent read.
+///
+/// NOT a column on `users`: @updatedAt would bump on every bell open and make
+/// "when was this account last changed" meaningless. NOT on `sessions`: read
+/// state must survive logout, or a shared house phone re-toasts everything at
+/// every shift change.
+///
+/// PER-EVENT DISMISSAL IS DELIBERATELY NOT BUILT. "Dismiss this one, keep that
+/// one" is a to-do list, and the dashboard is the to-do list now. If it is
+/// ever wanted this table grows a notificationId and a composite key, and the
+/// watermark becomes the fast path.
+model NotificationSeen {
+  userId String   @id
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// MOVES ONLY FORWARD — the service clamps with GREATEST. Two tabs racing
+  /// would otherwise rewind it and re-toast everything in between.
+  seenAt DateTime
+
+  @@map("notification_seen")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Documents
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1746,6 +1901,10 @@ model User {
   /// Two relations, one act each: who watched the dose, and who typed it.
   observedMedLogs  MedLog[]     @relation("observedMedLogs")
   recordedMedLogs  MedLog[]     @relation("recordedMedLogs")
+
+  /// Events this user caused, and where their bell has been read up to.
+  authoredNotifications Notification[]    @relation("authoredNotifications")
+  notificationSeen      NotificationSeen?
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

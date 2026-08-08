@@ -2019,15 +2019,130 @@ is not something they are later asked to look at and query.
 *(The default payment term was the last item here. Answered 2026-08-07: **net 3 days**.)*
 
 ### 12. Notifications
-**Built.** A bell in the app header on every page, showing situations rather than messages:
-an unplaced resident, an urgent open maintenance request, a bed out of service.
+**Built, and REVERSED in one specific way on 2026-08-09.** The bell in the app header used
+to show derived *situations*; it now shows **events** — what just happened — and there IS a
+Notification table for them. Both halves still exist and `GET /notifications` returns both:
 
-**There is no Notification table, deliberately.** Everything is derived from current state
-on each read, which means it cannot go stale, cannot be dismissed into a lie, and needs no
-job to keep it honest — a resident leaves the list the moment they get a bed, not when
-somebody remembers to mark it read. The cost is that "unread" cannot mean anything, so the
-badge is a live count of open situations. If per-user dismissal is ever wanted, that is a
-real table *and* a real decision about whether one person dismissing hides it from everyone.
+| | derived SITUATIONS | stored EVENTS |
+|---|---|---|
+| answers | what is TRUE NOW | what JUST HAPPENED |
+| storage | none, derived per read | `notifications`, append-only |
+| clears | itself, when the work is done | never; it is read, not resolved |
+| rendered by | the sidebar count badges, the dashboard | the bell |
+
+**The original rule, kept verbatim because it still governs the situations half:**
+
+> **There is no Notification table, deliberately.** Everything is derived from current state
+> on each read, which means it cannot go stale, cannot be dismissed into a lie, and needs no
+> job to keep it honest — a resident leaves the list the moment they get a bed, not when
+> somebody remembers to mark it read. The cost is that "unread" cannot mean anything, so the
+> badge is a live count of open situations. If per-user dismissal is ever wanted, that is a
+> real table *and* a real decision about whether one person dismissing hides it from everyone.
+
+**That section named four conditions for its own reversal, and all four are now met.**
+
+1. *"An event has to persist to survive a reconnect."* Met **structurally**: the socket
+   payload is `{ at }` and nothing else, and there is no replay. A device asleep from 2pm to
+   6pm has literally no other way to learn a pass was submitted at 3pm. Persistence is not a
+   convenience here, it is the only mechanism available.
+2. *"only an event can meaningfully be unread."* Met — `notification_seen`, one row per user.
+3. *"a real decision about whether one person dismissing hides it from everyone."* **Decided:
+   per user, it does not.** A tech clearing their bell must not blind the manager.
+4. *"who receives what is a role question with no default."* **Decided** — the `ROUTE` table
+   in `services/notify.js`, six kinds, three role sets, one place.
+
+**And it only became defensible the day before.** The badge used to count open situations;
+it now counts unseen events. That is the reversal with teeth, and it is only acceptable
+because the **dashboard's Needs attention panel (2026-08-08)** and the **sidebar count badges
+(2026-08-08)** both carry the situations already. The bell was the third copy of the same
+list; now it is the only copy of a different one.
+
+**What is LOST, plainly, because a reversal that only lists its wins is a sales pitch:** a
+derived item cannot go stale or be dismissed into a lie, and an event can. A
+`NOT_FOUND_ON_ROUND` event stands even after an amendment corrects the line to PRESENT —
+because it happened, and somebody was told. What makes that acceptable is that the
+*situation* clears itself everywhere else.
+
+**The rail and the bell now measure different things and are SUPPOSED to disagree.**
+`actionCount` stays on the wire, rendered nowhere, as the anchor for the browser check that
+the sidebar badges agree with the derivation.
+
+**`items` was renamed to `situations` on the wire, with no alias** — six verify suites and
+two composables changed one word. The bell no longer renders that list, so leaving the key
+called `items` would have taught the next reader something false.
+
+**THE SOCKET PAYLOAD DID NOT CHANGE, and that is the whole architecture.** `notify()` writes
+a row; the domain write's own `res.on('finish')` broadcasts the same `{ at }` it always has;
+every client refetches `GET /notifications`; and the role filter is a `where` clause in
+`feedFor()`, evaluated once per requesting session. **A tech's socket and a manager's socket
+receive byte-identical payloads — their two HTTP responses differ.** So module 12's fan-out
+warning is answered rather than argued around: authorization is still per-request, because
+the fan-out still carries nothing. `verify-realtime.js` proves the pair end to end.
+
+**Where events are written:** `services/notify.js`, a leaf module — `services/notifications.js`
+already imports five of the six call sites' modules, so putting `notify()` there is a real ESM
+cycle. It **must be called inside `runInTransaction()` with the domain write**: an event that
+outlives a rolled-back act announces something that does not exist, on a screen it is not on,
+and nothing can clear it because the feed is not derived. `verify-notifications.js` asserts a
+failed POST leaves zero rows.
+
+`runInTransaction()` became **reentrant** for this: services now compose (`postEntry` wraps a
+write plus a notification, and `removePendingCharge` calls it from inside its own
+transaction), and Prisma cannot nest interactive transactions.
+
+**The kind supplies every term but the sentence** — module 5's rule in its own words, *"a
+service may post to the ledger when every term of the entry is determined by the domain
+event; anything a human chooses goes through the route."* A tech filing a repair does not
+decide that managers get told. **`to` agrees with `roles` by construction**, so an event can
+never send somebody to a screen their route guard bounces them from — which was a real defect
+on the bell's own `URGENT_MAINTENANCE` item once.
+
+| Kind | Reaches | Points at |
+|---|---|---|
+| `PASS_REQUESTED` · `SERVICE_HOURS_LOGGED` | managers | `/passes` · `/service` |
+| `MAINTENANCE_FILED` | all staff — the tech who hears it may hold the ladder | `/maintenance` |
+| `PAYMENT_RECEIVED` · `INVOICE_SENT` | managers only | `/billing` |
+| `NOT_FOUND_ON_ROUND` | all staff | `/checks` |
+
+**Only ONE of the three safety situations can be an event, and that is settled rather than
+deferred.** `NOT_FOUND_ON_ROUND` has a write to hang on — `recordCheck` — and it is the
+highest-value event here: today a manager off site learns a resident cannot be found only by
+opening the app and looking. **An overdue sign-out and an overdue pass cross their threshold
+on the CLOCK with no write at all**, so there is nothing to hook a notification to, and this
+app has no scheduler on purpose. Both stay derived, on the dashboard and the sidebar badges,
+where they also clear themselves. **Reversal conditions, recorded:** a deploy target with
+exactly one guaranteed scheduler, *and* a facility ask for out-of-app alerts (SMS or push) —
+at which point a scheduled writer is unavoidable anyway and this comes free.
+
+`NOT_FOUND_ON_ROUND` **fires again on every round that still cannot find them** — no dedupe.
+Still missing an hour later *is* news, and a facility that stops being told forgets; it is the
+dashboard's own rule that hiding a person is what a cap must never do.
+
+**Disclosure, and it is testable:** an event's sentence is a fixed template plus a **name, a
+count, a time or a money amount**. Free text a human typed crosses **only when it is about a
+UNIT and never about a PERSON**. `MaintenanceRequest.title` is about a unit and already rode
+on the bell; `TravelPass.purpose` and `.destination`, `ServiceEntry.note` /
+`.supervisorName` / `.supervisorPhone`, `LedgerEntry.description`,
+`ApartmentCheckResident.note` and `SignOut.destination` are about a person and never cross.
+**Nothing from modules 5 or 6 becomes an event at all** — no kind may match `/^MED/`, asserted
+on the enum so it fails even before a row exists. Note `PASS_REQUESTED` is deliberately
+*stricter* than the derived `PASS_OVERDUE` item, which does carry a destination: there,
+somebody is out looking for a person; on a pass merely submitted, nobody is.
+
+**`POST /notifications/seen` broadcasts NOTHING**, and that turned `app.js`'s ad-hoc `/auth`
+exception into a stated rule — `SILENT_PREFIXES`: *a write that changes nothing another device
+shows does not broadcast*. Without it, one person hovering their bell would fan `changed` out
+to every device in the building and make every screen refetch its dashboard.
+
+**Toasts are wired and DO NOT RENDER, for a reason that predates all of this.** The client
+diff is built and correct (`verify` aside, the console shows it selecting exactly the right
+events): a cold load toasts nothing, your own acts are suppressed via `actorId`, anything
+older than five minutes is dropped as the reconnect guard, and a burst over three collapses
+to one summary. But `useNotify()` has **never** produced a visible toast in this app — the
+`<Toaster>` mounts and receives no children, on pre-existing paths as much as new ones. Ruled
+out: the vendored shadcn wrapper (swapping it for vue-sonner's own `<Toaster>` changes
+nothing) and the missing `vue-sonner/nuxt` module plus its stylesheet (installing both changes
+nothing). It is a vue-sonner v2 integration defect and it wants its own slice.
 
 The badge counts only `action` items. A bed out of service is worth seeing and is not a
 number anyone should feel behind on.
@@ -3215,6 +3330,21 @@ Two verification suites, both run against a live database:
   the return clears the bell and the tile, a second return is refused, and RLS is asserted
   both ways plus a resident's write refused. Posts a check and reviews passes — reseed
   after.
+- `node scripts/verify-notifications.js` — **18 assertions** on the event feed. The read
+  carries BOTH halves, and the derived `situations` are asserted still present because the
+  sidebar badges read them and would go silently blank. **The phantom test** is why `notify()`
+  lives inside the domain transaction: two failing POSTs leave the table byte-identical.
+  Routing is proved in **both directions** — a repair reaches all staff, a payment reaches
+  managers and admins **and NOT a tech** — plus the negative that a CHARGE writes nothing,
+  since only money *arriving* is news. Read state is per USER: the manager marking seen
+  clears theirs and **leaves the admin's alone**, and the watermark is proved to move only
+  forward against an older write. Append-only is asserted at **both layers separately**
+  (privilege for the app role, trigger for a superuser) plus a DELETE, and an event addressed
+  to nobody is refused by the CHECK. Disclosure is asserted against the **serialised feed per
+  role** — the verify-screens idiom — for clinical vocabulary, for every free-text column that
+  is about a PERSON, and on the enum itself that no kind starts with MED; with the matching
+  positive that a maintenance TITLE *does* cross, because it is about a unit. Writes events —
+  reseed after.
 - `npm run verify:rls` — 28 assertions proving a resident actor cannot read, count or
   write another resident's rows — including their ledger and sign-outs — and that the
   app role cannot bypass the policies
@@ -3239,6 +3369,7 @@ npm run verify:constraints && node scripts/seed.js \
   && node scripts/verify-screens.js && node scripts/seed.js \
   && node scripts/verify-meds.js && node scripts/seed.js \
   && node scripts/verify-passes.js && node scripts/seed.js \
+  && node scripts/verify-notifications.js && node scripts/seed.js \
   && npm run verify:rls
 ```
 

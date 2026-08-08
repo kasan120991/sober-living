@@ -176,6 +176,22 @@ async function main() {
     ? ok('payload contains no ids and no domain text')
     : bad('payload leaks', serialized)
 
+  // THE REGRESSION THAT MATTERS MOST, now that a mutation also writes a
+  // NOTIFICATION. The temptation to "just put the event on the wire" is the
+  // entire reason module 12's fan-out warning exists: the socket reaches every
+  // staff device identically, so anything on it has escaped per-request
+  // authorization. That POST above created a MAINTENANCE_FILED event, and none
+  // of it — not the id, not a word of the title — may appear here.
+  const feed = (await tech('/notifications')).body
+  const newest = feed.events?.[0]
+  newest?.kind === 'MAINTENANCE_FILED'
+    ? ok('…and the same mutation did write an event, so the next check is not vacuous')
+    : bad('event written', JSON.stringify(feed.events?.slice(0, 2) ?? []))
+
+  !serialized.includes(newest?.id ?? '\u0000') && !serialized.includes('hallway')
+    ? ok('a mutation that writes a NOTIFICATION still broadcasts only { at }')
+    : bad('event leaked onto the socket', serialized)
+
   console.log('\n\x1b[1mEmission discipline\x1b[0m')
 
   await tech('/census')
@@ -189,20 +205,95 @@ async function main() {
     ? ok('a failed mutation broadcasts nothing')
     : bad('failure is silent', `status ${rejected.status}, ${afterFail} event(s)`)
 
+  // FEWER EVENTS THAN WRITES, not exactly one — and the change is deliberate
+  // rather than a loosening.
+  //
+  // The coalescer's guarantee is "at most one emit per 75ms window". Asserting
+  // exactly 1 for two writes additionally assumes both responses FINISH inside
+  // one window, which is a fact about the machine, not about the coalescer:
+  // two finishes 100ms apart legitimately produce two events. That margin
+  // narrowed on 2026-08-09, when a maintenance POST grew a notification INSERT
+  // inside its transaction — the assertion then passed alone and failed in the
+  // full chain, where the database had already run sixteen suites. Flaky under
+  // load is the worst kind of assertion: it teaches people to re-run.
+  //
+  // Four concurrent writes and `< 4` measures the coalescer itself. It still
+  // fails loudly if coalescing is removed, which is the whole point.
+  const BURST = 4
   const burstCount = countEvents(techSocket, 'changed', COALESCE_MS * 8)
-  await Promise.all([
-    tech('/maintenance', {
-      method: 'POST',
-      body: JSON.stringify({ apartmentId: aptId, title: 'Realtime probe — burst A' }),
-    }),
-    tech('/maintenance', {
-      method: 'POST',
-      body: JSON.stringify({ apartmentId: aptId, title: 'Realtime probe — burst B' }),
-    }),
+  await Promise.all(
+    Array.from({ length: BURST }, (_, i) =>
+      tech('/maintenance', {
+        method: 'POST',
+        body: JSON.stringify({ apartmentId: aptId, title: `Realtime probe — burst ${i}` }),
+      }),
+    ),
+  )
+  const burst = await burstCount
+  burst >= 1 && burst < BURST
+    ? ok(`a burst of ${BURST} writes coalesced to ${burst} event(s)`)
+    : bad('coalescing', `${BURST} writes produced ${burst} events`)
+
+  // ── One fan-out, per-role feeds ──────────────────────────────────────────
+  // THE ARCHITECTURE, PROVEN END TO END. The socket reaches every staff device
+  // identically; the difference between what a tech and a manager may see is
+  // decided once per REQUEST, in feedFor()'s where clause. That is what lets
+  // the bell carry per-role events while the payload stays empty.
+  console.log('\n\x1b[1mOne fan-out, per-role feeds\x1b[0m')
+
+  const manager = as(await login('manager@facility.test'))
+  const mgrSocket = connectSocket(base, await login('manager@facility.test'))
+  await handshake(mgrSocket)
+
+  const payee = (await manager('/residents')).body.residents.find((r) => r.status === 'ACTIVE')
+  const bothSaw = Promise.all([
+    waitFor(techSocket, 'changed', WAIT_MS),
+    waitFor(mgrSocket, 'changed', WAIT_MS),
   ])
-  ;(await burstCount) === 1
-    ? ok('a burst of writes coalesces to one event')
-    : bad('coalescing', `expected 1 event`)
+  const paid = await manager(`/residents/${payee.id}/ledger`, {
+    method: 'POST',
+    body: JSON.stringify({
+      type: 'PAYMENT',
+      amount: '25.00',
+      description: 'Realtime probe — desk cash',
+      occurredAt: '2026-08-08',
+    }),
+  })
+  let sameShape = false
+  try {
+    const [a, b] = await bothSaw
+    sameShape =
+      paid.status === 201 && JSON.stringify(Object.keys(a)) === JSON.stringify(Object.keys(b))
+  } catch {
+    /* reported by the assertion */
+  }
+  sameShape
+    ? ok('a TECH socket and a MANAGER socket receive the identical `changed`')
+    : bad('same fan-out', `payment ${paid.status}; one socket missed it or shapes differed`)
+
+  const mgrKinds = (await manager('/notifications')).body.events.map((e) => e.kind)
+  mgrKinds.includes('PAYMENT_RECEIVED')
+    ? ok('the manager’s feed carries the money event')
+    : bad('manager sees money', JSON.stringify(mgrKinds))
+
+  // The tech's socket got that identical payload a moment ago. Their HTTP
+  // answer is where the difference lives — and it must not even mention it.
+  const techFeed = (await tech('/notifications')).body
+  const techKinds = techFeed.events.map((e) => e.kind)
+  !techKinds.includes('PAYMENT_RECEIVED') &&
+  !/desk cash|25\.00/.test(JSON.stringify(techFeed.events))
+    ? ok('the TECH’s does not, and mentions no part of it — different HTTP answer')
+    : bad('money leaked to a tech', JSON.stringify(techKinds))
+
+  // Marking a bell read is per-user state. Broadcasting it would make every
+  // screen in the building refetch because one person hovered a bell.
+  const seenQuiet = countEvents(techSocket, 'changed')
+  await manager('/notifications/seen', { method: 'POST' })
+  ;(await seenQuiet) === 0
+    ? ok('POST /notifications/seen broadcasts nothing — SILENT_PREFIXES')
+    : bad('seen is silent', 'marking a bell read fanned out to every device')
+
+  mgrSocket.disconnect()
 
   console.log('\n\x1b[1mSessions end, sockets end\x1b[0m')
 

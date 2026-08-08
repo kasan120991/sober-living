@@ -6,8 +6,10 @@ import {
   INVOICE_STATUS,
   LEDGER_ENTRY_TYPE,
   LEDGER_SIGN,
+  NOTIFICATION_KIND,
   STAY_STATUS,
 } from '../domain/constants.js'
+import { notify } from './notify.js'
 
 /**
  * The resident fee ledger.
@@ -342,20 +344,53 @@ export async function postEntry(input, actorId) {
   }
 
   try {
-    return await prisma.ledgerEntry.create({
-      data: {
-        stayId,
-        type,
-        category,
-        amountCents,
-        description: description.trim(),
-        // A date a manager typed is a facility calendar date, not UTC midnight.
-        occurredAt: facilityDayInstant(occurredAt),
-        correctsId,
-        externalRef,
-        recordedById: actorId,
-      },
-      include: { recordedBy: { select: { id: true, fullName: true } } },
+    // Reentrant — removePendingCharge() calls this from inside its own
+    // transaction, and runInTransaction reuses an open one.
+    return await runInTransaction(async () => {
+      const entry = await prisma.ledgerEntry.create({
+        data: {
+          stayId,
+          type,
+          category,
+          amountCents,
+          description: description.trim(),
+          // A date a manager typed is a facility calendar date, not UTC midnight.
+          occurredAt: facilityDayInstant(occurredAt),
+          correctsId,
+          externalRef,
+          recordedById: actorId,
+        },
+        include: { recordedBy: { select: { id: true, fullName: true } } },
+      })
+
+      // ONLY A PAYMENT. A charge is the facility asking for money and a credit
+      // is the facility correcting itself — neither is news. Money arriving is,
+      // and it is the one event here that can originate outside the building:
+      // the Stripe webhook posts through this same function.
+      //
+      // THE DESCRIPTION NEVER CROSSES. It is unreviewed free text a manager
+      // typed about a person, which is the same reason it never reaches Stripe
+      // (see the compliance section: "a ledger description is unreviewed prose
+      // entered in a hallway and can say anything at all").
+      if (type === LEDGER_ENTRY_TYPE.PAYMENT) {
+        const stay = await prisma.stay.findUnique({
+          where: { id: stayId },
+          select: { resident: { select: { firstName: true, lastName: true } } },
+        })
+        await notify(NOTIFICATION_KIND.PAYMENT_RECEIVED, {
+          title: `Payment received — ${stay.resident.firstName} ${stay.resident.lastName}`,
+          // Formatted HERE because the title and detail are STORED. Integer
+          // cents are the wire format everywhere else; this is the one place
+          // the server writes a money string, because a stored sentence
+          // cannot be re-formatted by a client later.
+          detail: `$${(amountCents / 100).toFixed(2)}`,
+          actorId,
+          entity: 'LedgerEntry',
+          entityId: entry.id,
+        })
+      }
+
+      return entry
     })
   } catch (err) {
     // A duplicate processor reference is the at-least-once webhook arriving

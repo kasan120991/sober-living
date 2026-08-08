@@ -7,9 +7,11 @@ import {
   INVOICE_STATUS,
   LEDGER_ENTRY_TYPE,
   LEDGER_SIGN,
+  NOTIFICATION_KIND,
   STAY_STATUS,
   STRIPE_LINE_LABEL,
 } from '../domain/constants.js'
+import { notify } from './notify.js'
 import { facilityDueDate } from '../lib/facilityTime.js'
 import { stripe, stripeEmailsInvoices, stripeEnabled } from '../lib/stripe.js'
 import { balanceOfStay, balancesByStay, draftByStay, removedIds } from './ledger.js'
@@ -424,16 +426,35 @@ export async function pushToStripe(invoiceId, entries) {
     )
   }
 
-  return prisma.invoice.update({
-    where: { id: invoice.id },
-    data: {
-      status: INVOICE_STATUS.OPEN,
-      stripeInvoiceId: finalized.id,
-      number: finalized.number ?? null,
-      hostedUrl: finalized.hosted_invoice_url ?? null,
-      issuedAt: new Date(),
-      finalizedAt: new Date(),
-    },
+  // The notification rides with the status flip rather than with the draft:
+  // a DRAFT is money in neither the balance nor pending, so it is not yet news.
+  // What is news is the moment the invoice becomes a demand.
+  return runInTransaction(async () => {
+    const open = await prisma.invoice.update({
+      where: { id: invoice.id },
+      data: {
+        status: INVOICE_STATUS.OPEN,
+        stripeInvoiceId: finalized.id,
+        number: finalized.number ?? null,
+        hostedUrl: finalized.hosted_invoice_url ?? null,
+        issuedAt: new Date(),
+        finalizedAt: new Date(),
+      },
+      include: { stay: { select: { resident: { select: { firstName: true, lastName: true } } } } },
+    })
+
+    await notify(NOTIFICATION_KIND.INVOICE_SENT, {
+      title: `Invoice sent — ${open.stay.resident.firstName} ${open.stay.resident.lastName}`,
+      detail: `$${(open.totalCents / 100).toFixed(2)}`,
+      // The invoice records who sent it, so pushToStripe needs no actorId
+      // parameter — and this is also correct on the RESUME path, where a
+      // different manager may be replaying somebody else's stranded draft.
+      actorId: open.sentById,
+      entity: 'Invoice',
+      entityId: open.id,
+    })
+
+    return open
   })
 }
 

@@ -125,6 +125,8 @@ const RLS_MODELS = new Set([
   'Medication',
   'MedLog',
   'TravelPass',
+  // Staff read all; a resident reads only events addressed to them by name.
+  'Notification',
   'Invoice',
   'InvoiceLine',
   'StripeEvent',
@@ -162,6 +164,17 @@ const txStorage = new AsyncLocalStorage()
  * separately and a failure halfway would leave a resident with no stay.
  */
 export function runInTransaction(cb) {
+  // REENTRANT: already inside a unit of work, so reuse it. Prisma cannot nest
+  // interactive transactions, and the actor context is already set on the open
+  // one — this is withRlsClient's own rule ("already inside a unit of work —
+  // reuse its transaction and its context") applied one level up.
+  //
+  // It matters as soon as services compose: postEntry() wraps its write plus a
+  // notification, and removePendingCharge() calls postEntry from inside its own
+  // transaction. Without this, the inner call asks Postgres for a transaction
+  // inside a transaction and the removal fails.
+  if (txStorage.getStore()) return Promise.resolve().then(cb)
+
   const actor = getDbActor()
   if (!actor) {
     return Promise.reject(

@@ -285,14 +285,14 @@ async function main() {
   // Notifications are derived from current state, never stored — so the test
   // is that they track reality, not that a row was written somewhere.
   const notif = await tech('/notifications')
-  notif.status === 200 && Array.isArray(notif.body?.items)
+  notif.status === 200 && Array.isArray(notif.body?.situations)
     ? ok('any staff role can read notifications')
     : bad('notifications readable', `${notif.status}`)
 
   // Gated on the roster rather than assumed: this suite mutates as it runs, and
   // an assertion that only holds on a freshly seeded database is a trap for
   // whoever runs it twice.
-  const kinds = new Set((notif.body?.items ?? []).map((i) => i.kind))
+  const kinds = new Set((notif.body?.situations ?? []).map((i) => i.kind))
   const rosterUnhoused = (await admin('/residents')).body.unhoused.length
   rosterUnhoused === 0 || kinds.has('UNHOUSED')
     ? ok(
@@ -302,12 +302,12 @@ async function main() {
       )
     : bad('unhoused surfaces', [...kinds].join(', ') || 'no items')
 
-  const actionable = (notif.body?.items ?? []).filter((i) => i.level === 'action').length
+  const actionable = (notif.body?.situations ?? []).filter((i) => i.level === 'action').length
   notif.body?.actionCount === actionable
-    ? ok(`the badge counts only actionable items (${actionable} of ${notif.body.items.length})`)
+    ? ok(`the badge counts only actionable items (${actionable} of ${notif.body.situations.length})`)
     : bad('badge count', `${notif.body?.actionCount} vs ${actionable}`)
 
-  const watchOnly = (notif.body?.items ?? []).filter((i) => i.level === 'watch')
+  const watchOnly = (notif.body?.situations ?? []).filter((i) => i.level === 'watch')
   watchOnly.every((i) => i.kind === 'BED_OUT_OF_SERVICE')
     ? ok('an out-of-service bed is shown but does not inflate the badge')
     : bad('watch level', JSON.stringify(watchOnly.map((i) => i.kind)))
@@ -325,7 +325,7 @@ async function main() {
   const roster = (await tech('/notifications')).body
   const rosterRows = (await admin('/residents')).body.residents
   const flagged = new Set(
-    (roster.items ?? []).filter((i) => i.kind === 'UNHOUSED').map((i) => i.id.split(':')[1]),
+    (roster.situations ?? []).filter((i) => i.kind === 'UNHOUSED').map((i) => i.id.split(':')[1]),
   )
   const bedless = new Set(
     rosterRows.filter((r) => r.status === 'ACTIVE' && !r.bed).map((r) => r.stayId),
@@ -338,7 +338,7 @@ async function main() {
   // makes, and the one the sidebar badge depends on: of the five badged
   // destinations this is the only one that must not go red, because nobody is
   // late. Skipped rather than asserted vacuously when the house is fully placed.
-  const unhousedItems = (roster.items ?? []).filter((i) => i.kind === 'UNHOUSED')
+  const unhousedItems = (roster.situations ?? []).filter((i) => i.kind === 'UNHOUSED')
   unhousedItems.length === 0
     ? ok('nobody is unplaced, so there is no severity to check')
     : unhousedItems.every((i) => i.severity === 'warning')
