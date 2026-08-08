@@ -3,6 +3,7 @@ import { BED_STATUS, STAY_STATUS } from '../domain/constants.js'
 import { formatFacilityTime } from '../lib/facilityTime.js'
 import { overdueApartmentChecks, unaccountedResidents } from './checks.js'
 import { MAINTENANCE_STATE, bellMaintenanceWhere, requestState } from './maintenance.js'
+import { unmarkedDoses } from './meds.js'
 import { overdueWhere } from './signOuts.js'
 
 /**
@@ -29,7 +30,7 @@ import { overdueWhere } from './signOuts.js'
 const LEVEL = { ACTION: 'action', WATCH: 'watch' }
 
 export async function listNotifications() {
-  const [overdue, unhoused, urgent, staleOpen, checksOverdue, notAccounted] = await Promise.all([
+  const [overdue, unhoused, urgent, staleOpen, checksOverdue, notAccounted, medsDue] = await Promise.all([
     // The loudest state in the app: someone off property past their expected
     // return (plus the grace window — see OVERDUE_GRACE_MS).
     prisma.signOut.findMany({
@@ -74,6 +75,10 @@ export async function listNotifications() {
     // knob — and clear themselves the moment a check or sign-out lands.
     overdueApartmentChecks(),
     unaccountedResidents(),
+
+    // The med pass: doses due now with nothing recorded. COUNTS AND A TIME
+    // ONLY — see below, and see unmarkedDoses() for why DUE and never MISSED.
+    unmarkedDoses(),
   ])
 
   const items = []
@@ -152,6 +157,30 @@ export async function listNotifications() {
       detail: `${r.apartmentName} · ${formatFacilityTime(r.at)}`,
       to: '/checks',
       at: r.at,
+    })
+  }
+
+  // The med pass, and this item is the ANSWER to the warning in this file's
+  // own header — "nothing from module 5 or 6 belongs in a bell without a
+  // separate think about who is standing behind the phone." The think happened
+  // on 2026-08-07 and the answer is: a count and a time, nothing else.
+  //
+  // No resident name and no medication, ever. A count says the pass has not
+  // been run, which is operational; a name against a medication is a clinical
+  // disclosure to whoever is reading over the shoulder of the person holding a
+  // shared house phone. That is why this item is shaped unlike its neighbours
+  // — RESIDENT_NOT_ACCOUNTED names somebody deliberately, and the difference
+  // between the two is the whole of module 13's rule.
+  if (medsDue) {
+    items.push({
+      id: 'meds:due',
+      level: LEVEL.ACTION,
+      kind: 'MED_PASS_DUE',
+      title:
+        medsDue.count === 1 ? '1 dose not yet recorded' : `${medsDue.count} doses not yet recorded`,
+      detail: `${medsDue.label} med pass · ${medsDue.residents} ${medsDue.residents === 1 ? 'resident' : 'residents'}`,
+      to: '/meds',
+      at: medsDue.at,
     })
   }
 

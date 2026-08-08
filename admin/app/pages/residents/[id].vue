@@ -461,6 +461,15 @@ const maskedSsn = computed(() =>
           </Suspense>
         </template>
 
+        <template v-else-if="section === 'meds'">
+          <Suspense>
+            <AppResidentMeds :resident-id="resident.id" />
+            <template #fallback>
+              <p class="text-muted-foreground text-sm">Loading medications…</p>
+            </template>
+          </Suspense>
+        </template>
+
         <!-- ── Sign-outs ─────────────────────────────────────────────────── -->
         <template v-else-if="section === 'signOuts'">
           <section class="flex flex-col gap-2">

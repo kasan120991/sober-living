@@ -948,10 +948,137 @@ and attaching the lab's own report — blocked on object storage **and** open qu
 the lab is a text reference for now, the `ServiceEntry.supervisorName` precedent.
 
 ### 6. Medication administration
-Self-administration observed by staff (typical for sober living; **confirm the facility's
-actual model before building** — a clinical MAR is a different and much heavier thing).
-Per-resident med list, scheduled pass windows, and a log of given / refused / missed /
-held with the observing staff member. Controlled-substance counts if the house stores any.
+**Built (2026-08-07).** The facility's model was confirmed before building, which is what
+this section used to demand and what open question 3 held: **staff-stored, resident
+self-administered**. The house holds the medications; staff hand a dose over and observe it
+being taken. **Staff never administer**, so this is not a clinical MAR — no route, no site,
+no PRN protocol, no prescriber entity.
+
+**The house stores NO controlled substances**, so there is no count, no on-hand figure and
+no reconciliation anywhere in this module. That is the facility's answer to "controlled
+substance counts if the house stores any" — **foreclosed, not deferred**. A count subsystem
+was designed and dropped the same day on that answer; if the house ever holds a controlled
+med it is a new slice with its own evidence rules, not a column added here.
+
+Two tables — `Medication` (the standing instruction) and `MedLog` (the dose as observed) —
+and the split between them is the module's spine. **A medication is current state; a dose is
+evidence.** `medications` is freely updatable and soft-deletable, the `maintenance_requests`
+posture; `med_logs` refuses every UPDATE and DELETE by trigger *and* by revoked privilege,
+stricter than `service_entries`, which keeps one write-once UPDATE for verification. A dose
+has no transition at all, so there is nothing to grant.
+
+Two rules keep the editable half safe, and both are the same rule other modules learned the
+hard way:
+
+- **`MedLog` snapshots `medicationName` and `dosage` at the dose.** Raising somebody's dose
+  next month must not restate what was handed over last week. Deliberately a second copy
+  that *may* disagree, exactly like `Invoice.totalCents` — and it is what buys `Medication`
+  its editability. Without the snapshot every field there would have to freeze the way a
+  schedule event's shape does. An amendment carries the snapshot forward verbatim rather
+  than re-reading the medication.
+- **A medication with any dose logged cannot be deleted, only ENDED** (`endsOn` + a required
+  reason). Soft-deleting it would make the soft-delete extension filter it out of every read
+  and silently erase the dose history hanging off it — the identical failure the
+  `ScheduleEvent` rule warns about. And `endsOn` is never earlier than the last recorded
+  dose, because reads filter medications to those standing on a date, so shortening the
+  window orphans a dose through exactly the gate `expand()` orphans attendance through.
+  Ending a medication is the *sanctioned* act, which is what makes that the easiest guard
+  here to ship a bug in.
+
+**MISSED is derived and must never become storable.** CLAUDE.md's own sketch said the log
+was "given / refused / missed / held"; three of those four are stored. `MedLogStatus` is
+`GIVEN | REFUSED | HELD`, and `MED_DOSE_STATE` adds `UPCOMING`, `DUE` and `MISSED` as a
+frozen constant, the `CHECK_STATE` / `PRESENCE` / `SESSION_STATE` pattern. A missed dose is
+the **absence** of a record: making it typeable would render "nobody ran the pass"
+indistinguishable from "we ran it and marked everyone missed", and the first is the evidence
+gap the alarm exists to find. **HELD carries a required note** and is what staff reach for
+when a dose was deliberately not given — asleep, at work, held pending a prescriber call.
+**REFUSED is `--warning`, never `--destructive`**, the module 5 rule: a resident declining is
+a choice and a fact that defends the facility. MISSED gets the red.
+
+**Times are wall-clock `'HH:MM'` strings on the medication, converted per date** by
+`facilityWallClockToUtc()` — `ScheduleOccurrence.startsAtLocal`'s rule verbatim, and
+`lib/facilityTime.js` has said "med windows will reuse this" since sign-outs. An 8pm dose is
+8pm on both sides of a DST boundary; an instant drifts an hour in November. A **PRN**
+(as-needed) medication carries no times, never reads DUE, and its log has a null
+`scheduledFor` — which is why the one-live-log-per-dose trigger exempts a null slot: a
+resident may honestly take an as-needed medication twice in a day.
+
+**Nothing is materialized and there is no cron.** A dose exists because a medication carries
+a time and a date came round; a row exists only because somebody recorded an observation.
+
+- **`MED_PASS_GRACE_MS` is TWO HOURS** (facility, 2026-08-07) — `medMissedCutoff()` in
+  `services/meds.js` is THE one knob, shared by the board, the bell and the record.
+  Deliberately much wider than its siblings, and the difference is the point: `OVERDUE_GRACE_MS`
+  and `CHECK_GRACE_MS` are fifteen minutes because a sign-out lags a deadline a resident
+  promised and an hourly round is a cadence staff control, whereas an evening med pass drifts
+  with when people get home from work. At fifteen minutes it would fire most evenings on a
+  house doing nothing wrong, which is how a signal stops being read.
+- **The board ticks at 30 seconds**, like the census and unlike `/screens`: a dose crossing
+  into MISSED is no write, so no socket event will come. `utils/meds.js` mirrors the server's
+  `doseStateOf()` for exactly that re-derivation.
+- **No backfill.** `recordDoses` takes no date and always writes today — a dose missed on
+  Tuesday cannot be given on Thursday, and recording it then is falsifying rather than
+  catching up. A dose whose time has **not yet come** is refused too (recording an observation
+  nobody has made, the `checkedAt`-is-always-the-server-clock reasoning). A **late** dose *is*
+  recordable: the observation genuinely happened, and `scheduledFor` against `createdAt` says
+  exactly how late without anyone claiming otherwise.
+
+**A dose is answered once**, enforced by trigger — a partial unique index cannot express
+"live", since that depends on whether *another* row supersedes it. The service returns a
+friendly 409 first; the trigger is the enforcement and the 409 only its face, the
+`assignBedTo` pattern. Corrections are the amendment pattern: a pure INSERT carrying
+`medicationId`, `stayId` and `scheduledFor` verbatim, `supersedesId @unique` so a forked
+chain is structurally impossible, and a trigger pinning the amendment to the same medication.
+
+**Roles split on one line: observing a dose is a hallway act, deciding what somebody takes is
+not.** Recording and amending are **all-staff** — the tech at the lockbox is the one holding
+the phone, and making them find a manager is how a pass ends up on paper, the sign-out, roll
+and hourly-round reasoning. Changing the **med list** is **managers-only**, the same line as
+setting a service-hours target or setting the schedule.
+
+**Both tables hang off `Stay`**, like the ledger, sign-outs, service hours and check lines,
+with a **composite FK `(medicationId, stayId)`** so Postgres itself refuses a log claiming
+one stay against another's medication. A discharge therefore drops the resident off every
+future pass **with no write at all** — asserted, because it is the property the stay-scoping
+buys.
+
+**The privacy boundary is the shape of the API, not a client decision.** `GET /meds` carries
+**no medication name, dosage, prescriber or pharmacy** — resident names and counts only,
+because it is a work queue like `/service` and you cannot run a pass without knowing whose it
+is. A drug arrives solely from `GET /meds/pass/:stayId`, one resident at a time, because
+somebody opened their sheet. That is module 5's reveal reasoning at the right grain, but
+**without** the 30-second auto-collapse: a med sheet is the tool for *doing* the pass and a
+curtain closing mid-hallway is friction rather than protection. The cost, stated: the audit
+unit is "opened this resident's med pass" rather than "read this medication". On the resident
+record medications **are** named inline, the same exception and the same justification as
+screens there — a deliberate navigation to one person somebody already chose.
+
+**The bell carries a count and a time, never a name or a medication.**
+`services/notifications.js` has warned since it was written that nothing from module 5 or 6
+belongs in a bell "without a separate think about who is standing behind the phone". The
+think happened on 2026-08-07 and the answer is `MED_PASS_DUE` — "3 doses not yet recorded ·
+3:00 PM med pass · 2 residents". Deliberately shaped unlike `RESIDENT_NOT_ACCOUNTED`, which
+names somebody: the difference between those two items is the whole of module 13's rule. It
+counts **DUE doses only, never MISSED** — a derived item has to be clearable by doing the
+thing it names, and a missed dose can never be recorded, so counting them would sit in the
+bell forever with nothing anybody could do about it.
+
+**RLS is staff, or the resident's own stay** — the `sign_outs` policy shape on both tables.
+Unlike `apartment_checks`, whose header is staff-only because its free-text note can name
+other residents, nothing here describes anyone but the one resident the row is about, so the
+own-stay read is written now rather than deferred. It is what the resident portal will use.
+
+**On the resident record** the rail's Medications section is READ-ONLY — the current list
+over a day-grouped, keyset-paginated dose trail, with discontinued medications kept visible
+because a medication somebody was on until last week is exactly what a prescriber asks about.
+It carries **no dot**, the `AppResidentScreens` rule: a dot on a Clinical section is an
+ambient clinical signal on every screen that draws the rail.
+
+**Still to build:** whether a dose was directly observed versus handed over and trusted is a
+distinction the facility has not been asked about; photographs of a med sheet or a label are
+blocked on the same object storage as module 1's documents; and resident self-service — the
+RLS read is already in place, so it is a UI decision rather than a schema one.
 
 ### 7. Community service
 **Built.** Hours are logged against a **stay** with a date worked, a location and an outside
@@ -1489,8 +1616,12 @@ Three details, each load-bearing:
 now exactly `overdue`: three days of terms *is* the grace, and a second grace stacked on top
 would be two knobs for one idea with no way to tell which one a screen was showing. **The
 `OVERDUE_GRACE_MS` idiom still stands where it was born** — sign-outs, where the deadline is
-a promise a resident made and the alarm should lag it. This change removes its only other
-user; it is not abandoned.
+a promise a resident made and the alarm should lag it. This change removed its only other
+user at the time; it is not abandoned, and module 6 took it up again on 2026-08-07 with
+`MED_PASS_GRACE_MS`. The family now reads: **fifteen minutes** for a sign-out and an
+apartment round, **two hours** for a med pass. The figures differ because what they lag
+differs — a promise a resident made, a cadence staff control, and an evening that drifts
+with when people get home from work.
 
 And `settled` reads the LEDGER as well as Stripe: a resident who pays $800 cash at the desk
 clears the dot even though Stripe never hears, because without that clause the dot burns
@@ -1731,6 +1862,17 @@ that actually happened.
 **Nothing from modules 5 or 6 goes in the bell without a separate think.** A name against
 "has no bed" is operational. A name against a screen result is a disclosure to whoever is
 standing behind the person holding the phone.
+
+**Both thinks have now happened, and they came out differently — which is the rule working
+rather than an inconsistency.** Module 5 (2026-08-06): **nothing at all**, not a name, not a
+count, not a link, and it is structural rather than intended since `GET /residents/:id`
+carries no screens block. Module 6 (2026-08-07): **a count and a time, never a name and
+never a medication** — `MED_PASS_DUE`, "3 doses not yet recorded · 3:00 PM med pass ·
+2 residents". The distinction that decided it: a count says *the round has not been run*,
+which is operational and true of the house rather than of a person; a name beside a
+medication is a clinical fact about somebody, read over a shoulder in a hallway. Where a med
+item would have had to name a resident to be useful, it does not exist — which is why it
+counts only DUE doses, the ones anybody can still act on, and not the missed ones.
 
 ### 14. Dashboard
 **Built (2026-08-05).** The landing page at `/`, replacing the census board as home —
@@ -2547,6 +2689,37 @@ Two verification suites, both run against a live database:
   assertion with nothing actually wrong. The seed says "storm door" for exactly this
   reason. Rename the data, never loosen the regex: its breadth is what catches an
   `attention.screensPending` somebody adds later.
+- `node scripts/verify-meds.js` — **65 assertions** on the med pass. Six prove the
+  two-hour grace with **no database at all**, on fixed instants so no DST week and no time
+  of day can flake them: 119 minutes past is DUE, 121 is MISSED, a future dose is UPCOMING,
+  and **a recorded log beats the clock** — without that last one a dose given late flips
+  back to MISSED on the next refresh. Two pin the wall-clock rule in **both** directions:
+  20:00 reads 20:00 in October *and* November, **and the two are different UTC instants**,
+  since a conversion that did nothing would pass the first half alone. The privacy boundary
+  is asserted against the **serialised** board payload rather than a key list, so a
+  `medicationName` somebody adds to a pass row later fails it — with the matching positive
+  that the sheet *does* name medications and the board *does* name residents, because a
+  queue nobody can read is not the goal. **MISSED is proved unstorable twice**, at the route
+  and by counting the enum's members. `REFUSED` with no note is refused by the CHECK **and
+  separately with an explicitly NULL note** — issue #1's hole again, and the assertion that
+  would catch it. Append-only is asserted at **both layers separately** (privilege for the
+  app role, trigger for a superuser), alongside the positive that a **medication** is still
+  editable, which is the whole current-state/evidence split. The amendment arc gets six,
+  led by the **row count going UP** — "the amendment shows" passes with the original
+  destroyed, which is the failure the pattern exists to prevent — plus the slot and the
+  snapshot carried verbatim, no forked chain, and a cross-medication amendment refused by
+  the trigger. Deleting a medication with doses is refused **and it is then read back to
+  prove it was not removed anyway**; ending one before a recorded dose is refused. A
+  discharge drops future doses from the board **with nothing deleted to achieve it**. The
+  bell is asserted in both directions — it **fires** while a dose is due, names no resident
+  and no medication, and **clears itself** once every due dose is recorded. RLS is asserted
+  both ways: another resident's doses are invisible **and their own are readable**, because
+  "sees nothing" passes just as well when the policy denies everything.
+  **One trap, and it cost a false failure here:** the RLS assertions must be
+  `async () => await prisma…`, never `() => prisma…`. A `PrismaPromise` is lazy, so returned
+  unawaited it escapes the resident context and runs under the suite's ambient
+  `runAsSystem` — every row comes back and it reads as a leak while testing nothing.
+  Posts doses and medications — reseed after.
 - `npm run verify:rls` — 28 assertions proving a resident actor cannot read, count or
   write another resident's rows — including their ledger and sign-outs — and that the
   app role cannot bypass the policies
@@ -2569,6 +2742,7 @@ npm run verify:constraints && node scripts/seed.js \
   && node scripts/verify-dashboard.js && node scripts/seed.js \
   && node scripts/verify-checks.js && node scripts/seed.js \
   && node scripts/verify-screens.js && node scripts/seed.js \
+  && node scripts/verify-meds.js && node scripts/seed.js \
   && npm run verify:rls
 ```
 
@@ -2741,7 +2915,15 @@ Resolve these as they come up; update this file when they do.
    Do not encode any specific Georgia rule from memory. Verify it before it reaches the
    schema or a deploy.
 2. How many apartments and beds, at launch and realistically? What's the cohort split?
-3. Medication model: observed self-administration only, or does staff store and dispense?
+3. ~~Medication model: observed self-administration only, or does staff store and dispense?~~
+   **Staff-stored, resident self-administered** (2026-08-07). The house holds the medications
+   and staff hand a dose over and watch it taken; staff never administer, so a clinical MAR is
+   out of scope. Each medication carries its own wall-clock times, and a "pass" is derived
+   from whose doses fall in a window rather than being an entity. **The house stores no
+   controlled substances at all**, which forecloses the count subsystem this file used to
+   hedge about rather than deferring it. Late tolerance is **two hours**. See module 6.
+   Still open underneath it: whether a dose was *directly observed* or handed over and
+   trusted is a separate custody fact nobody has been asked about.
 4. Does the facility already have a system (Sober Living App, BestNotes, spreadsheets)
    with data to migrate?
 5. Do residents get accounts at intake, or is it staff-entry-only for phase 1?

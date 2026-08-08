@@ -57,17 +57,7 @@ export const RESIDENT_SECTIONS = Object.freeze([
   // nearby. Opening a named resident's record is a deliberate navigation by
   // someone who already knows who they are looking at, and it is audited.
   { key: 'screens', label: 'Drug screens', group: 'Clinical', built: true },
-  {
-    key: 'meds',
-    label: 'Medications',
-    group: 'Clinical',
-    built: false,
-    module: 'Module 6 — Medication administration',
-    summary:
-      'The resident\'s med list and the log of given / refused / missed / held with the ' +
-      'observing staff member. The facility\'s actual model — observed self-administration ' +
-      'or staff-dispensed — is open question 3 and decides how heavy this gets.',
-  },
+  { key: 'meds', label: 'Medications', group: 'Clinical', built: true },
 
   // ── Administrative ────────────────────────────────────────────────────────
   {

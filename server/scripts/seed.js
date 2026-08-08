@@ -11,7 +11,12 @@ import { resetFacilityData } from './lib/reset.js'
 import { prisma } from '../src/db/client.js'
 import { runAsSystem } from '../src/lib/dbContext.js'
 import { hashPassword } from '../src/auth/passwords.js'
-import { facilityDueDate, facilityToday } from '../src/lib/facilityTime.js'
+import {
+  facilityDueDate,
+  facilityHourKey,
+  facilityToday,
+  facilityWallClockToUtc,
+} from '../src/lib/facilityTime.js'
 import { INVOICE_NET_DAYS } from '../src/domain/constants.js'
 import { addDays, dateKeyToUtc } from '../src/services/schedule/expand.js'
 
@@ -659,6 +664,112 @@ async function main() {
     labRecordedById: manager.id,
   })
 
+  // ── Medications and the med pass ────────────────────────────────────────
+  // Staff-stored, resident self-administered, no controlled substances — the
+  // facility's model. What a fresh seed shows: one pass fully recorded, one
+  // pass DUE with somebody still to mark, one dose MISSED, an as-needed
+  // medication, a discontinued one, and an amended dose.
+  //
+  // Times are anchored to the CURRENT facility hour rather than hardcoded, the
+  // same reasoning as the sign-outs and the hourly round above: a seed that
+  // pins 08:00 shows an all-missed board every afternoon. Known degradation,
+  // stated rather than discovered — seeded between roughly 5am and 8pm the
+  // states below are exactly as described; outside that the anchor clamps and
+  // the earliest pass may read DUE rather than MISSED. It costs a demo state,
+  // never a wrong record.
+  const facilityHour = Number(facilityHourKey(new Date(nowMs)).slice(-2))
+  const anchor = Math.min(Math.max(facilityHour, 5), 20)
+  const hh = (h) => `${String(h).padStart(2, '0')}:00`
+  const missedTime = hh(anchor - 3) // past the 2h grace
+  const dueTime = hh(anchor - 1) // late but still inside it
+  const laterTime = hh(anchor + 3) // not due yet
+  const today = facilityToday(new Date(nowMs))
+  const slot = (time) => facilityWallClockToUtc(today, time)
+
+  const addMed = (stayId, data) =>
+    prisma.medication.create({
+      data: { stayId, startsOn: dateKeyToUtc('2026-05-01'), addedById: manager.id, ...data },
+    })
+
+  const [whitfieldMed, ocampoMed, castilloMed, booneMed, boonePrn, ferrerOld] = await Promise.all([
+    addMed(byLast('Whitfield'), {
+      name: 'Sertraline',
+      dosage: '50 mg, 1 tablet',
+      instructions: 'With breakfast',
+      prescriber: 'Dr. Alvarez',
+      pharmacy: 'Peachtree Pharmacy',
+      times: [missedTime, laterTime],
+    }),
+    addMed(byLast('Ocampo'), {
+      name: 'Lisinopril',
+      dosage: '10 mg, 1 tablet',
+      prescriber: 'Dr. Alvarez',
+      times: [dueTime],
+    }),
+    addMed(byLast('Castillo'), {
+      name: 'Metformin',
+      dosage: '500 mg, 1 tablet',
+      instructions: 'With food',
+      times: [dueTime, laterTime],
+    }),
+    addMed(byLast('Boone'), {
+      name: 'Bupropion',
+      dosage: '150 mg, 1 tablet',
+      prescriber: 'Dr. Nwosu',
+      times: [missedTime],
+    }),
+    // As-needed: no times, never appears as a dose on the board, logged when
+    // it is actually taken.
+    addMed(byLast('Boone'), {
+      name: 'Ibuprofen',
+      dosage: '200 mg, up to 2 tablets',
+      instructions: 'As needed for pain',
+      isPrn: true,
+    }),
+    // Discontinued last week — still on the record, off every pass since.
+    addMed(byLast('Ferrer'), {
+      name: 'Trazodone',
+      dosage: '50 mg, 1 tablet',
+      times: ['22:00'],
+      endsOn: dateKeyToUtc(addDays(today, -7)),
+      endReason: 'Prescriber stopped it at the 30-day review.',
+    }),
+  ])
+
+  const dose = (med, time, data) =>
+    prisma.medLog.create({
+      data: {
+        medicationId: med.id,
+        stayId: med.stayId,
+        scheduledFor: time ? slot(time) : null,
+        observedById: tech.id,
+        recordedById: tech.id,
+        medicationName: med.name,
+        dosage: med.dosage,
+        ...data,
+      },
+    })
+
+  // The earlier pass: Whitfield took his, Boone's was never recorded — hers is
+  // the MISSED dose, which is an absence rather than a row.
+  const whitfieldEarly = await dose(whitfieldMed, missedTime, { status: 'GIVEN' })
+
+  // The current pass: Ocampo has been marked, Castillo has not — so the board
+  // reads "1 of 2" and the bell carries a count.
+  await dose(ocampoMed, dueTime, { status: 'GIVEN' })
+
+  // An as-needed dose taken this morning.
+  await dose(boonePrn, null, { status: 'GIVEN', note: 'Headache after her shift.' })
+
+  // And one amendment: marked given in the hallway, corrected minutes later.
+  // The original SURVIVES — that is the whole point of the pattern.
+  await dose(whitfieldMed, missedTime, {
+    status: 'REFUSED',
+    note: 'Said he had already taken it upstairs; nothing was handed over.',
+    supersedesId: whitfieldEarly.id,
+    amendmentReason: 'Marked given by mistake — the dose was not observed.',
+  })
+
   // ── Community service ───────────────────────────────────────────────────
   // Intake is 2026-05-01, so every seeded resident is months into a stay and
   // the quota has bitten several times over. The point of this block is that a
@@ -1107,6 +1218,7 @@ async function main() {
     ${await prisma.signOut.count()} sign-outs (1 out, 1 OVERDUE, 1 returned)
     ${await prisma.apartmentCheck.count()} apartment checks (men's CHECKED with 1 not found, women's OVERDUE, 1 missed hour, 1 amended)
     ${await prisma.drugScreen.count()} drug screens (1 negative, 1 awaiting the resident's decision, 1 declined, 1 at the lab, 1 lab-cleared after paying)
+    ${await prisma.medication.count()} medications (1 as-needed, 1 discontinued), ${await prisma.medLog.count()} doses recorded (1 amended, 1 dose deliberately missed)
     ${await prisma.ledgerEntry.count()} ledger entries (rent, laundry, a trip, a damage, one credit)
     ${await prisma.invoice.count()} invoices — rent billed monthly (net 3), most paid, 3 unpaid months long overdue
     balances are invoiced-and-due: 2 residents owe, the rest are square; fees stay pending

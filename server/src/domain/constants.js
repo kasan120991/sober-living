@@ -163,6 +163,8 @@ export const AUDITED_MODELS = Object.freeze([
   'ApartmentCheck',
   'ApartmentCheckResident',
   'DrugScreen',
+  'Medication',
+  'MedLog',
   'Invoice',
   'InvoiceLine',
   // Facility configuration
@@ -196,6 +198,14 @@ export const SOFT_DELETE_MODELS = Object.freeze([
   'ScheduleEvent',
   'ScheduleOccurrence',
   'ScheduleAttendee',
+  // Medication IS here, and its absence from the list below is the point: a
+  // medication is a standing instruction and therefore current state, like a
+  // maintenance request. What keeps that safe is that a medication with any
+  // dose logged against it cannot be deleted at all — only ENDED, via endsOn —
+  // because soft-deleting it would make this very extension filter it out of
+  // every read and silently erase the dose history hanging off it. That is the
+  // ScheduleEvent rule, and services/meds.js enforces it.
+  'Medication',
   // ScheduleSession and ScheduleAttendance are deliberately absent, and this is
   // not an oversight to be tidied up later. A session row exists only because
   // it carries a record, so CANCEL is the operation and delete is not one; and
@@ -218,6 +228,12 @@ export const SOFT_DELETE_MODELS = Object.freeze([
   // deleted — a sent demand for money is evidence that it was sent — and an
   // invoice line is append-only outright: a charge is billed exactly once,
   // forever, which is what stops a void from quietly re-billing anybody.
+  //
+  // MedLog is absent, and takes the apartment-check posture rather than the
+  // drug-screen one: a dose has no later fact to record about it, so the
+  // database refuses every UPDATE and every DELETE, and a mis-tap is corrected
+  // by amendment. Note its parent Medication IS in this list — the standing
+  // instruction is current state, the observation of a dose is evidence.
 ])
 
 /// Presence on the census board. DERIVED from a sign-out's returnedAt and
@@ -252,6 +268,53 @@ export const CHECK_STATE = Object.freeze({
   /// History only: an elapsed hour bucket with no check.
   MISSED: 'MISSED',
 })
+
+/// What happened at one dose. Matches the `MedLogStatus` enum in
+/// schema.prisma — THREE members, because MISSED is derived and never stored.
+/// See MED_DOSE_STATE below and the enum's own note for why.
+export const MED_LOG_STATUS = Object.freeze({
+  GIVEN: 'GIVEN',
+  REFUSED: 'REFUSED',
+  HELD: 'HELD',
+})
+
+/// One scheduled dose's standing, DERIVED on read from its scheduled instant
+/// and whatever log answers it — deliberately NOT a schema enum, exactly like
+/// PRESENCE, CHECK_STATE and SESSION_STATE.
+///
+/// The three stored statuses appear here unchanged, plus the two that exist
+/// only as a relationship between a clock and an absent row. MISSED in
+/// particular must never become storable: it is the ABSENCE of a record, and
+/// making it typeable would let "nobody ran the pass" be silenced into "we ran
+/// it and marked everyone missed".
+export const MED_DOSE_STATE = Object.freeze({
+  /// Its time has not come round yet today.
+  UPCOMING: 'UPCOMING',
+  /// Due now, or late but still inside the grace window.
+  DUE: 'DUE',
+  GIVEN: 'GIVEN',
+  REFUSED: 'REFUSED',
+  HELD: 'HELD',
+  /// Past its time by more than MED_PASS_GRACE_MS with nothing recorded.
+  MISSED: 'MISSED',
+})
+
+/**
+ * How late a scheduled dose may be given before the app calls it missed
+ * (facility policy, chosen 2026-08-07): TWO HOURS.
+ *
+ * THE one knob. The board, the bell and the resident record all derive through
+ * medMissedCutoff() in services/meds.js, so changing it here changes it
+ * everywhere and none of the three can disagree about what is late.
+ *
+ * Deliberately much wider than its siblings — OVERDUE_GRACE_MS and
+ * CHECK_GRACE_MS are both fifteen minutes — and the difference is the point. A
+ * sign-out grace lags a deadline a resident promised to meet, and an hourly
+ * round is a cadence staff control. An evening med pass drifts with when people
+ * get home from work, so an alarm at fifteen minutes would fire most evenings
+ * on a house doing nothing wrong, which is how a signal stops being read.
+ */
+export const MED_PASS_GRACE_MS = 2 * 60 * 60_000
 
 /// An invoice's state, mirroring Stripe's. Matches `InvoiceStatus` in
 /// schema.prisma. There is deliberately no OVERDUE: that is `dueAt` against a
