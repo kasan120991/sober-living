@@ -175,7 +175,15 @@ async function main() {
   const withDue = board.body.passes.find((p) => p.due > 0)
   const target = withDue?.residents.find((r) => r.due > 0)
   if (!target) {
+    // Report and STOP, rather than dereferencing undefined two lines down. The
+    // seed anchors a due dose to the current hour at every hour of the day, so
+    // reaching this means the fixture is genuinely wrong — and a TypeError
+    // stack would say nothing about which.
     bad('fixture', 'the seed produced no due dose — reseed and re-run')
+    console.log(`\n\x1b[1mResult: ${pass} passed, ${fail} failed\x1b[0m\n`)
+    await owner.end()
+    server.close()
+    process.exit(1)
   }
   const sheet = await tech(`/meds/pass/${target.stayId}`)
   sheet.status === 200 && sheet.body.doses.some((d) => d.medicationName)

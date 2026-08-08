@@ -677,12 +677,36 @@ async function main() {
   // states below are exactly as described; outside that the anchor clamps and
   // the earliest pass may read DUE rather than MISSED. It costs a demo state,
   // never a wrong record.
+  // Anchored to the CURRENT facility hour, and the shape of the arithmetic is
+  // what makes it hold at every hour of the day rather than only in office
+  // hours. An earlier version clamped the anchor into 5..20, which quietly
+  // stopped producing a DUE dose after 9pm — the anchor capped at 20, so "due"
+  // landed at 19:00, already past the two-hour grace. The seed showed no
+  // current pass and verify-meds.js had no fixture to work with.
+  //
+  // So DUE is derived first and never degrades: one hour back, or the current
+  // hour itself just after midnight. The other two are allowed to drop out
+  // instead, because a demo missing its upcoming pass costs a state on screen
+  // while a demo missing its DUE pass costs the whole point of the board.
   const facilityHour = Number(facilityHourKey(new Date(nowMs)).slice(-2))
-  const anchor = Math.min(Math.max(facilityHour, 5), 20)
   const hh = (h) => `${String(h).padStart(2, '0')}:00`
-  const missedTime = hh(anchor - 3) // past the 2h grace
-  const dueTime = hh(anchor - 1) // late but still inside it
-  const laterTime = hh(anchor + 3) // not due yet
+  const dueTime = hh(Math.max(facilityHour - 1, 0)) // late, still inside the grace
+  const missedTime = facilityHour >= 3 ? hh(facilityHour - 3) : null // past it
+  // Not due yet. Three hours ahead where the day has room, otherwise the last
+  // hour of it — which is still ahead of now for every hour but 23:00, and
+  // keeps verify-meds.js's "a dose not due yet cannot be recorded" assertion
+  // exercised late in the evening instead of quietly skipped.
+  const laterTime =
+    facilityHour + 3 <= 23 ? hh(facilityHour + 3) : facilityHour < 23 ? hh(23) : null
+  /** Drops the times that do not exist at this hour. */
+  const at = (...times) => times.filter(Boolean)
+  // Whitfield always has at least one slot: `missedTime` is null only before
+  // 3am and `laterTime` only after 8pm, and no hour is both.
+  const whitfieldTimes = at(missedTime, laterTime)
+  // Boone's dose is the deliberately-unrecorded one. Before 3am there is no
+  // past slot to miss, so she falls back to the current pass — the medication
+  // stays valid and only the MISSED demo state is unavailable for those hours.
+  const booneTime = missedTime ?? dueTime
   const today = facilityToday(new Date(nowMs))
   const slot = (time) => facilityWallClockToUtc(today, time)
 
@@ -698,7 +722,7 @@ async function main() {
       instructions: 'With breakfast',
       prescriber: 'Dr. Alvarez',
       pharmacy: 'Peachtree Pharmacy',
-      times: [missedTime, laterTime],
+      times: whitfieldTimes,
     }),
     addMed(byLast('Ocampo'), {
       name: 'Lisinopril',
@@ -710,13 +734,13 @@ async function main() {
       name: 'Metformin',
       dosage: '500 mg, 1 tablet',
       instructions: 'With food',
-      times: [dueTime, laterTime],
+      times: at(dueTime, laterTime),
     }),
     addMed(byLast('Boone'), {
       name: 'Bupropion',
       dosage: '150 mg, 1 tablet',
       prescriber: 'Dr. Nwosu',
-      times: [missedTime],
+      times: [booneTime],
     }),
     // As-needed: no times, never appears as a dose on the board, logged when
     // it is actually taken.
@@ -752,7 +776,9 @@ async function main() {
 
   // The earlier pass: Whitfield took his, Boone's was never recorded — hers is
   // the MISSED dose, which is an absence rather than a row.
-  const whitfieldEarly = await dose(whitfieldMed, missedTime, { status: 'GIVEN' })
+  // Whichever of his slots exists at this hour — see whitfieldTimes above.
+  const whitfieldSlot = whitfieldTimes[0]
+  const whitfieldEarly = await dose(whitfieldMed, whitfieldSlot, { status: 'GIVEN' })
 
   // The current pass: Ocampo has been marked, Castillo has not — so the board
   // reads "1 of 2" and the bell carries a count.
@@ -763,7 +789,7 @@ async function main() {
 
   // And one amendment: marked given in the hallway, corrected minutes later.
   // The original SURVIVES — that is the whole point of the pattern.
-  await dose(whitfieldMed, missedTime, {
+  await dose(whitfieldMed, whitfieldSlot, {
     status: 'REFUSED',
     note: 'Said he had already taken it upstairs; nothing was handed over.',
     supersedesId: whitfieldEarly.id,
