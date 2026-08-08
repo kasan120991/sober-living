@@ -4,7 +4,15 @@
  *
  * Run after `node scripts/seed.js`. Posts entries and does not clean up, so
  * reseed afterwards.
+ *
+ * FIRST IMPORT, and the order matters: ./lib/no-stripe.js makes this run
+ * keyless whatever the machine's .env says. src/lib/stripe.js reads the key
+ * once at module load, so anything importing src/app.js ahead of it would
+ * freeze the real key in and the keyless-refusal assertion below would not
+ * merely fail — it would send a real invoice, bill the stay, and take the rest
+ * of the suite down with it. See that file.
  */
+import './lib/no-stripe.js'
 import { createApp } from '../src/app.js'
 import { prisma } from '../src/db/client.js'
 import { runAsSystem } from '../src/lib/dbContext.js'

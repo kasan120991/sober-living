@@ -2399,12 +2399,23 @@ Two verification suites, both run against a live database:
   reported on its own; a payment with nothing invoiced reads as a **credit**; and it
   **nets against the next invoice**. Plus the keyless send **refused with nothing billed** —
   which is also why the arc drives `draftInvoice` directly rather than the route.
-  **Known environmental failure, not a regression** (noticed 2026-08-07): that one
-  assertion needs `STRIPE_SECRET_KEY` to be **absent**, so on a machine where `.env`
-  carries the test key it fails — the send genuinely succeeds against the Stripe sandbox
-  and returns 201 where the suite expects a 503. The other 71 pass. Unset the key for the
-  run, or read this line and move on; the real fix is for the suite to stub the key
-  rather than depend on the environment lacking one.
+  **The suite STUBS the key rather than depending on the environment lacking one**
+  (fixed 2026-08-07). `scripts/lib/no-stripe.js` is imported FIRST — before
+  `src/app.js`, the as-owner.js ordering rule, because `src/lib/stripe.js` reads
+  `STRIPE_SECRET_KEY` once at module load and freezes the answer into
+  `stripeEnabled()`. It sets the variable to `''` rather than deleting it, so a later
+  `import 'dotenv/config'` further down the graph cannot quietly put the real key back.
+
+  **The note that used to sit here was wrong in two ways, and both are worth keeping**
+  because they are how a "known environmental failure" hid a real one. It said the
+  keyless-refusal assertion merely fails on a machine with a key and "the other 71 pass".
+  It did not: the send **succeeded**, which **billed the stay's pending lines**, so the
+  next step — which needs something unbilled — threw `There is nothing unbilled on this
+  stay` and **the suite died there**, with roughly sixty assertions never running. And
+  because the send was real, every run created a **live invoice against a seeded resident
+  in the Stripe sandbox**. A failure documented as cosmetic was costing most of the
+  suite's coverage and touching an external service. All **72 now run and pass with a key
+  present or absent**.
   **Five pin the net-3 term**, led by the regression that motivated it: an invoice sent
   today is **not overdue**; the due date is the end of the **third facility day** and two
   sends on that day share it whatever the hour, both proved on fixed instants so no DST
