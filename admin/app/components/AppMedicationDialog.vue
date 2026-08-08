@@ -15,7 +15,7 @@
 // created by calling the API by hand. Exactly the failure CLAUDE.md records
 // against module 10's vendorName — a column whose whole justification was
 // getting something out of a description, with nothing in the UI able to set it.
-import { Plus, X } from '@lucide/vue'
+import { X } from '@lucide/vue'
 import { facilityDateNow, facilityDateOf, formatWallClock } from '~/utils/facilityTime.js'
 
 const props = defineProps({
@@ -41,7 +41,7 @@ const blank = () => ({
 })
 
 const form = reactive(blank())
-const newTime = ref('')
+const newTime = ref(undefined)
 const busy = ref(false)
 const error = ref('')
 
@@ -52,7 +52,7 @@ watch(
   (key) => {
     if (!key) return
     error.value = ''
-    newTime.value = ''
+    newTime.value = undefined
     Object.assign(form, blank())
     if (props.medication) {
       const m = props.medication
@@ -71,31 +71,36 @@ watch(
   { immediate: true },
 )
 
-const WALL_CLOCK = /^([01][0-9]|2[0-3]):[0-5][0-9]$/
-
 /**
- * Whether there is a complete time waiting to be added.
+ * Times are CHOSEN FROM A LIST, not typed.
  *
- * A native <input type="time"> reports its value as an EMPTY STRING while the
- * time is incomplete — type the hour and the field visibly reads "08:--" while
- * the value is still ''. So "the user has typed something" and "we have a time"
- * are different questions, and only the second one is answerable here.
+ * This replaced an <input type="time"> plus an "Add time" button, and the
+ * reason is worth keeping because the native control looked like the obvious
+ * choice and was the wrong one. In a 12-hour locale it has THREE segments —
+ * hour, minute, AM/PM — and it reports `value` as an EMPTY STRING until every
+ * one of them is filled. So somebody types 8, then 00, sees "08:00" sitting in
+ * the field, and the app still has nothing. The button did nothing, silently,
+ * and no amount of disabling or hinting makes a control usable when the user
+ * has visibly done the thing and the machine disagrees.
+ *
+ * A dropdown cannot reach that state. There is no partial selection, no locale
+ * parsing, no keyboard sequence to get wrong, and picking commits immediately —
+ * so the separate Add step is gone too. Half-hour granularity because a med
+ * pass is a round time by nature; the seed and the facility both use whole
+ * hours.
  */
-const validTime = computed(() => WALL_CLOCK.test(newTime.value))
+const TIME_OPTIONS = Array.from({ length: 48 }, (_, i) => {
+  const value = `${String(Math.floor(i / 2)).padStart(2, '0')}:${i % 2 ? '30' : '00'}`
+  return { value, label: formatWallClock(value) }
+})
 
-/**
- * Adds the pending time. Called from the button, from Enter, AND from the
- * input's own `change` — which native time inputs fire only once the value is
- * complete, so picking a time commits it without touching the button at all.
- *
- * Idempotent by the duplicate check, which is what makes those three triggers
- * safe together.
- */
-function addTime() {
-  if (!validTime.value) return
-  const t = newTime.value
+/** Picking a time IS adding it. Idempotent, so a re-pick is harmless. */
+function addTime(t) {
+  if (!t) return
   if (!form.times.includes(t)) form.times = [...form.times, t].sort()
-  newTime.value = ''
+  // Reka's Select reserves '' for "cleared", so reset to undefined — the
+  // sentinel rule in CLAUDE.md's UI notes.
+  newTime.value = undefined
 }
 const dropTime = (t) => (form.times = form.times.filter((x) => x !== t))
 
@@ -218,32 +223,31 @@ async function submit() {
                 </button>
               </span>
             </div>
-            <div class="flex flex-wrap items-center gap-2">
-              <Input
-                v-model="newTime"
-                type="time"
-                class="w-36"
-                aria-label="Add a time"
-                @change="addTime"
-                @keydown.enter.prevent="addTime"
-              />
-              <!-- Disabled until there is a complete time, so the control's
-                   state says what a click would do. It used to be always
-                   enabled and silently do nothing on an incomplete time, which
-                   reads as a broken button — and was reported as one. -->
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                :disabled="!validTime"
-                @click="addTime"
-              >
-                <Plus class="size-4" /> Add time
-              </Button>
-              <span v-if="!validTime" class="text-muted-foreground text-xs">
-                Finish the time to add it{{ form.times.length ? '' : ' — at least one is required' }}.
-              </span>
-            </div>
+            <!-- Choosing a time adds it. No separate button, because there is
+                 no half-entered state for one to guard against. -->
+            <!-- Keyed on the count so the trigger returns to "Add a time…"
+                 after each pick. Reka keeps its own display state, and clearing
+                 the bound value alone leaves the last choice showing — which
+                 makes an add-another control read as a single-choice one. -->
+            <Select
+              :key="form.times.length"
+              :model-value="newTime"
+              @update:model-value="addTime"
+            >
+              <SelectTrigger class="w-44">
+                <SelectValue placeholder="Add a time…" />
+              </SelectTrigger>
+              <SelectContent class="max-h-64">
+                <SelectItem
+                  v-for="t in TIME_OPTIONS"
+                  :key="t.value"
+                  :value="t.value"
+                  :disabled="form.times.includes(t.value)"
+                >
+                  {{ t.label }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </AppField>
 
