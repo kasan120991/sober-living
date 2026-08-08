@@ -334,6 +334,17 @@ async function main() {
     ? ok(`the bell matches the roster exactly (${flagged.size} unplaced)`)
     : bad('bell matches roster', `flagged ${[...flagged]} vs bedless ${[...bedless]}`)
 
+  // Unplaced is WARNING, never critical — the split `facilityStatus()` already
+  // makes, and the one the sidebar badge depends on: of the five badged
+  // destinations this is the only one that must not go red, because nobody is
+  // late. Skipped rather than asserted vacuously when the house is fully placed.
+  const unhousedItems = (roster.items ?? []).filter((i) => i.kind === 'UNHOUSED')
+  unhousedItems.length === 0
+    ? ok('nobody is unplaced, so there is no severity to check')
+    : unhousedItems.every((i) => i.severity === 'warning')
+      ? ok('an unplaced resident is WARNING, not critical — nobody is late')
+      : bad('unhoused severity', JSON.stringify(unhousedItems.map((i) => i.severity)))
+
   const housedFlagged = rosterRows.filter((r) => r.bed && flagged.has(r.stayId))
   housedFlagged.length === 0
     ? ok('nobody with a bed is flagged — the item clears itself, with nothing to dismiss')

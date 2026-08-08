@@ -27,8 +27,47 @@ import { overdueWhere } from './signOuts.js'
  * bell without a separate think about who is standing behind the phone.
  */
 
-/** Severity drives ordering and colour. Kept small on purpose. */
+/** Level drives ordering and the badge count. Kept small on purpose. */
 const LEVEL = { ACTION: 'action', WATCH: 'watch' }
+
+/**
+ * How LATE a situation is — a different question from whether it needs a person.
+ *
+ * `level` answers "does somebody have to do something?" and drives actionCount.
+ * `severity` answers "has a clock run out?", which is what a red badge means.
+ * The two do not collapse: an ACTION item is often only WARNING — nobody is
+ * late because a resident has no bed — and a WATCH item is never CRITICAL.
+ *
+ * IT IS DECIDED HERE BECAUSE FOR ONE KIND THE CLIENT CANNOT DECIDE IT.
+ * `URGENT_MAINTENANCE` is the union of urgent-and-open with past-its-own-target
+ * (`bellMaintenanceWhere()`), and telling those apart needs `priority` and
+ * `reportedAt` against MAINTENANCE_TARGET_MS — neither of which crosses the
+ * wire. The only alternative was parsing the `detail` sentence, which would
+ * make a string load-bearing. This is the dashboard's own precedent, where
+ * `attention.urgentMaintenance` carries `state` and `priority` so the client
+ * need not re-derive the rule.
+ *
+ * The vocabulary is the app's existing one, deliberately not a third set of
+ * names for one judgement: `facilityStatus()` returns critical / warning, and
+ * the resident rail's SECTION_DOT uses the same two words. Every per-kind
+ * choice below was already made by one of those two — overdue is critical and
+ * unplaced is warning in `facilityStatus()`; `notAccounted` is CRITICAL in
+ * `sectionDots()`.
+ *
+ * EVERY item carries it, watch items included. A field that is sometimes
+ * absent is a third state nobody decided.
+ *
+ * NOT a module 13 disclosure: it is a severity flag on a situation this same
+ * item already states in full — no name, no count, nothing clinical. And module
+ * 12's "the payload is `{ at }` and nothing else" rule governs the `changed`
+ * SOCKET, where RLS does not apply to a fan-out. This is the authenticated,
+ * staff-gated HTTP read, decided per request.
+ */
+export const NOTIFICATION_SEVERITY = Object.freeze({
+  CRITICAL: 'critical',
+  WARNING: 'warning',
+})
+const SEV = NOTIFICATION_SEVERITY
 
 export async function listNotifications() {
   const [overdue, unhoused, urgent, staleOpen, checksOverdue, notAccounted, medsDue, passesLate] = await Promise.all([
@@ -92,6 +131,9 @@ export async function listNotifications() {
     items.push({
       id: `overdue:${s.id}`,
       level: LEVEL.ACTION,
+      // `facilityStatus()` already calls an overdue return critical, and this
+      // file's own comment calls it "the loudest state in the app".
+      severity: SEV.CRITICAL,
       kind: 'OVERDUE_SIGN_OUT',
       title: `${s.stay.resident.firstName} ${s.stay.resident.lastName} has not returned`,
       // Destination is operational, and the person acting on this needs to
@@ -107,6 +149,9 @@ export async function listNotifications() {
     items.push({
       id: `unhoused:${stay.id}`,
       level: LEVEL.ACTION,
+      // WARNING, not critical, and the split is `facilityStatus()`'s: unplaced
+      // is a thing to do today, not a clock that has run out. Nobody is late.
+      severity: SEV.WARNING,
       kind: 'UNHOUSED',
       title: `${stay.resident.firstName} ${stay.resident.lastName} has no bed`,
       detail: 'In the programme and not yet placed.',
@@ -125,6 +170,11 @@ export async function listNotifications() {
     items.push({
       id: `urgent:${r.id}`,
       level: LEVEL.ACTION,
+      // The one kind whose severity a client cannot derive — see
+      // NOTIFICATION_SEVERITY. It costs nothing here because `overdue` is
+      // already computed on the line above for the detail, and it follows the
+      // same rule that sentence does: overdue wins when a request is both.
+      severity: overdue ? SEV.CRITICAL : SEV.WARNING,
       kind: 'URGENT_MAINTENANCE',
       title: r.title,
       detail: `${overdue ? 'Overdue' : 'Urgent'} · ${r.apartment.name}`,
@@ -140,6 +190,8 @@ export async function listNotifications() {
     items.push({
       id: `check:${c.apartment.id}`,
       level: LEVEL.ACTION,
+      // Past the rolling alarm — a clock has run out by construction.
+      severity: SEV.CRITICAL,
       kind: 'APARTMENT_CHECK_OVERDUE',
       title: `${c.apartment.name} has not been checked`,
       detail: c.lastCheckAt
@@ -155,6 +207,9 @@ export async function listNotifications() {
     items.push({
       id: `notfound:${r.stayId}`,
       level: LEVEL.ACTION,
+      // `sectionDots()` gives this SECTION_DOT.CRITICAL on the resident record
+      // — "the record's loudest fact". The same judgement, the same word.
+      severity: SEV.CRITICAL,
       kind: 'RESIDENT_NOT_ACCOUNTED',
       // A name against "not found" is operational, the same test the overdue
       // sign-out item passes: whoever acts needs to know who to look for.
@@ -180,6 +235,9 @@ export async function listNotifications() {
     items.push({
       id: 'meds:due',
       level: LEVEL.ACTION,
+      // WARNING deliberately: this counts DUE doses only, never MISSED, so by
+      // construction nothing here is past its two-hour grace yet.
+      severity: SEV.WARNING,
       kind: 'MED_PASS_DUE',
       title:
         medsDue.count === 1 ? '1 dose not yet recorded' : `${medsDue.count} doses not yet recorded`,
@@ -193,6 +251,9 @@ export async function listNotifications() {
     items.push({
       id: `pass:${p.id}`,
       level: LEVEL.ACTION,
+      // The dashboard row for this same pass already takes a destructive badge
+      // (module 14, 2026-08-08); this is that decision said once more.
+      severity: SEV.CRITICAL,
       kind: 'PASS_OVERDUE',
       title: `${p.fullName} is not back from their pass`,
       // The DESTINATION rides here, exactly as it does on the overdue sign-out
@@ -210,6 +271,8 @@ export async function listNotifications() {
     items.push({
       id: `oos:${bed.id}`,
       level: LEVEL.WATCH,
+      // A watch item is never critical — that is what makes it a watch item.
+      severity: SEV.WARNING,
       kind: 'BED_OUT_OF_SERVICE',
       title: `${bed.apartment.name} · ${bed.label} is out of service`,
       detail: bed.outOfServiceNote ?? 'No note recorded.',

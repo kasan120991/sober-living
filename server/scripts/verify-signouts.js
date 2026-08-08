@@ -155,6 +155,10 @@ async function main() {
   const bellItem = bell.items.find((i) => i.kind === 'OVERDUE_SIGN_OUT')
   bellItem &&
   bellItem.level === 'action' &&
+  // The two are a different question and must not collapse: `level` says
+  // somebody has to act, `severity` says a clock has run out. The sidebar
+  // badge's red keys on this one.
+  bellItem.severity === 'critical' &&
   bellItem.to === '/sign-outs' &&
   bellItem.title.includes('Tasha Boone') &&
   bellItem.detail.includes('Kroger')

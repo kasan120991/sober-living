@@ -2030,6 +2030,65 @@ real table *and* a real decision about whether one person dismissing hides it fr
 The badge counts only `action` items. A bed out of service is worth seeing and is not a
 number anyone should feel behind on.
 
+**Built: the same numbers on the SIDEBAR (2026-08-08).** Five entries carry a count —
+Apartment Checks, Sign-Outs, Travel Passes, Maintenance, Residents — and it is the bell's
+own action items for that destination, read from the same `useState`. **No endpoint was
+added and no request was added**: `AppNotifications` is rendered by `AppPageHeader` on
+every screen, so the bell already fetches on every navigation, and the realtime socket
+already refreshes it — so the rail updates live for free. That is a real coupling and
+`useNavBadges.js` says so: if the bell ever stops being fetched on every page, the badges
+go stale silently.
+
+The count is **absent at zero**, the rule the census tiles and the resident rail already
+follow, because a quiet house has to *look* quiet or the colours stop meaning anything on
+the day one of them matters. It is **not capped** — the bell caps at `9+` because it is a
+fixed-size overlay on an icon button where a wider number shifts the header, and its own
+comment says so; a sidebar badge is `absolute` inside a 16rem row and reflows nothing, and
+"12 overdue checks" and "9+" are different amounts of alarm. The label truncates before
+the badge does.
+
+**Red means a clock has run out; amber means it has not** — and every bell item now
+carries a **`severity`** (`critical` / `warning`) saying which. It exists because one kind
+cannot be judged from the client: `URGENT_MAINTENANCE` is the union of urgent-and-open
+with past-its-own-target, and the item carries neither `priority` nor `reportedAt`, so the
+only client-side way to tell them apart was **parsing the `detail` sentence**. It costs
+nothing on the server, because `const overdue = requestState(r) === MAINTENANCE_STATE.OVERDUE`
+was already computed on the line above for that sentence. This is the dashboard's own
+precedent — `attention.urgentMaintenance` carries `state` and `priority` "so the client
+need not re-derive the rule", which `verify-maintenance.js` asserts in those words.
+
+`severity` and `level` are **different questions and must not collapse**: `level` says
+somebody has to act and drives `actionCount`; `severity` says a clock has run out. An
+ACTION item is often only WARNING — nobody is late because a resident has no bed. **Every
+item carries it, watch items included**: a field that is sometimes absent is a third state
+nobody decided. The words are `facilityStatus()`'s and `SECTION_DOT`'s rather than a third
+vocabulary, and every per-kind value is a judgement one of those two had already made —
+overdue critical, unplaced warning, `notAccounted` critical.
+
+**Adding it is NOT a module 13 question**, and the reason is worth stating because a
+careful reader will reach for the wrong rule: it is a severity flag on a situation the same
+item already states in full, and module 12's "the payload is `{ at }` and nothing else"
+governs the **`changed` socket**, where RLS does not apply to a fan-out. This is the
+authenticated, staff-gated HTTP read, decided per request. `verify-screens.js` runs a
+deliberately broad regex over the whole serialised bell payload and is unmoved by it — but
+check that regex first if the field is ever renamed.
+
+**Badges are keyed by `kind`, never by an item's own `to`.** `UNHOUSED` links to
+`/residents/${id}` — the person, because placing them is the next act — so bucketing by
+destination would scatter one badge into a bucket per resident, on routes no nav entry has,
+and leave `/residents` bare. **Red wins the moment one item in a bucket is critical**, the
+same rule the maintenance detail line follows: amber over a bucket holding a resident
+nobody can find would be a lie told in colour, and the count beside it would not correct it.
+
+**Med Pass is deliberately UNBADGED**, recorded so it is not "fixed" later. `MED_PASS_DUE`
+is one aggregate item carrying its count inside its title, so a badge built from it would
+read `1` beside a bell row saying "3 doses not yet recorded" — two numbers for one fact on
+the same screen. Badging it means giving that item a real count field first, which is a
+**module 6** decision and not a privacy one: module 13 cleared the shape on 2026-08-07 —
+a count and a time, never a name and never a medication. It is the one action-level kind
+left out, and the five badges sum to `actionCount` minus exactly it, which is a cheap
+browser check that the rail and the bell agree.
+
 **Built: realtime, as an invalidation socket that carries nothing.** Socket.IO on the
 API's HTTP server (`server/src/lib/realtime.js`), one event — `changed` — whose payload is
 `{ at: <timestamp> }` and **nothing else**: no ids, no names, no entity types. Clients
@@ -2510,12 +2569,28 @@ The preset owns colour and type. What it does not decide, and we do:
   style it as a heading.
 - Table rows 48px, `px-3` cells. Wide tables scroll inside their own `overflow-x-auto`
   container; the page never scrolls sideways. Mobile-first for anything a tech touches.
-- The shell follows shadcn's **sidebar-08** block. Two deliberate deviations: no collapsible
-  submenus, because we have no second-level navigation and inventing one to fill the shape
-  would be IA written to match a template; and breadcrumb ancestors stay visible below `md`,
-  because they replaced a back arrow and a phone is where the way back matters most.
+- The shell follows shadcn's **sidebar-08** block. Three deliberate deviations: no
+  collapsible submenus, because we have no second-level navigation and inventing one to
+  fill the shape would be IA written to match a template; breadcrumb ancestors stay visible
+  below `md`, because they replaced a back arrow and a phone is where the way back matters
+  most; and **`SidebarMenuBadge` is CENTRED rather than offset by button size**. shadcn's
+  `peer-data-[size=default]/menu-button:top-1.5` assumes its own 36px button, and ours is
+  `max-md:h-11 pointer-coarse:h-11` under the 44px rule above — so the stock offset sat the
+  badge 6px high in a 44px row, on exactly the device that floor exists for. **This is the
+  second-order cost of that deviation**, and the place to look for the next one. Centring is
+  height-agnostic, so it cannot rot the next time a height moves.
+- **The icon rail loses the badge, so it gets a dot.** `SidebarMenuBadge` is
+  `group-data-[collapsible=icon]:hidden` and a number does not fit a 32px button — but
+  collapsing is a **persisted cookie choice**, so "we lose the signal when collapsed" really
+  means the two desktop roles collapse the rail once and never see it again. `AppNavBadge`
+  renders both: the chip when expanded, a dot when collapsed, and **the count survives in
+  the button's tooltip**, which shadcn already shows only when collapsed. Same trade
+  `AppResidentRail` makes to keep its dots on the sheet trigger below `md`. The dot is a
+  **sibling of `SidebarMenuButton`**, never inside the link — the button is `overflow-hidden`
+  and would clip it — and it cannot appear in the mobile sheet by construction, because
+  `data-collapsible` is only set on the desktop branch of `Sidebar.vue`.
 
-Five things that will trip you up:
+Six things that will trip you up:
 
 1. **`shadcn-vue add` rewrites `main.css` every time**, silently restoring the Google Fonts
    CDN `@import`s — a third-party request on every page load, which this file forbids. It is
@@ -2531,6 +2606,15 @@ Five things that will trip you up:
 5. **`AppPageHeader`'s `md:rounded-t-2xl` has to match `SidebarInset`'s corner**, or the
    card shows as a sliver outside the header. It is `2xl`, not the `xl` shadcn ships — the
    preset restyled `SidebarInset`.
+6. **tailwind-merge does not resolve a conflict across DIFFERENT variant modifiers.**
+   `cn('peer-hover/menu-button:text-sidebar-accent-foreground', 'text-destructive')` keeps
+   **both**, and the peer variant also wins on specificity — `(0,3,0)` against `(0,1,0)` —
+   whatever the source order, so a plain override silently loses in exactly the states you
+   look at the thing in. Overriding a vendored `peer-*` / `group-*` utility takes the **same
+   modifier**, or it does not take at all. This is why `AppNavBadge` re-states
+   `peer-hover/menu-button:` and `peer-data-active/menu-button:` for its colour, and it is
+   verifiable: with the same modifier the base rule is *resolved away* and no longer appears
+   in the rendered class list.
 - **Prisma 7** over **PostgreSQL**, via the `@prisma/adapter-pg` driver adapter
   (`PrismaPg`). Prisma 7 uses driver adapters — there is no `mysql2` or `pg` usage
   anywhere outside `db/client.js`.

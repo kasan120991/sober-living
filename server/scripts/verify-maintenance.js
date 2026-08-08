@@ -235,6 +235,25 @@ async function main() {
     ? ok('the panel carries state and priority, so the client need not re-derive the rule')
     : bad('panel fields', 'state or priority missing')
 
+  // The bell's own version of that rule, added for the sidebar badge (2026-08-08).
+  // URGENT_MAINTENANCE is the ONE kind whose urgency a client cannot derive —
+  // the item carries neither priority nor reportedAt — so without this field the
+  // only way to tell an overdue repair from a merely urgent one was parsing the
+  // `detail` sentence. Asserted per item AND in both directions, because "they
+  // all say critical" would pass while the distinction was gone.
+  const sevItems = notif.body.items.filter((i) => i.kind === 'URGENT_MAINTENANCE')
+  sevItems.every((i) =>
+    overdueIds.has(i.id.slice(7)) ? i.severity === 'critical' : i.severity === 'warning',
+  )
+    ? ok('each bell item’s severity IS its own overdue-ness — nothing downstream parses the detail')
+    : bad('bell severity', JSON.stringify(sevItems.map((i) => [i.id, i.severity])))
+
+  // The seed carries both kinds, so this proves the field actually discriminates
+  // rather than being a constant that happens to satisfy the check above.
+  new Set(sevItems.map((i) => i.severity)).size === 2
+    ? ok('…and both values are really in play — an overdue one and a merely urgent one')
+    : bad('severity discriminates', JSON.stringify(sevItems.map((i) => i.severity)))
+
   // ── IN_PROGRESS needs an owner ───────────────────────────────────────────
   console.log('\n\x1b[1mIN_PROGRESS carries an owner\x1b[0m')
 
