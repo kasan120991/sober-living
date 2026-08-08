@@ -984,6 +984,18 @@ hard way:
   window orphans a dose through exactly the gate `expand()` orphans attendance through.
   Ending a medication is the *sanctioned* act, which is what makes that the easiest guard
   here to ship a bug in.
+- **On the day it ends, only doses that were actually RECORDED survive** (fixed
+  2026-08-08). `endsOn` stays inclusive — the medication was in effect that day — but the
+  expander drops any dose on that date with no log against it. The two alternatives each
+  lose something real, which is why this is worth stating rather than deriving:
+  keeping every dose leaves a medication somebody deliberately stopped reading DUE and
+  then **MISSED**, and that second one is a *false record* — it asserts the facility failed
+  to give a dose it had decided not to give, in a module whose whole posture is that
+  records are evidence. Dropping every dose instead takes this morning's, which really was
+  handed over and observed, and that is worse. So what happened stands and what was never
+  going to happen never appears. The guard above is unaffected, because a recorded dose is
+  exactly what still shows. Found in the seeded data as a discontinued Trazodone still
+  showing a dose due that evening.
 
 **MISSED is derived and must never become storable.** CLAUDE.md's own sketch said the log
 was "given / refused / missed / held"; three of those four are stored. `MedLogStatus` is
@@ -2689,7 +2701,7 @@ Two verification suites, both run against a live database:
   assertion with nothing actually wrong. The seed says "storm door" for exactly this
   reason. Rename the data, never loosen the regex: its breadth is what catches an
   `attention.screensPending` somebody adds later.
-- `node scripts/verify-meds.js` — **65 assertions** on the med pass. Six prove the
+- `node scripts/verify-meds.js` — **68 assertions** on the med pass. Six prove the
   two-hour grace with **no database at all**, on fixed instants so no DST week and no time
   of day can flake them: 119 minutes past is DUE, 121 is MISSED, a future dose is UPCOMING,
   and **a recorded log beats the clock** — without that last one a dose given late flips
@@ -2719,6 +2731,11 @@ Two verification suites, both run against a live database:
   `async () => await prisma…`, never `() => prisma…`. A `PrismaPromise` is lazy, so returned
   unawaited it escapes the resident context and runs under the suite's ambient
   `runAsSystem` — every row comes back and it reads as a leak while testing nothing.
+  **Three pin the discontinuation day**, and the pair is the point: a medication ended on
+  a day it already has a dose is accepted, that recorded dose is **KEPT**, and the one
+  never given is **GONE**. Either half alone passes a broken filter — "the unrecorded dose
+  is gone" passes if every dose was dropped, and "the recorded one survives" passes if
+  nothing was filtered at all.
   Posts doses and medications — reseed after.
 - `npm run verify:rls` — 28 assertions proving a resident actor cannot read, count or
   write another resident's rows — including their ledger and sign-outs — and that the
