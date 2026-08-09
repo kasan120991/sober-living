@@ -1,7 +1,19 @@
 import { prisma, runInTransaction } from '../db/client.js'
 import { HttpError } from '../middleware/authorize.js'
-import { CHECK_RESIDENT_STATUS, CHECK_STATE, PRESENCE, STAY_STATUS } from '../domain/constants.js'
-import { facilityHourKey, facilityStartOfToday, facilityWallClockToUtc } from '../lib/facilityTime.js'
+import {
+  CHECK_RESIDENT_STATUS,
+  CHECK_STATE,
+  NOTIFICATION_KIND,
+  PRESENCE,
+  STAY_STATUS,
+} from '../domain/constants.js'
+import { notify } from './notify.js'
+import {
+  facilityHourKey,
+  facilityStartOfToday,
+  facilityWallClockToUtc,
+  formatFacilityTime,
+} from '../lib/facilityTime.js'
 import { presenceOf } from './signOuts.js'
 import { passesCovering } from './passes.js'
 
@@ -263,7 +275,7 @@ export async function getCheck(id) {
  */
 export function recordCheck(input, actorId) {
   return runInTransaction(async () => {
-    const { people } = await rosterFor(input.apartmentId)
+    const { apartment, people } = await rosterFor(input.apartmentId)
     const expected = new Set(people.map((p) => p.stayId))
     requireExactCoverage(input.lines, expected, 'The roster changed — reload and record again.')
 
@@ -293,6 +305,39 @@ export function recordCheck(input, actorId) {
       },
       include: WITH_DETAIL,
     })
+
+    // THE ONLY SAFETY EVENT, and the highest-value one in the feature: today a
+    // manager off site learns a resident cannot be found only by opening the
+    // app and looking.
+    //
+    // Its two siblings CANNOT be events, and that is settled rather than
+    // pending: an overdue sign-out and an overdue pass cross their threshold on
+    // the CLOCK with no write at all, so there is nothing to hook a
+    // notification to and this app has no scheduler, deliberately. Both stay
+    // derived — on the dashboard, the sidebar badges and the pill — where they
+    // also clear themselves. See CLAUDE.md module 12.
+    //
+    // NO DEDUPE: it fires again on the next round that still cannot find them.
+    // That is right rather than noisy — an hour later, still missing, IS news,
+    // and a facility that stops being told after the first hour forgets. It is
+    // the dashboard's own rule that hiding a person is what a cap must never
+    // do. And an AMENDMENT does not retract it: somebody was told, and that
+    // happened. The situation clears itself everywhere else, which is exactly
+    // what lets the event be permanent.
+    for (const line of check.residents) {
+      if (line.status !== CHECK_RESIDENT_STATUS.NOT_FOUND) continue
+      const resident = line.stay.resident
+      await notify(NOTIFICATION_KIND.NOT_FOUND_ON_ROUND, {
+        title: `${resident.firstName} ${resident.lastName} was not found on the round`,
+        // The apartment and the time — never the line's `note`, which is free
+        // text about a person.
+        detail: `${apartment.name} · ${formatFacilityTime(check.checkedAt)}`,
+        actorId,
+        entity: 'ApartmentCheckResident',
+        entityId: line.id,
+      })
+    }
+
     return shapeCheck(check)
   })
 }

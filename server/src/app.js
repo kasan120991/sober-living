@@ -31,6 +31,22 @@ import invoicesRouter from './routes/invoices.js'
 import billingRouter from './routes/billing.js'
 import stripeWebhookRouter from './routes/stripeWebhook.js'
 
+/**
+ * Writes that do NOT broadcast, because they change nothing another device
+ * shows. A stated rule rather than a list of special cases.
+ *
+ * `/auth` was the first: login and logout change nothing on another screen,
+ * and broadcasting on login would announce sign-in cadence for no benefit.
+ *
+ * `/notifications/seen` is the second, and it is the one that would have been
+ * a real regression rather than a nicety: marking your own bell read is
+ * per-user state, and the person it belongs to has already updated their own
+ * client from the response. Without this, one person hovering a bell would fan
+ * `changed` out to every device in the building and make every screen refetch
+ * its dashboard.
+ */
+const SILENT_PREFIXES = ['/auth', '/notifications/seen']
+
 export function createApp() {
   const app = express()
 
@@ -61,9 +77,7 @@ export function createApp() {
   // Realtime invalidation: any successful mutation, on any route present or
   // future, tells every connected staff screen to refetch. `finish` fires
   // after the response left, which is after the route awaited its transaction
-  // — a client's refetch can never observe pre-commit state. /auth is skipped:
-  // login and logout change nothing another screen shows, and broadcasting on
-  // login would announce sign-in cadence for no benefit.
+  // — a client's refetch can never observe pre-commit state.
   //
   // req.originalUrl, not req.path: Express rewrites req.path when descending
   // into mounted routers, and at finish time it may be router-relative.
@@ -71,7 +85,7 @@ export function createApp() {
     res.on('finish', () => {
       if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return
       if (res.statusCode >= 400) return
-      if (req.originalUrl.split('?')[0].startsWith('/auth')) return
+      if (SILENT_PREFIXES.some((p) => req.originalUrl.split('?')[0].startsWith(p))) return
       broadcastChanged()
     })
     next()

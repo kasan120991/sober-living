@@ -148,7 +148,7 @@ async function main() {
   // the recording section below clears it — asserting its shape afterwards
   // would silently skip every assertion about it.
   const bellWhileDue = await tech('/notifications')
-  const medItem = bellWhileDue.body.items.find((i) => i.kind === 'MED_PASS_DUE')
+  const medItem = bellWhileDue.body.situations.find((i) => i.kind === 'MED_PASS_DUE')
 
   // ── The board carries no medication ──────────────────────────────────────
   // The privacy boundary this module rests on, asserted against the SERIALISED
@@ -674,7 +674,7 @@ async function main() {
     }
   }
   const bellCleared = await tech('/notifications')
-  !bellCleared.body.items.some((i) => i.kind === 'MED_PASS_DUE')
+  !bellCleared.body.situations.some((i) => i.kind === 'MED_PASS_DUE')
     ? ok('recording every due dose clears the item — nothing stored, nothing stale')
     : bad('bell clear', 'the med item survived every dose being recorded')
 

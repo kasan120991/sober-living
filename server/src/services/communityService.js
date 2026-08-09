@@ -20,13 +20,15 @@
  * Minutes everywhere. Hours are a display unit, parsed once at the route
  * boundary — the ledger's integer-cents reasoning, applied to time.
  */
-import { prisma } from '../db/client.js'
+import { prisma, runInTransaction } from '../db/client.js'
 import { HttpError } from '../middleware/authorize.js'
 import {
   MONTHLY_SERVICE_QUOTA_HOURS,
+  NOTIFICATION_KIND,
   SERVICE_DAYS_PER_MONTH,
   STAY_STATUS,
 } from '../domain/constants.js'
+import { notify } from './notify.js'
 
 /**
  * The pace rule. PURE — no database, and no clock beyond the `dayOfStay` handed
@@ -180,7 +182,14 @@ export async function listEntries(stayId) {
 async function loadStay(stayId) {
   const stay = await prisma.stay.findUnique({
     where: { id: stayId },
-    select: { id: true, status: true },
+    // The resident's name rides along for the notification. One query either
+    // way — this is the dashboard's no-per-row-lookups habit applied to a
+    // single read.
+    select: {
+      id: true,
+      status: true,
+      resident: { select: { firstName: true, lastName: true } },
+    },
   })
   if (!stay) throw new HttpError(404, 'Stay not found')
   return stay
@@ -194,20 +203,38 @@ async function loadStay(stayId) {
  * refusing it would push the hours into a note nobody can total.
  */
 export async function logEntry(input, actorId) {
-  await loadStay(input.stayId)
+  const stay = await loadStay(input.stayId)
 
-  const entry = await prisma.serviceEntry.create({
-    data: {
-      stayId: input.stayId,
-      minutes: input.minutes,
-      workedOn: new Date(`${input.workedOn}T00:00:00.000Z`),
-      location: input.location,
-      supervisorName: input.supervisorName || null,
-      supervisorPhone: input.supervisorPhone || null,
-      note: input.note || null,
-      recordedById: actorId,
-    },
-    include: WITH_PEOPLE,
+  // One transaction with the notification — see services/notify.js.
+  const entry = await runInTransaction(async () => {
+    const row = await prisma.serviceEntry.create({
+      data: {
+        stayId: input.stayId,
+        minutes: input.minutes,
+        workedOn: new Date(`${input.workedOn}T00:00:00.000Z`),
+        location: input.location,
+        supervisorName: input.supervisorName || null,
+        supervisorPhone: input.supervisorPhone || null,
+        note: input.note || null,
+        recordedById: actorId,
+      },
+      include: WITH_PEOPLE,
+    })
+
+    // A NAME AND A COUNT OF HOURS, and nothing else. No location, no `note`,
+    // and above all no `supervisorName` or `supervisorPhone`: a third party's
+    // name and number on a bell read over somebody's shoulder is a disclosure
+    // to a person who is not even in the programme.
+    const hours = row.minutes / 60
+    await notify(NOTIFICATION_KIND.SERVICE_HOURS_LOGGED, {
+      title: `${stay.resident.firstName} ${stay.resident.lastName} logged ${hours} ${hours === 1 ? 'hour' : 'hours'}`,
+      detail: 'Awaiting verification',
+      actorId,
+      entity: 'ServiceEntry',
+      entityId: row.id,
+    })
+
+    return row
   })
   return shape(entry)
 }

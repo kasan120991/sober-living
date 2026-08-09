@@ -219,7 +219,7 @@ async function main() {
 
   const notif = await manager('/notifications')
   const notifIds = new Set(
-    notif.body.items.filter((i) => i.kind === 'URGENT_MAINTENANCE').map((i) => i.id.slice(7)),
+    notif.body.situations.filter((i) => i.kind === 'URGENT_MAINTENANCE').map((i) => i.id.slice(7)),
   )
   notifIds.size === bellIds.size && [...notifIds].every((id) => bellIds.has(id))
     ? ok('every bell item is exactly one row of the shared where')
@@ -241,7 +241,7 @@ async function main() {
   // only way to tell an overdue repair from a merely urgent one was parsing the
   // `detail` sentence. Asserted per item AND in both directions, because "they
   // all say critical" would pass while the distinction was gone.
-  const sevItems = notif.body.items.filter((i) => i.kind === 'URGENT_MAINTENANCE')
+  const sevItems = notif.body.situations.filter((i) => i.kind === 'URGENT_MAINTENANCE')
   sevItems.every((i) =>
     overdueIds.has(i.id.slice(7)) ? i.severity === 'critical' : i.severity === 'warning',
   )

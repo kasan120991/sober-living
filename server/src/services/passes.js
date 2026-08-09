@@ -1,6 +1,12 @@
 import { prisma, runInTransaction } from '../db/client.js'
 import { HttpError } from '../middleware/authorize.js'
-import { PASS_GRACE_MS, PASS_STATUS, STAY_STATUS } from '../domain/constants.js'
+import {
+  NOTIFICATION_KIND,
+  PASS_GRACE_MS,
+  PASS_STATUS,
+  STAY_STATUS,
+} from '../domain/constants.js'
+import { notify } from './notify.js'
 import { facilityWallClockToUtc } from '../lib/facilityTime.js'
 
 /**
@@ -249,7 +255,7 @@ export async function overduePasses(now = new Date()) {
 export async function requestPass(residentId, input, actorId) {
   const stay = await prisma.stay.findFirst({
     where: { residentId, status: STAY_STATUS.ACTIVE },
-    include: { program: true },
+    include: { program: true, resident: NAME },
   })
   const eligibility = passEligibility(stay)
   if (!eligibility.eligible) throw new HttpError(409, eligibility.reason)
@@ -276,15 +282,37 @@ export async function requestPass(residentId, input, actorId) {
     throw new HttpError(409, 'This resident already has a pass covering those dates.')
   }
 
-  return prisma.travelPass.create({
-    data: {
-      stayId: stay.id,
-      destination: input.destination.trim(),
-      purpose: input.purpose?.trim() || null,
-      departAt,
-      returnBy,
-      requestedById: actorId,
-    },
+  // ONE TRANSACTION with the notification. A pass announced on somebody's bell
+  // that then failed to write is a phantom the feed cannot clear, because
+  // events are not derived — see services/notify.js.
+  return runInTransaction(async () => {
+    const pass = await prisma.travelPass.create({
+      data: {
+        stayId: stay.id,
+        destination: input.destination.trim(),
+        purpose: input.purpose?.trim() || null,
+        departAt,
+        returnBy,
+        requestedById: actorId,
+      },
+    })
+
+    // NAMES THE RESIDENT AND THE NIGHTS, AND NOTHING ELSE. Neither `purpose`
+    // nor `destination` crosses, and that is deliberately STRICTER than the
+    // derived PASS_OVERDUE item, which does carry the destination: there,
+    // somebody is out looking for a person and needs a place to start. On a
+    // pass merely submitted, nobody is looking for anybody — and `purpose` is
+    // free text a resident dictated, which can say "my mother's funeral".
+    const nights = Math.max(1, Math.round((returnBy - departAt) / 86_400_000))
+    await notify(NOTIFICATION_KIND.PASS_REQUESTED, {
+      title: `${fullName(stay.resident)} requested a travel pass`,
+      detail: `${nights} ${nights === 1 ? 'night' : 'nights'}`,
+      actorId,
+      entity: 'TravelPass',
+      entityId: pass.id,
+    })
+
+    return pass
   })
 }
 

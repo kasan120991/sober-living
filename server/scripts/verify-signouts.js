@@ -152,7 +152,7 @@ async function main() {
     : bad('pill critical', JSON.stringify(pill))
 
   const bell = (await tech('/notifications')).body
-  const bellItem = bell.items.find((i) => i.kind === 'OVERDUE_SIGN_OUT')
+  const bellItem = bell.situations.find((i) => i.kind === 'OVERDUE_SIGN_OUT')
   bellItem &&
   bellItem.level === 'action' &&
   // The two are a different question and must not collapse: `level` says
@@ -165,7 +165,7 @@ async function main() {
     ? ok('the bell carries the overdue return, with where to start looking')
     : bad('bell item', JSON.stringify(bellItem))
 
-  bell.actionCount === bell.items.filter((i) => i.level === 'action').length
+  bell.actionCount === bell.situations.filter((i) => i.level === 'action').length
     ? ok('the badge counts the actionable items')
     : bad('actionCount', JSON.stringify(bell))
 
@@ -314,9 +314,9 @@ async function main() {
 
   const tashaBack = await tech(`/sign-outs/${tasha.id}/return`, { method: 'POST', body: '{}' })
   const bellAfter = (await tech('/notifications')).body
-  tashaBack.status === 200 && !bellAfter.items.some((i) => i.kind === 'OVERDUE_SIGN_OUT')
+  tashaBack.status === 200 && !bellAfter.situations.some((i) => i.kind === 'OVERDUE_SIGN_OUT')
     ? ok('the bell item vanishes the moment the return is acknowledged — derived, not dismissed')
-    : bad('bell clears', JSON.stringify(bellAfter.items.map((i) => i.kind)))
+    : bad('bell clears', JSON.stringify(bellAfter.situations.map((i) => i.kind)))
 
   const pillAfter = (await tech('/search/status')).body
   pillAfter.level !== 'critical'

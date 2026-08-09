@@ -138,6 +138,32 @@ export const MAINTENANCE_TARGET_MS = Object.freeze({
 })
 
 /**
+ * What kind of thing happened — the event half of the bell. Must match the
+ * `NotificationKind` enum in schema.prisma, and the ROUTE table in
+ * services/notify.js, which decides who each one reaches.
+ *
+ * NOTHING FROM MODULES 5 OR 6 IS HERE and nothing ever should be: a screen
+ * result or a medication on a bell glanced at over a shoulder is exactly the
+ * ambient disclosure module 13 exists to prevent. verify-notifications.js
+ * asserts no kind matches /^MED/.
+ */
+export const NOTIFICATION_KIND = Object.freeze({
+  PASS_REQUESTED: 'PASS_REQUESTED',
+  MAINTENANCE_FILED: 'MAINTENANCE_FILED',
+  SERVICE_HOURS_LOGGED: 'SERVICE_HOURS_LOGGED',
+  PAYMENT_RECEIVED: 'PAYMENT_RECEIVED',
+  INVOICE_SENT: 'INVOICE_SENT',
+  NOT_FOUND_ON_ROUND: 'NOT_FOUND_ON_ROUND',
+})
+
+/** Drives tone and grouping. Coarse on purpose — six kinds, three families. */
+export const NOTIFICATION_CLASS = Object.freeze({
+  REQUEST: 'REQUEST',
+  MONEY: 'MONEY',
+  SAFETY: 'SAFETY',
+})
+
+/**
  * Models whose every read and write is written to the audit log.
  *
  * Named for what it does, not for what it holds: the first five carry resident
@@ -168,6 +194,9 @@ export const AUDITED_MODELS = Object.freeze([
   'TravelPass',
   'Invoice',
   'InvoiceLine',
+  // An event's stored title can name a resident, so reading the feed is a
+  // read of resident data and is audited like any other.
+  'Notification',
   // Facility configuration
   'Apartment',
   'Bed',

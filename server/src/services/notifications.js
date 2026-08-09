@@ -287,9 +287,94 @@ export async function listNotifications() {
   items.sort((a, b) => rank[a.level] - rank[b.level] || new Date(a.at) - new Date(b.at))
 
   return {
-    items,
-    // Only the actionable ones drive the badge. A bed out of service is worth
-    // seeing but is not a number anyone should feel behind on.
+    // RENAMED from `items` on 2026-08-09, deliberately and with no alias: the
+    // bell no longer renders this list — it renders `events` — so leaving the
+    // key called `items` would teach the next reader something false. These are
+    // now read by the sidebar count badges and by nothing else in the UI.
+    situations: items,
+    // Only the actionable ones. This drove the bell's badge until the bell
+    // became an event feed; it is kept on the wire because the browser check
+    // that the sidebar badges agree with the derivation is anchored to it.
     actionCount: items.filter((i) => i.level === LEVEL.ACTION).length,
   }
+}
+
+// ── The event feed ──────────────────────────────────────────────────────────
+
+/**
+ * How many events the feed carries, and how far back it looks.
+ *
+ * TWO BOUNDS, because they answer different questions. The window keeps a bell
+ * opened after a fortnight away from being a history lesson; the limit keeps
+ * one bad afternoon from returning five hundred rows to a phone. Neither is a
+ * retention rule — the table itself is never pruned (see the migration).
+ */
+const FEED_LIMIT = 30
+const FEED_WINDOW_MS = 14 * 24 * 60 * 60_000
+
+/**
+ * The events this session may see, newest first, plus how many are unseen.
+ *
+ * THE ROLE FILTER IS A `where` CLAUSE, and that is the whole architecture of
+ * this feature. The socket fan-out carries `{ at }` and reaches every staff
+ * device identically; the difference between what a tech and a manager can see
+ * is decided HERE, once per request, under the same session the rest of the API
+ * uses. That is what answers module 12's fan-out warning without opening the
+ * payload — see services/notify.js.
+ *
+ * `residentId` is OR'd in for the portal. It matches nothing today, because no
+ * RESIDENT account can be created and every staff event leaves it null.
+ */
+export async function feedFor(session) {
+  const since = new Date(Date.now() - FEED_WINDOW_MS)
+  const where = {
+    at: { gte: since },
+    OR: [
+      { roles: { has: session.role } },
+      ...(session.residentId ? [{ residentId: session.residentId }] : []),
+    ],
+  }
+
+  const [events, seen] = await Promise.all([
+    prisma.notification.findMany({ where, orderBy: { at: 'desc' }, take: FEED_LIMIT }),
+    prisma.notificationSeen.findUnique({ where: { userId: session.userId } }),
+  ])
+
+  const seenAt = seen?.seenAt ?? null
+  return {
+    events: events.map((e) => ({
+      id: e.id,
+      at: e.at,
+      kind: e.kind,
+      class: e.class,
+      title: e.title,
+      detail: e.detail,
+      to: e.to,
+      // The client's ONLY use for this: suppressing a toast for your own act.
+      // It is not rendered.
+      actorId: e.actorId,
+    })),
+    // Counted over the SAME bounded window the feed returns, so the badge can
+    // never claim more than the panel can show.
+    unseenCount: seenAt ? events.filter((e) => e.at > seenAt).length : events.length,
+    seenAt,
+  }
+}
+
+/**
+ * Move this user's watermark to now.
+ *
+ * FORWARD ONLY. Two tabs racing — one opened before an event landed, one after
+ * — would otherwise rewind it and re-toast everything in between. Postgres
+ * decides with GREATEST rather than the application read-modify-writing, so two
+ * concurrent calls cannot interleave into a rewind.
+ */
+export async function markSeen(userId) {
+  const now = new Date()
+  await prisma.$executeRaw`
+    INSERT INTO "notification_seen" ("userId", "seenAt") VALUES (${userId}, ${now})
+    ON CONFLICT ("userId") DO UPDATE
+      SET "seenAt" = GREATEST("notification_seen"."seenAt", EXCLUDED."seenAt")`
+  const row = await prisma.notificationSeen.findUnique({ where: { userId } })
+  return { seenAt: row?.seenAt ?? now, unseenCount: 0 }
 }

@@ -8,8 +8,10 @@ import {
   MAINTENANCE_PRIORITY,
   MAINTENANCE_STATUS,
   MAINTENANCE_TARGET_MS,
+  NOTIFICATION_KIND,
   STAFF_ROLE,
 } from '../domain/constants.js'
+import { notify } from './notify.js'
 
 /**
  * A request's derived state. Frozen constant, deliberately NOT a schema enum —
@@ -262,9 +264,33 @@ export async function createRequest({ apartmentId, title, description, priority 
   const apartment = await prisma.apartment.findUnique({ where: { id: apartmentId } })
   if (!apartment) throw new HttpError(404, 'Apartment not found')
 
-  const created = await prisma.maintenanceRequest.create({
-    data: { apartmentId, title, description, priority, reportedById: actorId },
-    include: WITH_PEOPLE,
+  // One transaction with the notification — see services/notify.js.
+  const created = await runInTransaction(async () => {
+    const row = await prisma.maintenanceRequest.create({
+      data: { apartmentId, title, description, priority, reportedById: actorId },
+      include: WITH_PEOPLE,
+    })
+
+    // THE REQUEST'S OWN TITLE CROSSES, and it is the one piece of human free
+    // text in the whole feed that does. The rule it satisfies: free text may
+    // cross when it is about a UNIT and never about a PERSON. A repair is
+    // about a unit — and there is direct precedent, since the derived
+    // URGENT_MAINTENANCE item has always put r.title on the bell.
+    await notify(NOTIFICATION_KIND.MAINTENANCE_FILED, {
+      title: row.title,
+      // Priority is named only when it is URGENT, which is the wording the
+      // derived URGENT_MAINTENANCE item already uses. "Apt 12 · Low" is a
+      // detail line that says nothing.
+      detail:
+        row.priority === MAINTENANCE_PRIORITY.URGENT
+          ? `${apartment.name} · Urgent`
+          : apartment.name,
+      actorId,
+      entity: 'MaintenanceRequest',
+      entityId: row.id,
+    })
+
+    return row
   })
   return shapeRequest(created)
 }

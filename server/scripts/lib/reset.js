@@ -42,7 +42,11 @@ export async function resetFacilityData(prisma, { quiet = false } = {}) {
     // maintenance_events joins the TRUNCATE list for the same reason as the
     // others: its append-only trigger refuses DELETE even to the owner, and it
     // references maintenance_requests, so it must clear before them.
-    'TRUNCATE "invoice_lines", "invoices", "stripe_events", "drug_screens", "med_logs", "medications", "apartment_check_residents", "apartment_checks", "maintenance_events", "service_entries", "ledger_entries", "bed_assignments", "sessions", "audit_log" RESTART IDENTITY',
+    // notifications leads for that same reason — its trigger refused the
+    // owner's DELETE the first time this ran — and it references residents and
+    // users, so it must clear before both. notification_seen rides with it: it
+    // is DELETE-able, but the pair belongs together and it references users.
+    'TRUNCATE "notifications", "notification_seen", "invoice_lines", "invoices", "stripe_events", "drug_screens", "med_logs", "medications", "apartment_check_residents", "apartment_checks", "maintenance_events", "service_entries", "ledger_entries", "bed_assignments", "sessions", "audit_log" RESTART IDENTITY',
   )
 
   // The schedule, in foreign-key order and all of it BEFORE stays, which the
