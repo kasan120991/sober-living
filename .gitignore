@@ -18,6 +18,7 @@ server/src/generated/
 .playwright-mcp/
 *.png
 !public/**/*.png
+!docs/screenshots/*.png
 
 # Nuxt
 .data/

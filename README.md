@@ -11,9 +11,52 @@ the fact**, because every record is potential evidence for a licensing audit or 
 officer. Records are append-only in spirit: corrections are new entries with a reason,
 never silent overwrites.
 
+![The dashboard: a resident the last round could not account for, four status figures, a
+needs-attention queue, and panels for today's schedule, who is signed out, and what is
+owed](docs/screenshots/dashboard.png)
+
 > **Architecture, the domain glossary, and the reasoning behind every decision live in
 > [CLAUDE.md](CLAUDE.md).** This file only gets you running. When the two disagree,
 > CLAUDE.md wins.
+
+## Screens
+
+The dashboard above is the landing page, and it leads with the loudest true thing — a
+resident the last round could not find — before anything about money.
+
+| | |
+|---|---|
+| <img src="docs/screenshots/census.png" alt="The census board: bed tiles across two apartments, one bed free, one out of service, one resident overdue back" width="680"> | <img src="docs/screenshots/round.png" alt="An hourly round in progress on a phone: one resident pre-accounted by a sign-out, one being marked present" width="240"> |
+| **The census board.** Absence is what has to read at a glance: a bed free, a bed out of service carrying its reason, somebody overdue back. A tile with no chip on it is fine — which is what keeps a quiet house looking quiet. | **An hourly round, on the phone it is walked with.** Tasha is already accounted for by her open sign-out — the round only asks about whoever is left. |
+
+Every name is seed data.
+
+## The parts worth reading
+
+For anyone evaluating the code rather than running it, these are the decisions the domain forced.
+
+**Corrections are new rows.** A licensing auditor or a probation officer may eventually read these
+records, so history can't be editable. A correction is an append with a reason attached, never an
+overwrite — which means the schema can answer "what did staff believe at 9pm, and when did that
+change?" long after the fact.
+
+**Row-level security, the audit log and soft deletes live at the database and Prisma-client level,
+not in route handlers.** Per-route checks are only as good as the least careful endpoint anyone adds
+later. Pushing them down means a new route can't forget them.
+
+**The resident app doesn't exist yet, on purpose.** `client/` is deliberately empty and separate
+from `admin/` so that no staff code — and no staff-only data shape — can ever end up in a resident's
+bundle. The boundary was drawn before there was anything to put on the other side of it.
+
+**There is no test framework, and that's a decision rather than a gap.** Each module ships assertion
+scripts that run against a live database and check the invariants the domain actually depends on:
+cohort separation, append-only history, RLS, derived states. Mocked unit tests would have verified
+that the code does what it says; these verify that the database can't be talked into an illegal
+state. See [Verification](#verification).
+
+**Compliance shapes the logging, not just the auth.** 42 CFR Part 2 treats the mere fact of someone's
+enrollment as protected, which rules out names in logs, URLs, analytics, and third-party services —
+including LLMs. Log ids, never identities.
 
 ## Stack
 
