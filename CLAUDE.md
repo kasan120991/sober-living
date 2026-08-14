@@ -3,8 +3,23 @@
 Operations management app for a sober living facility. Replaces the paper binders,
 whiteboards, and group texts that a house currently runs on.
 
-**Status:** Greenfield. No code written yet. Nothing in this file is implemented unless
-a section says so.
+**Status:** all fifteen modules below are built — module 11's ledger partly, with the
+remaining pieces named where they belong. Where a section says **Still to build**, it
+means it.
+
+**What this file is.** The durable record of every design decision and the reasoning
+behind it, written for an AI pair-programmer working in this repo — which is why it is
+addressed in the imperative, and why it argues with its own earlier self instead of
+quietly overwriting it. Rejected options are kept rather than deleted, because the reason
+something was *not* built is the part that gets lost first. [README.md](README.md) is the
+short version, and the one that gets you running.
+
+**The facility is a composite, and every name in here is invented.** This is a spec build
+modelled on how sober living houses actually operate — not a deployment holding anyone's
+records. Every resident, staff member, apartment and balance comes from
+`server/scripts/seed.js`, and the policy figures — the $50 lab fee, 20 service hours a
+month, net-3 invoice terms — belong to that modelled house. They are written as firm
+decisions because reasoning needs something concrete to bite on.
 
 ---
 
@@ -2680,10 +2695,12 @@ downstream. It is a disclosure whether or not a card is ever charged.
 **That paragraph has not changed and does not need to. What changed is the PERMISSION.**
 This section used to say "send no resident name, email, phone or date of birth" and
 "whether any of this is permissible without written consent is a question for whoever
-advises the facility." It said that because consent was **unresolved**. On **2026-08-06 the
-facility's advisor cleared name and email**, and module 11 was built on that clearance. The
-rule is rewritten rather than quietly broken, and it is dated so it can be revisited if the
-advice changes.
+advises the facility." It said that because consent was **unresolved**. Module 11 is built
+on the modelled premise that **name and email are cleared for the processor and nothing
+else is** — a premise a real deployment would have to get in writing from whoever advises
+the facility, before a single Customer is created. The rule is rewritten rather than
+quietly broken, and the narrow surface below is what that premise buys: widen it and the
+reasoning has to be redone, not merely extended.
 
 **Permitted to Stripe, and nothing beyond it:**
 
