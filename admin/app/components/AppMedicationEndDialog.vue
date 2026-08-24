@@ -51,6 +51,9 @@ async function submit() {
     busy.value = false
   }
 }
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('lastDay', 'reason')
 </script>
 
 <template>
@@ -70,26 +73,22 @@ async function submit() {
           <AlertDescription>{{ error }}</AlertDescription>
         </Alert>
 
-        <AppField
-          v-slot="{ id }"
-          label="Last day"
-          description="Cannot be earlier than a dose already recorded."
-        >
-          <Input :id="id" v-model="endsOn" type="date" />
-        </AppField>
+        <Field>
+          <FieldLabel :for="ids.lastDay">Last day</FieldLabel>
+          <Input :id="ids.lastDay" v-model="endsOn" type="date" />
+          <FieldDescription>Cannot be earlier than a dose already recorded.</FieldDescription>
+        </Field>
 
-        <AppField
-          v-slot="{ id }"
-          label="Reason"
-          description="Required — this is what an auditor asks about."
-        >
+        <Field>
+          <FieldLabel :for="ids.reason">Reason</FieldLabel>
           <Input
-            :id="id"
+            :id="ids.reason"
             v-model="reason"
             placeholder="Prescriber stopped it at the 30-day review."
             required
           />
-        </AppField>
+          <FieldDescription>Required — this is what an auditor asks about.</FieldDescription>
+        </Field>
 
         <DialogFooter class="border-t pt-4">
           <Button type="button" variant="ghost" @click="emit('update:open', false)">Cancel</Button>

@@ -291,6 +291,9 @@ async function submit() {
 }
 
 defineExpose({ submit, valid, pending })
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('description', 'field', 'lastDate', 'location', 'minutes', 'onTheseDays', 'repeats', 'startsAt', 'title')
 </script>
 
 <template>
@@ -309,16 +312,19 @@ defineExpose({ submit, valid, pending })
           <h2 class="text-muted-foreground text-[10.5px] font-semibold tracking-[0.1em] uppercase">
             The event
           </h2>
-          <AppField v-slot="{ id }" label="Title" required>
-            <Input :id="id" v-model="form.title" placeholder="House Meeting" required />
-          </AppField>
+          <Field>
+            <FieldLabel :for="ids.title">Title<span class="text-destructive" aria-hidden="true">*</span></FieldLabel>
+            <Input :id="ids.title" v-model="form.title" placeholder="House Meeting" required />
+          </Field>
           <div class="flex flex-col gap-4 sm:flex-row">
-            <AppField v-slot="{ id }" label="Location" class="flex-1">
-              <Input :id="id" v-model="form.location" placeholder="Common room" />
-            </AppField>
-            <AppField v-slot="{ id }" label="Description" class="flex-1">
-              <Input :id="id" v-model="form.description" placeholder="Optional" />
-            </AppField>
+            <Field class="flex-1">
+              <FieldLabel :for="ids.location">Location</FieldLabel>
+              <Input :id="ids.location" v-model="form.location" placeholder="Common room" />
+            </Field>
+            <Field class="flex-1">
+              <FieldLabel :for="ids.description">Description</FieldLabel>
+              <Input :id="ids.description" v-model="form.description" placeholder="Optional" />
+            </Field>
           </div>
         </section>
 
@@ -344,18 +350,20 @@ defineExpose({ submit, valid, pending })
           </Alert>
 
           <div class="grid gap-4 sm:grid-cols-3">
-            <AppField v-slot="{ id }" label="Starts at">
+            <Field>
+              <FieldLabel :for="ids.startsAt">Starts at</FieldLabel>
               <Input
-                :id="id"
+                :id="ids.startsAt"
                 v-model="form.startsAtLocal"
                 type="time"
                 required
                 :disabled="shapeLocked"
               />
-            </AppField>
-            <AppField v-slot="{ id }" label="Minutes">
+            </Field>
+            <Field>
+              <FieldLabel :for="ids.minutes">Minutes</FieldLabel>
               <Input
-                :id="id"
+                :id="ids.minutes"
                 v-model.number="form.durationMinutes"
                 type="number"
                 min="1"
@@ -363,8 +371,9 @@ defineExpose({ submit, valid, pending })
                 required
                 :disabled="shapeLocked"
               />
-            </AppField>
-            <AppField label="Repeats">
+            </Field>
+            <Field>
+              <FieldLabel :for="ids.repeats">Repeats</FieldLabel>
               <Select v-model="form.recurrence" :disabled="shapeLocked">
                 <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -372,18 +381,11 @@ defineExpose({ submit, valid, pending })
                   <SelectItem :value="RECURRENCE.ONCE">Once</SelectItem>
                 </SelectContent>
               </Select>
-            </AppField>
+            </Field>
           </div>
 
-          <AppField
-            v-if="form.recurrence === RECURRENCE.WEEKLY"
-            label="On these days"
-            :description="
-              shapeLocked
-                ? 'Fixed — this series has a record against it.'
-                : 'Mon/Wed/Fri is one event on three days, not three events.'
-            "
-          >
+          <Field v-if="form.recurrence === RECURRENCE.WEEKLY">
+            <FieldLabel :for="ids.onTheseDays">On these days</FieldLabel>
             <div class="flex flex-wrap gap-1.5">
               <button
                 v-for="d in WEEKDAYS"
@@ -403,29 +405,29 @@ defineExpose({ submit, valid, pending })
                 {{ d.label }}
               </button>
             </div>
-          </AppField>
+            <FieldDescription>{{
+              shapeLocked
+                ? 'Fixed — this series has a record against it.'
+                : 'Mon/Wed/Fri is one event on three days, not three events.'
+             }}</FieldDescription>
+          </Field>
 
           <div class="grid gap-4 sm:grid-cols-2">
-            <AppField
-              v-slot="{ id }"
-              :label="form.recurrence === RECURRENCE.ONCE ? 'Date' : 'First date'"
-            >
+            <Field>
+              <FieldLabel :for="ids.field">{{ form.recurrence === RECURRENCE.ONCE ? 'Date' : 'First date' }}</FieldLabel>
               <Input
-                :id="id"
+                :id="ids.field"
                 v-model="form.startsOn"
                 type="date"
                 required
                 :disabled="shapeLocked"
               />
-            </AppField>
-            <AppField
-              v-if="form.recurrence === RECURRENCE.WEEKLY"
-              v-slot="{ id }"
-              label="Last date"
-              description="Leave blank to run until it is ended."
-            >
-              <Input :id="id" v-model="form.endsOn" type="date" />
-            </AppField>
+            </Field>
+            <Field v-if="form.recurrence === RECURRENCE.WEEKLY">
+              <FieldLabel :for="ids.lastDate">Last date</FieldLabel>
+              <Input :id="ids.lastDate" v-model="form.endsOn" type="date" />
+              <FieldDescription>Leave blank to run until it is ended.</FieldDescription>
+            </Field>
           </div>
 
           <!-- This sentence is what pays for moving the cohort switch away from

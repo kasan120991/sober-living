@@ -52,6 +52,9 @@ async function submit() {
     pending.value = false
   }
 }
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('reason', 'type')
 </script>
 
 <template>
@@ -67,7 +70,8 @@ async function submit() {
           <AlertDescription>{{ error }}</AlertDescription>
         </Alert>
 
-        <AppField label="Type">
+        <Field>
+          <FieldLabel :for="ids.type">Type</FieldLabel>
           <Select v-model="form.dischargeType">
             <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -76,15 +80,13 @@ async function submit() {
               </SelectItem>
             </SelectContent>
           </Select>
-        </AppField>
+        </Field>
 
-        <AppField
-          v-slot="{ id }"
-          label="Reason"
-          description="Required. This is the record that explains the discharge to a referral source or an audit."
-        >
-          <Textarea :id="id" v-model="form.dischargeReason" :rows="3" />
-        </AppField>
+        <Field>
+          <FieldLabel :for="ids.reason">Reason</FieldLabel>
+          <Textarea :id="ids.reason" v-model="form.dischargeReason" :rows="3" />
+          <FieldDescription>Required. This is the record that explains the discharge to a referral source or an audit.</FieldDescription>
+        </Field>
 
         <p class="text-muted-foreground text-xs">
           This cannot be undone. A mistake is corrected by a new intake, not by editing

@@ -77,6 +77,9 @@ async function submit() {
     pending.value = false
   }
 }
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('resident')
 </script>
 
 <template>
@@ -92,10 +95,8 @@ async function submit() {
           <AlertDescription>{{ error }}</AlertDescription>
         </Alert>
 
-        <AppField
-          label="Resident"
-          :description="`${cohortLabel} awaiting a bed. Assigning opens a new bed-history row — the board updates for everyone.`"
-        >
+        <Field>
+          <FieldLabel :for="ids.resident">Resident</FieldLabel>
           <Select v-model="chosen" :disabled="!candidates.length">
             <SelectTrigger class="w-full">
               <SelectValue placeholder="Select a resident" />
@@ -106,7 +107,8 @@ async function submit() {
               </SelectItem>
             </SelectContent>
           </Select>
-        </AppField>
+          <FieldDescription>{{ `${cohortLabel} awaiting a bed. Assigning opens a new bed-history row — the board updates for everyone.` }}</FieldDescription>
+        </Field>
 
         <p v-if="wentStale" class="text-warning text-sm">
           They have since been given a bed. Pick someone else, or close this.

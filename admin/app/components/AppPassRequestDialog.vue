@@ -101,6 +101,9 @@ async function submit() {
     busy.value = false
   }
 }
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('at', 'at2', 'backBy', 'destination', 'leaves', 'purpose', 'resident')
 </script>
 
 <template>
@@ -119,7 +122,8 @@ async function submit() {
           <AlertDescription>{{ error }}</AlertDescription>
         </Alert>
 
-        <AppField v-if="!residentId" label="Resident" required>
+        <Field v-if="!residentId">
+          <FieldLabel :for="ids.resident">Resident<span class="text-destructive" aria-hidden="true">*</span></FieldLabel>
           <Select v-model="form.residentId">
             <SelectTrigger class="w-full"><SelectValue placeholder="Who is going?" /></SelectTrigger>
             <SelectContent>
@@ -128,7 +132,7 @@ async function submit() {
               </SelectItem>
             </SelectContent>
           </Select>
-        </AppField>
+        </Field>
         <p v-else class="text-muted-foreground text-sm">For {{ residentName }}.</p>
 
         <!-- Shown BEFORE the form is filled in, so nobody types a destination
@@ -137,29 +141,36 @@ async function submit() {
           <AlertDescription>{{ eligibility.reason }}</AlertDescription>
         </Alert>
 
-        <AppField v-slot="{ id }" label="Destination">
-          <Input :id="id" v-model="form.destination" placeholder="Sister's wedding — Macon, GA" required />
-        </AppField>
+        <Field>
+          <FieldLabel :for="ids.destination">Destination</FieldLabel>
+          <Input :id="ids.destination" v-model="form.destination" placeholder="Sister's wedding — Macon, GA" required />
+        </Field>
 
-        <AppField v-slot="{ id }" label="Purpose" description="Optional.">
-          <Input :id="id" v-model="form.purpose" placeholder="Family event" />
-        </AppField>
+        <Field>
+          <FieldLabel :for="ids.purpose">Purpose</FieldLabel>
+          <Input :id="ids.purpose" v-model="form.purpose" placeholder="Family event" />
+          <FieldDescription>Optional.</FieldDescription>
+        </Field>
 
         <div class="flex gap-3">
-          <AppField v-slot="{ id }" label="Leaves" class="flex-1">
-            <Input :id="id" v-model="form.departDate" type="date" required />
-          </AppField>
-          <AppField v-slot="{ id }" label="At" class="w-32">
-            <Input :id="id" v-model="form.departTime" type="time" required />
-          </AppField>
+          <Field class="flex-1">
+            <FieldLabel :for="ids.leaves">Leaves</FieldLabel>
+            <Input :id="ids.leaves" v-model="form.departDate" type="date" required />
+          </Field>
+          <Field class="w-32">
+            <FieldLabel :for="ids.at">At</FieldLabel>
+            <Input :id="ids.at" v-model="form.departTime" type="time" required />
+          </Field>
         </div>
         <div class="flex gap-3">
-          <AppField v-slot="{ id }" label="Back by" class="flex-1">
-            <Input :id="id" v-model="form.returnDate" type="date" required />
-          </AppField>
-          <AppField v-slot="{ id }" label="At" class="w-32">
-            <Input :id="id" v-model="form.returnTime" type="time" required />
-          </AppField>
+          <Field class="flex-1">
+            <FieldLabel :for="ids.backBy">Back by</FieldLabel>
+            <Input :id="ids.backBy" v-model="form.returnDate" type="date" required />
+          </Field>
+          <Field class="w-32">
+            <FieldLabel :for="ids.at2">At</FieldLabel>
+            <Input :id="ids.at2" v-model="form.returnTime" type="time" required />
+          </Field>
         </div>
 
         <p class="text-muted-foreground text-xs">

@@ -23,6 +23,9 @@ async function onSubmit() {
     pending.value = false
   }
 }
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('email', 'password')
 </script>
 
 <template>
@@ -46,27 +49,29 @@ async function onSubmit() {
         </Alert>
 
         <form class="flex flex-col gap-4" @submit.prevent="onSubmit">
-          <AppField v-slot="{ id }" label="Email">
+          <Field>
+            <FieldLabel :for="ids.email">Email</FieldLabel>
             <Input
-              :id="id"
+              :id="ids.email"
               v-model="email"
               type="email"
               autocomplete="username"
               placeholder="you@facility.org"
               required
             />
-          </AppField>
+          </Field>
 
-          <AppField v-slot="{ id }" label="Password">
+          <Field>
+            <FieldLabel :for="ids.password">Password</FieldLabel>
             <Input
-              :id="id"
+              :id="ids.password"
               v-model="password"
               type="password"
               autocomplete="current-password"
               placeholder="••••••••••"
               required
             />
-          </AppField>
+          </Field>
 
           <Button type="submit" :disabled="pending" class="w-full">
             {{ pending ? 'Signing in…' : 'Sign in' }}

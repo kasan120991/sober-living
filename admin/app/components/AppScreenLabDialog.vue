@@ -71,6 +71,9 @@ async function submit() {
     pending.value = false
   }
 }
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('confirmedSubstances', 'labReference', 'whatTheLabReported')
 </script>
 
 <template>
@@ -89,7 +92,8 @@ async function submit() {
       </Alert>
 
       <div class="flex flex-col gap-3">
-        <AppField label="What the lab reported">
+        <Field>
+          <FieldLabel :for="ids.whatTheLabReported">What the lab reported</FieldLabel>
           <div class="flex flex-wrap gap-1.5">
             <button
               v-for="r in LAB_RESULTS"
@@ -102,9 +106,10 @@ async function submit() {
               {{ humanEnum(r) }}
             </button>
           </div>
-        </AppField>
+        </Field>
 
-        <AppField v-if="isPositive" label="Confirmed substances">
+        <Field v-if="isPositive">
+          <FieldLabel :for="ids.confirmedSubstances">Confirmed substances</FieldLabel>
           <div class="flex flex-wrap gap-1.5">
             <button
               v-for="s in SUBSTANCES"
@@ -117,11 +122,13 @@ async function submit() {
               {{ humanEnum(s) }}
             </button>
           </div>
-        </AppField>
+        </Field>
 
-        <AppField v-slot="{ id }" label="Lab reference" description="Optional.">
-          <Input :id="id" v-model="labReference" maxlength="80" />
-        </AppField>
+        <Field>
+          <FieldLabel :for="ids.labReference">Lab reference</FieldLabel>
+          <Input :id="ids.labReference" v-model="labReference" maxlength="80" />
+          <FieldDescription>Optional.</FieldDescription>
+        </Field>
 
         <p class="text-muted-foreground text-xs">
           If the lab clears a resident who paid, this flags it for review — no credit is posted

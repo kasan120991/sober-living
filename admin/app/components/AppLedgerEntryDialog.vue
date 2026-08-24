@@ -92,6 +92,9 @@ async function submit() {
     busy.value = false
   }
 }
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('amount', 'date', 'description', 'for', 'resident', 'type')
 </script>
 
 <template>
@@ -114,7 +117,8 @@ async function submit() {
           <AlertDescription>{{ error }}</AlertDescription>
         </Alert>
 
-        <AppField v-if="!residentId" label="Resident" required>
+        <Field v-if="!residentId">
+          <FieldLabel :for="ids.resident">Resident<span class="text-destructive" aria-hidden="true">*</span></FieldLabel>
           <Select v-model="pickedResidentId" required>
             <SelectTrigger class="w-full">
               <SelectValue placeholder="Whose ledger?" />
@@ -125,10 +129,11 @@ async function submit() {
               </SelectItem>
             </SelectContent>
           </Select>
-        </AppField>
+        </Field>
 
         <div class="flex gap-3">
-          <AppField label="Type" class="flex-1">
+          <Field class="flex-1">
+            <FieldLabel :for="ids.type">Type</FieldLabel>
             <Select v-model="form.type">
               <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -137,9 +142,10 @@ async function submit() {
                 </SelectItem>
               </SelectContent>
             </Select>
-          </AppField>
+          </Field>
 
-          <AppField v-if="form.type === 'CHARGE'" label="For" class="flex-1">
+          <Field v-if="form.type === 'CHARGE'" class="flex-1">
+            <FieldLabel :for="ids.for">For</FieldLabel>
             <Select v-model="form.category">
               <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -148,30 +154,27 @@ async function submit() {
                 </SelectItem>
               </SelectContent>
             </Select>
-          </AppField>
+          </Field>
         </div>
 
         <div class="flex gap-3">
-          <AppField
-            v-slot="{ id }"
-            label="Amount"
-            class="flex-1"
-            description="Dollars, e.g. 650 or 20.50"
-          >
-            <Input :id="id" v-model="form.amount" inputmode="decimal" placeholder="650.00" required />
-          </AppField>
-          <AppField v-slot="{ id }" label="Date" class="flex-1" description="When it applies.">
-            <Input :id="id" v-model="form.occurredAt" type="date" />
-          </AppField>
+          <Field class="flex-1">
+            <FieldLabel :for="ids.amount">Amount</FieldLabel>
+            <Input :id="ids.amount" v-model="form.amount" inputmode="decimal" placeholder="650.00" required />
+            <FieldDescription>Dollars, e.g. 650 or 20.50</FieldDescription>
+          </Field>
+          <Field class="flex-1">
+            <FieldLabel :for="ids.date">Date</FieldLabel>
+            <Input :id="ids.date" v-model="form.occurredAt" type="date" />
+            <FieldDescription>When it applies.</FieldDescription>
+          </Field>
         </div>
 
-        <AppField
-          v-slot="{ id }"
-          label="Description"
-          description="What this is for. It appears on the resident's ledger."
-        >
-          <Input :id="id" v-model="form.description" placeholder="Rent 2026-08" required />
-        </AppField>
+        <Field>
+          <FieldLabel :for="ids.description">Description</FieldLabel>
+          <Input :id="ids.description" v-model="form.description" placeholder="Rent 2026-08" required />
+          <FieldDescription>What this is for. It appears on the resident's ledger.</FieldDescription>
+        </Field>
 
         <!-- Append-only is a property of the record, not a technicality — say so
              where someone is about to write one. -->

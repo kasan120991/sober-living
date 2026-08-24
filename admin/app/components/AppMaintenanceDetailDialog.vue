@@ -116,6 +116,9 @@ function handOff(event, payload) {
 }
 
 const moved = computed(() => form.apartmentId && form.apartmentId !== r.value?.apartmentId)
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('apartment', 'details', 'whatIsWrong')
 </script>
 
 <template>
@@ -123,6 +126,9 @@ const moved = computed(() => form.apartmentId && form.apartmentId !== r.value?.a
     <DialogContent v-if="r" class="sm:max-w-[560px]">
       <DialogHeader>
         <DialogTitle class="pe-9">{{ mode === 'edit' ? 'Edit request' : r.title }}</DialogTitle>
+        <DialogDescription>
+          {{ mode === 'edit' ? 'Title, description and which apartment it belongs to.' : r.apartmentName }}
+        </DialogDescription>
       </DialogHeader>
 
       <Alert v-if="error" variant="destructive">
@@ -198,26 +204,27 @@ const moved = computed(() => form.apartmentId && form.apartmentId !== r.value?.a
 
       <!-- ── Edit ────────────────────────────────────────────────────────── -->
       <form v-else class="flex flex-col gap-4" @submit.prevent="save">
-        <AppField v-slot="{ id }" label="What is wrong">
-          <Input :id="id" v-model="form.title" />
-        </AppField>
+        <Field>
+          <FieldLabel :for="ids.whatIsWrong">What is wrong</FieldLabel>
+          <Input :id="ids.whatIsWrong" v-model="form.title" />
+        </Field>
 
-        <AppField v-slot="{ id }" label="Details" description="Optional.">
-          <Textarea :id="id" v-model="form.description" :rows="3" />
-        </AppField>
+        <Field>
+          <FieldLabel :for="ids.details">Details</FieldLabel>
+          <Textarea :id="ids.details" v-model="form.description" :rows="3" />
+          <FieldDescription>Optional.</FieldDescription>
+        </Field>
 
-        <AppField
-          v-slot="{ id }"
-          label="Apartment"
-          description="Only for a request filed against the wrong unit — it moves out of one apartment's history and into another's."
-        >
-          <Select :id="id" v-model="form.apartmentId">
+        <Field>
+          <FieldLabel :for="ids.apartment">Apartment</FieldLabel>
+          <Select :id="ids.apartment" v-model="form.apartmentId">
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem v-for="a in apartments" :key="a.id" :value="a.id">{{ a.name }}</SelectItem>
             </SelectContent>
           </Select>
-        </AppField>
+          <FieldDescription>Only for a request filed against the wrong unit — it moves out of one apartment's history and into another's.</FieldDescription>
+        </Field>
 
         <p v-if="moved" class="text-warning text-[12.5px]">
           This will move the request off {{ r.apartmentName }}.

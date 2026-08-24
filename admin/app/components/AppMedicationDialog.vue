@@ -152,6 +152,9 @@ async function submit() {
     busy.value = false
   }
 }
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('dose', 'instructions', 'name', 'prescriber', 'starts', 'times')
 </script>
 
 <template>
@@ -171,22 +174,22 @@ async function submit() {
         </Alert>
 
         <div class="flex gap-3">
-          <AppField v-slot="{ id }" label="Name" class="flex-1">
-            <Input :id="id" v-model="form.name" placeholder="Sertraline" required />
-          </AppField>
-          <AppField
-            v-slot="{ id }"
-            label="Dose"
-            class="flex-1"
-            description="As written on the label."
-          >
-            <Input :id="id" v-model="form.dosage" placeholder="50 mg, 1 tablet" required />
-          </AppField>
+          <Field class="flex-1">
+            <FieldLabel :for="ids.name">Name</FieldLabel>
+            <Input :id="ids.name" v-model="form.name" placeholder="Sertraline" required />
+          </Field>
+          <Field class="flex-1">
+            <FieldLabel :for="ids.dose">Dose</FieldLabel>
+            <Input :id="ids.dose" v-model="form.dosage" placeholder="50 mg, 1 tablet" required />
+            <FieldDescription>As written on the label.</FieldDescription>
+          </Field>
         </div>
 
-        <AppField v-slot="{ id }" label="Instructions" description="Optional.">
-          <Input :id="id" v-model="form.instructions" placeholder="With food" />
-        </AppField>
+        <Field>
+          <FieldLabel :for="ids.instructions">Instructions</FieldLabel>
+          <Input :id="ids.instructions" v-model="form.instructions" placeholder="With food" />
+          <FieldDescription>Optional.</FieldDescription>
+        </Field>
 
         <!-- Scheduled vs as-needed. The one control whose effect is another
              control's contents, so it sits directly above the times. -->
@@ -200,11 +203,8 @@ async function submit() {
           </label>
         </div>
 
-        <AppField
-          v-if="!form.isPrn"
-          label="Times"
-          description="Facility clock. An 8pm dose stays 8pm across daylight saving."
-        >
+        <Field v-if="!form.isPrn">
+          <FieldLabel :for="ids.times">Times</FieldLabel>
           <div class="flex flex-col gap-2">
             <div v-if="form.times.length" class="flex flex-wrap gap-1.5">
               <span
@@ -249,15 +249,19 @@ async function submit() {
               </SelectContent>
             </Select>
           </div>
-        </AppField>
+          <FieldDescription>Facility clock. An 8pm dose stays 8pm across daylight saving.</FieldDescription>
+        </Field>
 
         <div class="flex gap-3">
-          <AppField v-slot="{ id }" label="Prescriber" class="flex-1" description="Optional.">
-            <Input :id="id" v-model="form.prescriber" placeholder="Dr. Alvarez" />
-          </AppField>
-          <AppField v-slot="{ id }" label="Starts" class="flex-1">
-            <Input :id="id" v-model="form.startsOn" type="date" />
-          </AppField>
+          <Field class="flex-1">
+            <FieldLabel :for="ids.prescriber">Prescriber</FieldLabel>
+            <Input :id="ids.prescriber" v-model="form.prescriber" placeholder="Dr. Alvarez" />
+            <FieldDescription>Optional.</FieldDescription>
+          </Field>
+          <Field class="flex-1">
+            <FieldLabel :for="ids.starts">Starts</FieldLabel>
+            <Input :id="ids.starts" v-model="form.startsOn" type="date" />
+          </Field>
         </div>
 
         <!-- Say where the irreversibility is, at the point somebody is writing

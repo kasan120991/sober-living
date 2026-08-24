@@ -179,6 +179,9 @@ const toneFor = (status, active) => {
 
 // The shells drive the footer, so they need the form's state and its save.
 defineExpose({ submit, canSave, accountedCount, people, ready, loading, pending, title, amending })
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('apartmentNote', 'reasonForTheAmendment')
 </script>
 
 <template>
@@ -280,17 +283,16 @@ defineExpose({ submit, canSave, accountedCount, people, ready, loading, pending,
       </div>
 
       <div class="flex flex-col gap-2 border-t p-3">
-        <AppField v-slot="{ id }" label="Apartment note" description="Optional — the unit itself, not a person.">
-          <Input :id="id" v-model="apartmentNote" maxlength="500" placeholder="e.g. smoke smell in hallway" />
-        </AppField>
-        <AppField
-          v-if="amending"
-          v-slot="{ id }"
-          label="Reason for the amendment"
-          description="Required. The original stays on the record."
-        >
-          <Input :id="id" v-model="reason" maxlength="500" placeholder="What was wrong?" />
-        </AppField>
+        <Field>
+          <FieldLabel :for="ids.apartmentNote">Apartment note</FieldLabel>
+          <Input :id="ids.apartmentNote" v-model="apartmentNote" maxlength="500" placeholder="e.g. smoke smell in hallway" />
+          <FieldDescription>Optional — the unit itself, not a person.</FieldDescription>
+        </Field>
+        <Field v-if="amending">
+          <FieldLabel :for="ids.reasonForTheAmendment">Reason for the amendment</FieldLabel>
+          <Input :id="ids.reasonForTheAmendment" v-model="reason" maxlength="500" placeholder="What was wrong?" />
+          <FieldDescription>Required. The original stays on the record.</FieldDescription>
+        </Field>
       </div>
     </template>
 

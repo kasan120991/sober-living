@@ -55,6 +55,9 @@ async function decide(decision) {
     pending.value = false
   }
 }
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('lab', 'labReference')
 </script>
 
 <template>
@@ -72,16 +75,16 @@ async function decide(decision) {
       </Alert>
 
       <div class="flex flex-col gap-3">
-        <AppField
-          v-slot="{ id }"
-          label="Lab"
-          :description="`Required to send. The resident is charged ${money(feeCents)}.`"
-        >
-          <Input :id="id" v-model="labName" maxlength="120" placeholder="e.g. Quest Diagnostics" />
-        </AppField>
-        <AppField v-slot="{ id }" label="Lab reference" description="Optional.">
-          <Input :id="id" v-model="labReference" maxlength="80" />
-        </AppField>
+        <Field>
+          <FieldLabel :for="ids.lab">Lab</FieldLabel>
+          <Input :id="ids.lab" v-model="labName" maxlength="120" placeholder="e.g. Quest Diagnostics" />
+          <FieldDescription>{{ `Required to send. The resident is charged ${money(feeCents)}.` }}</FieldDescription>
+        </Field>
+        <Field>
+          <FieldLabel :for="ids.labReference">Lab reference</FieldLabel>
+          <Input :id="ids.labReference" v-model="labReference" maxlength="80" />
+          <FieldDescription>Optional.</FieldDescription>
+        </Field>
       </div>
 
       <DialogFooter class="flex-col gap-2 sm:flex-col">

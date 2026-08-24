@@ -151,6 +151,9 @@ const FACTS = [
 const maskedSsn = computed(() =>
   resident.value?.ssnLast4 ? `•••• ${resident.value.ssnLast4}` : null,
 )
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('name', 'phone', 'relationship')
 </script>
 
 <template>
@@ -707,16 +710,19 @@ const maskedSsn = computed(() =>
       <DialogHeader><DialogTitle>Add emergency contact</DialogTitle></DialogHeader>
       <form class="flex flex-col gap-4" @submit.prevent="submitContact">
         <div class="flex gap-3">
-          <AppField v-slot="{ id }" label="Name" class="flex-1">
-            <Input :id="id" v-model="contact.name" required />
-          </AppField>
-          <AppField v-slot="{ id }" label="Relationship" class="w-36">
-            <Input :id="id" v-model="contact.relationship" placeholder="Parent" />
-          </AppField>
+          <Field class="flex-1">
+            <FieldLabel :for="ids.name">Name</FieldLabel>
+            <Input :id="ids.name" v-model="contact.name" required />
+          </Field>
+          <Field class="w-36">
+            <FieldLabel :for="ids.relationship">Relationship</FieldLabel>
+            <Input :id="ids.relationship" v-model="contact.relationship" placeholder="Parent" />
+          </Field>
         </div>
-        <AppField v-slot="{ id }" label="Phone">
-          <Input :id="id" v-model="contact.phone" required />
-        </AppField>
+        <Field>
+          <FieldLabel :for="ids.phone">Phone</FieldLabel>
+          <Input :id="ids.phone" v-model="contact.phone" required />
+        </Field>
         <DialogFooter>
           <Button type="button" variant="ghost" @click="contactOpen = false">Cancel</Button>
           <Button type="submit" :disabled="contactPending">Add</Button>

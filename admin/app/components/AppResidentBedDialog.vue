@@ -60,6 +60,9 @@ async function submit() {
     pending.value = false
   }
 }
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('bed')
 </script>
 
 <template>
@@ -75,10 +78,8 @@ async function submit() {
           <AlertDescription>{{ error }}</AlertDescription>
         </Alert>
 
-        <AppField
-          label="Bed"
-          description="Free beds in matching-cohort apartments only. Moving closes the current assignment and opens a new one — the history keeps both."
-        >
+        <Field>
+          <FieldLabel :for="ids.bed">Bed</FieldLabel>
           <p v-if="loading" class="text-muted-foreground text-sm">Loading…</p>
           <Select v-else v-model="chosen">
             <SelectTrigger class="w-full"><SelectValue placeholder="Select a bed" /></SelectTrigger>
@@ -86,7 +87,8 @@ async function submit() {
               <SelectItem v-for="b in beds" :key="b.id" :value="b.id">{{ b.label }}</SelectItem>
             </SelectContent>
           </Select>
-        </AppField>
+          <FieldDescription>Free beds in matching-cohort apartments only. Moving closes the current assignment and opens a new one — the history keeps both.</FieldDescription>
+        </Field>
 
         <p v-if="!loading && !beds.length" class="text-warning text-sm">
           No free beds in this cohort.

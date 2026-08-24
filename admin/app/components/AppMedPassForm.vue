@@ -120,6 +120,9 @@ async function submit() {
 }
 
 defineExpose({ submit, canSave, ready, loading, pending, markedCount, openDoses, pass })
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('observedBy')
 </script>
 
 <template>
@@ -219,14 +222,15 @@ defineExpose({ submit, canSave, ready, loading, pending, markedCount, openDoses,
 
         <!-- ── Who watched ──────────────────────────────────────────── -->
         <div v-if="openDoses.length" class="border-t p-4">
-          <AppField label="Observed by">
+          <Field>
+            <FieldLabel :for="ids.observedBy">Observed by</FieldLabel>
             <Select v-model="observedById">
               <SelectTrigger class="w-full"><SelectValue placeholder="Who watched the dose?" /></SelectTrigger>
               <SelectContent>
                 <SelectItem v-for="s in staff" :key="s.id" :value="s.id">{{ s.fullName }}</SelectItem>
               </SelectContent>
             </Select>
-          </AppField>
+          </Field>
         </div>
       </template>
     </template>

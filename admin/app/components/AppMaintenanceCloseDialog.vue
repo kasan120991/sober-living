@@ -55,6 +55,9 @@ async function submit() {
     pending.value = false
   }
 }
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('field')
 </script>
 
 <template>
@@ -62,24 +65,22 @@ async function submit() {
     <DialogContent class="sm:max-w-[440px]">
       <DialogHeader>
         <DialogTitle>{{ cancelling ? 'Cancel request' : 'Resolve request' }}</DialogTitle>
+        <DialogDescription>{{ requestTitle }}</DialogDescription>
       </DialogHeader>
       <form class="flex flex-col gap-4" @submit.prevent="submit">
-        <p class="text-sm">{{ requestTitle }}</p>
         <Alert v-if="error" variant="destructive">
           <AlertDescription>{{ error }}</AlertDescription>
         </Alert>
-        <AppField
-          v-slot="{ id }"
-          :label="cancelling ? 'Why it is being cancelled' : 'What was done'"
-          description="Required. A request that just disappears leaves no record of what was fixed."
-        >
+        <Field>
+          <FieldLabel :for="ids.field">{{ cancelling ? 'Why it is being cancelled' : 'What was done' }}</FieldLabel>
           <Textarea
-            :id="id"
+            :id="ids.field"
             v-model="note"
             :rows="3"
             :placeholder="cancelling ? 'Duplicate of the Apt 14 report.' : 'Replaced the latch.'"
           />
-        </AppField>
+          <FieldDescription>Required. A request that just disappears leaves no record of what was fixed.</FieldDescription>
+        </Field>
         <DialogFooter>
           <Button type="button" variant="ghost" @click="emit('update:open', false)">Back</Button>
           <Button type="submit" :disabled="pending">

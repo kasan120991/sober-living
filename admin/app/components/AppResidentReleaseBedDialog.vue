@@ -52,6 +52,9 @@ async function submit() {
     pending.value = false
   }
 }
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('reason')
 </script>
 
 <template>
@@ -67,13 +70,11 @@ async function submit() {
           <AlertDescription>{{ error }}</AlertDescription>
         </Alert>
 
-        <AppField
-          v-slot="{ id }"
-          label="Reason"
-          description="Optional, and worth writing: bed history is what answers who was in a bed on a given night."
-        >
-          <Input :id="id" v-model="reason" placeholder="Moving apartments" />
-        </AppField>
+        <Field>
+          <FieldLabel :for="ids.reason">Reason</FieldLabel>
+          <Input :id="ids.reason" v-model="reason" placeholder="Moving apartments" />
+          <FieldDescription>Optional, and worth writing: bed history is what answers who was in a bed on a given night.</FieldDescription>
+        </Field>
 
         <!-- The non-obvious consequence. Staff expect "release" to mean the
              person is gone; it does not. -->

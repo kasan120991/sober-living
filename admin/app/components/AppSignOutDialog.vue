@@ -1,4 +1,5 @@
 <script setup>
+import { useId } from 'vue'
 import { FACILITY_TIMEZONE, facilityTimeNow } from '~/utils/facilityTime.js'
 
 /**
@@ -38,6 +39,19 @@ const form = reactive({
 })
 
 const outSet = computed(() => new Set(props.outIds))
+
+// FieldLabel does not generate an id the way AppField did — it renders a plain
+// Label, so `for` and `id` are the caller's job. Generated rather than
+// hardcoded because two copies of this dialog can be mounted at once (the
+// Sign-Outs page and the dashboard's quick actions both render it), and
+// duplicate ids would point every label at whichever control mounted first.
+const ids = {
+  resident: useId(),
+  destination: useId(),
+  purpose: useId(),
+  outTime: useId(),
+  back: useId(),
+}
 
 watch(open, (isOpen) => {
   if (!isOpen) return
@@ -88,61 +102,77 @@ async function submit() {
     <DialogContent class="sm:max-w-[460px]">
       <DialogHeader>
         <DialogTitle>Sign someone out</DialogTitle>
+        <DialogDescription>
+          A same-day departure. An overnight absence is a travel pass.
+        </DialogDescription>
       </DialogHeader>
 
-      <form class="flex flex-col gap-4" @submit.prevent="submit">
-        <Alert v-if="error" variant="destructive">
-          <AlertDescription>{{ error }}</AlertDescription>
-        </Alert>
+      <form @submit.prevent="submit">
+        <FieldGroup>
+          <Alert v-if="error" variant="destructive">
+            <AlertDescription>{{ error }}</AlertDescription>
+          </Alert>
 
-        <AppField label="Resident">
-          <Select v-model="form.residentId" required>
-            <SelectTrigger class="w-full">
-              <SelectValue placeholder="Who is leaving?" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem
-                v-for="r in residents"
-                :key="r.id"
-                :value="r.id"
-                :disabled="outSet.has(r.id)"
-              >
-                {{ r.fullName }}{{ outSet.has(r.id) ? ' — already out' : '' }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </AppField>
+          <Field>
+            <FieldLabel :for="ids.resident">Resident</FieldLabel>
+            <Select v-model="form.residentId" required>
+              <SelectTrigger :id="ids.resident" class="w-full">
+                <SelectValue placeholder="Who is leaving?" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem
+                  v-for="r in residents"
+                  :key="r.id"
+                  :value="r.id"
+                  :disabled="outSet.has(r.id)"
+                >
+                  {{ r.fullName }}{{ outSet.has(r.id) ? ' — already out' : '' }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
 
-        <AppField v-slot="{ id }" label="Destination">
-          <Input :id="id" v-model="form.destination" placeholder="NA meeting — St. Mark's" required />
-        </AppField>
+          <Field>
+            <FieldLabel :for="ids.destination">Destination</FieldLabel>
+            <Input
+              :id="ids.destination"
+              v-model="form.destination"
+              placeholder="NA meeting — St. Mark's"
+              required
+            />
+          </Field>
 
-        <!-- Steered toward a REASON rather than a place, because this field is
-             what the resident record's apartment-check trail shows in place of
-             the destination. That rule is enforced by which column is read, so
-             the only lever on what the column HOLDS is here, where it is typed. -->
-        <AppField
-          v-slot="{ id }"
-          label="Purpose"
-          description="Optional. Why they are out — not where."
-        >
-          <Input :id="id" v-model="form.purpose" placeholder="Work shift" />
-        </AppField>
+          <!-- Steered toward a REASON rather than a place, because this field is
+               what the resident record's apartment-check trail shows in place of
+               the destination. That rule is enforced by which column is read, so
+               the only lever on what the column HOLDS is here, where it is typed. -->
+          <Field>
+            <FieldLabel :for="ids.purpose">Purpose</FieldLabel>
+            <Input :id="ids.purpose" v-model="form.purpose" placeholder="Work shift" />
+            <FieldDescription>Optional. Why they are out — not where.</FieldDescription>
+          </Field>
 
-        <div class="grid grid-cols-2 gap-3">
-          <AppField v-slot="{ id }" label="Out at">
-            <Input :id="id" v-model="form.outTime" type="time" required />
-          </AppField>
-          <AppField
-            v-slot="{ id }"
-            label="Expected back"
-            description="Earlier than the out time means after midnight."
-          >
-            <Input :id="id" v-model="form.expectedReturnTime" type="time" required />
-          </AppField>
-        </div>
+          <div class="grid grid-cols-2 gap-3">
+            <Field>
+              <FieldLabel :for="ids.outTime">Out at</FieldLabel>
+              <Input :id="ids.outTime" v-model="form.outTime" type="time" required />
+            </Field>
+            <Field>
+              <FieldLabel :for="ids.back">Expected back</FieldLabel>
+              <Input
+                :id="ids.back"
+                v-model="form.expectedReturnTime"
+                type="time"
+                required
+              />
+              <FieldDescription>
+                Earlier than the out time means after midnight.
+              </FieldDescription>
+            </Field>
+          </div>
+        </FieldGroup>
 
-        <DialogFooter>
+        <DialogFooter class="mt-6">
           <Button type="button" variant="ghost" @click="open = false">Cancel</Button>
           <Button type="submit" :disabled="pending || !form.residentId">Sign out</Button>
         </DialogFooter>

@@ -60,6 +60,9 @@ async function destroy(bed) {
     notify.error(err?.data?.error ?? 'Could not remove the bed.')
   }
 }
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('reason')
 </script>
 
 <template>
@@ -138,13 +141,11 @@ async function destroy(bed) {
         <DialogTitle>Mark {{ oosFor?.label }} out of service</DialogTitle>
       </DialogHeader>
       <form class="flex flex-col gap-4" @submit.prevent="confirmOos">
-        <AppField
-          v-slot="{ id }"
-          label="Reason"
-          description="What is wrong with it. This is separate from a maintenance request — file one against the apartment if work is needed."
-        >
-          <Textarea :id="id" v-model="note" :rows="3" placeholder="Window latch broken" />
-        </AppField>
+        <Field>
+          <FieldLabel :for="ids.reason">Reason</FieldLabel>
+          <Textarea :id="ids.reason" v-model="note" :rows="3" placeholder="Window latch broken" />
+          <FieldDescription>What is wrong with it. This is separate from a maintenance request — file one against the apartment if work is needed.</FieldDescription>
+        </Field>
         <DialogFooter>
           <Button type="button" variant="ghost" @click="oosFor = null">Cancel</Button>
           <Button type="submit" :disabled="pending">Mark out of service</Button>
