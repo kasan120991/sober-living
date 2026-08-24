@@ -48,24 +48,27 @@ async function submit() {
     pending.value = false
   }
 }
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('whyItIsBeingReopened')
 </script>
 
 <template>
   <Dialog :open="open" @update:open="(v) => emit('update:open', v)">
     <DialogContent class="sm:max-w-[440px]">
-      <DialogHeader><DialogTitle>Reopen request</DialogTitle></DialogHeader>
+      <DialogHeader>
+        <DialogTitle>Reopen request</DialogTitle>
+        <DialogDescription>{{ requestTitle }}</DialogDescription>
+      </DialogHeader>
       <form class="flex flex-col gap-4" @submit.prevent="submit">
-        <p class="text-sm">{{ requestTitle }}</p>
         <Alert v-if="error" variant="destructive">
           <AlertDescription>{{ error }}</AlertDescription>
         </Alert>
-        <AppField
-          v-slot="{ id }"
-          label="Why it is being reopened"
-          description="The earlier closure stays on the record — this is added beside it, never over it."
-        >
-          <Textarea :id="id" v-model="note" :rows="3" placeholder="Cold again within the week." />
-        </AppField>
+        <Field>
+          <FieldLabel :for="ids.whyItIsBeingReopened">Why it is being reopened</FieldLabel>
+          <Textarea :id="ids.whyItIsBeingReopened" v-model="note" :rows="3" placeholder="Cold again within the week." />
+          <FieldDescription>The earlier closure stays on the record — this is added beside it, never over it.</FieldDescription>
+        </Field>
         <DialogFooter>
           <Button type="button" variant="ghost" @click="emit('update:open', false)">Back</Button>
           <Button type="submit" :disabled="pending">Reopen</Button>

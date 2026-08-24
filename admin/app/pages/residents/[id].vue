@@ -151,6 +151,9 @@ const FACTS = [
 const maskedSsn = computed(() =>
   resident.value?.ssnLast4 ? `•••• ${resident.value.ssnLast4}` : null,
 )
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('name', 'phone', 'relationship')
 </script>
 
 <template>
@@ -229,9 +232,7 @@ const maskedSsn = computed(() =>
         <!-- ── Overview ──────────────────────────────────────────────────── -->
         <template v-if="section === 'overview'">
           <section v-if="resident.current" class="flex flex-col gap-2">
-            <div
-              class="bg-card grid grid-cols-2 gap-x-6 gap-y-4 rounded-md border p-4 sm:grid-cols-3 lg:grid-cols-4"
-            >
+            <Card class="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 lg:grid-cols-4">
               <div class="flex flex-col">
                 <span class="text-muted-foreground text-[11.5px]">Bed</span>
                 <span v-if="resident.current.bed" class="text-[13.5px] font-medium">
@@ -248,7 +249,7 @@ const maskedSsn = computed(() =>
                   {{ f.v(resident) }}
                 </span>
               </div>
-            </div>
+            </Card>
 
             <div v-if="canManage" class="flex gap-2">
               <Button size="sm" variant="outline" @click="bedOpen = true">
@@ -273,7 +274,7 @@ const maskedSsn = computed(() =>
             <h2 class="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
               Needs attention
             </h2>
-            <div class="bg-card flex flex-col gap-1 rounded-md border p-4">
+            <Card class="flex flex-col gap-1">
               <button
                 v-if="resident.current?.checks?.notAccounted"
                 type="button"
@@ -321,7 +322,7 @@ const maskedSsn = computed(() =>
                   give a charge a due date.
                 </p>
               </template>
-            </div>
+            </Card>
           </section>
 
           <!-- Identity and cover. Two blocks that are usually empty on day one
@@ -335,7 +336,7 @@ const maskedSsn = computed(() =>
               Intake detail
             </h2>
 
-            <div class="bg-card flex flex-col gap-4 rounded-md border p-4">
+            <Card class="flex flex-col gap-4">
               <div
                 v-if="maskedSsn || resident.insurance"
                 class="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4"
@@ -372,7 +373,7 @@ const maskedSsn = computed(() =>
                   {{ resident.current.intakeNotes }}
                 </p>
               </div>
-            </div>
+            </Card>
           </section>
 
           <!-- Recent activity. Sign-outs only for now: this is the one place the
@@ -491,42 +492,39 @@ const maskedSsn = computed(() =>
               Sign-outs
             </h2>
             <div v-if="signOuts.length" class="overflow-hidden rounded-md border">
-              <div class="overflow-x-auto">
-                <table class="w-full border-collapse text-sm">
-                  <thead>
-                    <tr>
-                      <th
-                        v-for="h in ['Out', 'Destination', 'Expected back', 'Returned', 'Recorded by']"
-                        :key="h"
-                        class="bg-card text-muted-foreground border-b px-3 py-2 text-left text-[10.5px] font-semibold tracking-wider whitespace-nowrap uppercase"
-                      >
-                        {{ h }}
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="s in signOuts" :key="s.id" class="bg-card">
-                      <td class="h-12 border-b px-3 whitespace-nowrap tabular-nums">
-                        {{ facilityDateOf(s.outAt) }} · {{ formatFacilityTime(s.outAt) }}
-                      </td>
-                      <td class="h-12 max-w-[24ch] truncate border-b px-3">{{ s.destination }}</td>
-                      <td class="h-12 border-b px-3 whitespace-nowrap tabular-nums">
-                        {{ formatFacilityTime(s.expectedReturnAt) }}
-                      </td>
-                      <td class="h-12 border-b px-3 whitespace-nowrap">
-                        <span v-if="s.returnedAt" class="tabular-nums">
-                          {{ formatFacilityTime(s.returnedAt) }}
-                        </span>
-                        <Badge v-else-if="s.overdue" variant="destructive">Overdue</Badge>
-                        <Badge v-else variant="outline" class="border-dashed">Still out</Badge>
-                      </td>
-                      <td class="text-muted-foreground h-12 border-b px-3 whitespace-nowrap">
-                        {{ s.recordedBy?.fullName ?? '—' }}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
+              <Table class="text-sm">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead
+                      v-for="h in ['Out', 'Destination', 'Expected back', 'Returned', 'Recorded by']"
+                      :key="h"
+                    >
+                      {{ h }}
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow v-for="s in signOuts" :key="s.id" class="bg-card">
+                    <TableCell class="whitespace-nowrap tabular-nums">
+                      {{ facilityDateOf(s.outAt) }} · {{ formatFacilityTime(s.outAt) }}
+                    </TableCell>
+                    <TableCell class="max-w-[24ch] truncate">{{ s.destination }}</TableCell>
+                    <TableCell class="whitespace-nowrap tabular-nums">
+                      {{ formatFacilityTime(s.expectedReturnAt) }}
+                    </TableCell>
+                    <TableCell class="whitespace-nowrap">
+                      <span v-if="s.returnedAt" class="tabular-nums">
+                        {{ formatFacilityTime(s.returnedAt) }}
+                      </span>
+                      <Badge v-else-if="s.overdue" variant="destructive">Overdue</Badge>
+                      <Badge v-else variant="outline" class="border-dashed">Still out</Badge>
+                    </TableCell>
+                    <TableCell class="text-muted-foreground whitespace-nowrap">
+                      {{ s.recordedBy?.fullName ?? '—' }}
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
             </div>
             <p v-else class="text-muted-foreground text-sm">No sign-outs on record.</p>
             <p class="text-muted-foreground text-xs">
@@ -618,43 +616,40 @@ const maskedSsn = computed(() =>
               Stay history
             </h2>
             <div class="overflow-hidden rounded-md border">
-              <div class="overflow-x-auto">
-                <table class="w-full border-collapse text-sm">
-                  <thead>
-                    <tr>
-                      <th
-                        v-for="h in ['Intake', 'Discharge', 'Type', 'Reason', 'Beds']"
-                        :key="h"
-                        class="bg-card text-muted-foreground border-b px-3 py-2 text-left text-[10.5px] font-semibold tracking-wider whitespace-nowrap uppercase"
-                      >
-                        {{ h }}
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="s in resident.stays" :key="s.id" class="bg-card">
-                      <td class="h-12 border-b px-3 whitespace-nowrap tabular-nums">
-                        {{ facilityDateOf(s.intakeAt) }}
-                      </td>
-                      <td class="h-12 border-b px-3 whitespace-nowrap">
-                        <span v-if="s.dischargedAt" class="tabular-nums">
-                          {{ facilityDateOf(s.dischargedAt) }}
-                        </span>
-                        <Badge v-else variant="outline" class="border-dashed">Current</Badge>
-                      </td>
-                      <td class="h-12 border-b px-3 whitespace-nowrap">
-                        {{ s.dischargeType ? dischargeLabel(s.dischargeType) : '—' }}
-                      </td>
-                      <td class="text-muted-foreground h-12 max-w-[32ch] truncate border-b px-3">
-                        {{ s.dischargeReason ?? '—' }}
-                      </td>
-                      <td class="h-12 border-b px-3 whitespace-nowrap">
-                        {{ s.beds.map((b) => b.label).join(', ') || '—' }}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
+              <Table class="text-sm">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead
+                      v-for="h in ['Intake', 'Discharge', 'Type', 'Reason', 'Beds']"
+                      :key="h"
+                    >
+                      {{ h }}
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow v-for="s in resident.stays" :key="s.id" class="bg-card">
+                    <TableCell class="whitespace-nowrap tabular-nums">
+                      {{ facilityDateOf(s.intakeAt) }}
+                    </TableCell>
+                    <TableCell class="whitespace-nowrap">
+                      <span v-if="s.dischargedAt" class="tabular-nums">
+                        {{ facilityDateOf(s.dischargedAt) }}
+                      </span>
+                      <Badge v-else variant="outline" class="border-dashed">Current</Badge>
+                    </TableCell>
+                    <TableCell class="whitespace-nowrap">
+                      {{ s.dischargeType ? dischargeLabel(s.dischargeType) : '—' }}
+                    </TableCell>
+                    <TableCell class="text-muted-foreground max-w-[32ch] truncate">
+                      {{ s.dischargeReason ?? '—' }}
+                    </TableCell>
+                    <TableCell class="whitespace-nowrap">
+                      {{ s.beds.map((b) => b.label).join(', ') || '—' }}
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
             </div>
             <p v-if="resident.stays.length > 1" class="text-muted-foreground text-xs">
               A returning resident gets a new stay — this record is the person, and persists
@@ -707,16 +702,19 @@ const maskedSsn = computed(() =>
       <DialogHeader><DialogTitle>Add emergency contact</DialogTitle></DialogHeader>
       <form class="flex flex-col gap-4" @submit.prevent="submitContact">
         <div class="flex gap-3">
-          <AppField v-slot="{ id }" label="Name" class="flex-1">
-            <Input :id="id" v-model="contact.name" required />
-          </AppField>
-          <AppField v-slot="{ id }" label="Relationship" class="w-36">
-            <Input :id="id" v-model="contact.relationship" placeholder="Parent" />
-          </AppField>
+          <Field class="flex-1">
+            <FieldLabel :for="ids.name">Name</FieldLabel>
+            <Input :id="ids.name" v-model="contact.name" required />
+          </Field>
+          <Field class="w-36">
+            <FieldLabel :for="ids.relationship">Relationship</FieldLabel>
+            <Input :id="ids.relationship" v-model="contact.relationship" placeholder="Parent" />
+          </Field>
         </div>
-        <AppField v-slot="{ id }" label="Phone">
-          <Input :id="id" v-model="contact.phone" required />
-        </AppField>
+        <Field>
+          <FieldLabel :for="ids.phone">Phone</FieldLabel>
+          <Input :id="ids.phone" v-model="contact.phone" required />
+        </Field>
         <DialogFooter>
           <Button type="button" variant="ghost" @click="contactOpen = false">Cancel</Button>
           <Button type="submit" :disabled="contactPending">Add</Button>

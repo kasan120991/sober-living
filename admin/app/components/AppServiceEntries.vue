@@ -100,9 +100,9 @@ const COLUMNS = [
         </div>
       </div>
 
-      <div class="bg-card rounded-md border p-4">
+      <Card>
         <AppServiceProgress :service="service" />
-      </div>
+      </Card>
     </section>
 
     <section class="flex flex-col gap-2">
@@ -113,81 +113,78 @@ const COLUMNS = [
       <p v-if="pending" class="text-muted-foreground text-sm">Loading…</p>
 
       <div v-else-if="entries.length" class="overflow-hidden rounded-md border">
-        <div class="overflow-x-auto">
-          <table class="w-full border-collapse text-sm">
-            <thead>
-              <tr>
-                <th
-                  v-for="c in COLUMNS"
-                  :key="c.key"
-                  class="bg-card text-muted-foreground border-b px-3 py-2 text-left text-[10.5px] font-semibold tracking-wider whitespace-nowrap uppercase"
-                >
-                  {{ c.label }}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <template v-for="e in entries" :key="e.id">
-                <tr class="bg-card">
-                  <td class="h-12 border-b px-3 whitespace-nowrap tabular-nums">
-                    {{ isoDate(e.workedOn) }}
-                  </td>
-                  <td class="h-12 border-b px-3 whitespace-nowrap tabular-nums">
-                    {{ hours(e.minutes) }}
-                  </td>
-                  <td class="h-12 max-w-[24ch] truncate border-b px-3">{{ e.location }}</td>
-                  <td class="text-muted-foreground h-12 border-b px-3 whitespace-nowrap">
-                    {{ e.supervisorName ?? '—' }}
-                  </td>
-                  <td class="h-12 border-b px-3 whitespace-nowrap">
-                    <Badge
-                      v-if="e.verifiedAt"
-                      variant="outline"
-                      class="border-success/40 bg-success/15 text-success text-[10px]"
-                    >
-                      {{ e.verifiedBy?.fullName ?? 'Verified' }}
-                    </Badge>
-                    <Badge v-else variant="outline" class="text-muted-foreground border-dashed text-[10px]">
-                      Pending
-                    </Badge>
-                  </td>
-                  <td class="h-12 border-b px-3 text-right whitespace-nowrap">
-                    <Button
-                      v-if="!e.verifiedAt"
-                      size="sm"
-                      variant="outline"
-                      :disabled="busy === e.id"
-                      @click="verify(e)"
-                    >
-                      Verify
-                    </Button>
-                    <DropdownMenu v-if="canLog">
-                      <DropdownMenuTrigger as-child>
-                        <Button variant="ghost" size="sm" :aria-label="`Actions for ${isoDate(e.workedOn)}`">
-                          <MoreHorizontal class="size-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" class="w-52">
-                        <!-- Amend, not Edit. Nothing here is editable — a
-                             correction is a new row and the original stays. -->
-                        <DropdownMenuItem @select="openAmend(e)">Amend this entry…</DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </td>
-                </tr>
-                <!-- The predecessor, when this row is a correction. Same
-                     treatment AppLedger gives a corrected line. -->
-                <tr v-if="e.supersedes" class="bg-card">
-                  <td colspan="6" class="text-muted-foreground border-b px-3 pb-2 text-xs">
-                    was <span class="tabular-nums">{{ hours(e.supersedes.minutes) }}</span> ·
-                    amended{{ e.recordedBy ? ` by ${e.recordedBy.fullName}` : '' }} —
-                    “{{ e.amendmentReason }}”
-                  </td>
-                </tr>
-              </template>
-            </tbody>
-          </table>
-        </div>
+        <Table class="text-sm">
+          <TableHeader>
+            <TableRow>
+              <TableHead
+                v-for="c in COLUMNS"
+                :key="c.key"
+              >
+                {{ c.label }}
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <template v-for="e in entries" :key="e.id">
+              <TableRow class="bg-card">
+                <TableCell class="whitespace-nowrap tabular-nums">
+                  {{ isoDate(e.workedOn) }}
+                </TableCell>
+                <TableCell class="whitespace-nowrap tabular-nums">
+                  {{ hours(e.minutes) }}
+                </TableCell>
+                <TableCell class="max-w-[24ch] truncate">{{ e.location }}</TableCell>
+                <TableCell class="text-muted-foreground whitespace-nowrap">
+                  {{ e.supervisorName ?? '—' }}
+                </TableCell>
+                <TableCell class="whitespace-nowrap">
+                  <Badge
+                    v-if="e.verifiedAt"
+                    variant="outline"
+                    class="border-success/40 bg-success/15 text-success text-[10px]"
+                  >
+                    {{ e.verifiedBy?.fullName ?? 'Verified' }}
+                  </Badge>
+                  <Badge v-else variant="outline" class="text-muted-foreground border-dashed text-[10px]">
+                    Pending
+                  </Badge>
+                </TableCell>
+                <TableCell class="text-right whitespace-nowrap">
+                  <Button
+                    v-if="!e.verifiedAt"
+                    size="sm"
+                    variant="outline"
+                    :disabled="busy === e.id"
+                    @click="verify(e)"
+                  >
+                    Verify
+                  </Button>
+                  <DropdownMenu v-if="canLog">
+                    <DropdownMenuTrigger as-child>
+                      <Button variant="ghost" size="sm" :aria-label="`Actions for ${isoDate(e.workedOn)}`">
+                        <MoreHorizontal class="size-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" class="w-52">
+                      <!-- Amend, not Edit. Nothing here is editable — a
+                           correction is a new row and the original stays. -->
+                      <DropdownMenuItem @select="openAmend(e)">Amend this entry…</DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </TableCell>
+              </TableRow>
+              <!-- The predecessor, when this row is a correction. Same
+                   treatment AppLedger gives a corrected line. -->
+              <TableRow v-if="e.supersedes" class="bg-card">
+                <TableCell colspan="6" class="text-muted-foreground pb-2 text-xs">
+                  was <span class="tabular-nums">{{ hours(e.supersedes.minutes) }}</span> ·
+                  amended{{ e.recordedBy ? ` by ${e.recordedBy.fullName}` : '' }} —
+                  “{{ e.amendmentReason }}”
+                </TableCell>
+              </TableRow>
+            </template>
+          </TableBody>
+        </Table>
       </div>
 
       <p v-else class="text-muted-foreground text-sm">No hours logged yet.</p>

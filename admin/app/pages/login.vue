@@ -23,11 +23,14 @@ async function onSubmit() {
     pending.value = false
   }
 }
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('email', 'password')
 </script>
 
 <template>
   <div class="bg-muted/40 grid min-h-svh place-items-center p-5">
-    <div class="bg-card w-full max-w-[380px] rounded-xl border p-7 shadow-sm">
+    <Card class="w-full max-w-[380px] rounded-xl p-7 shadow-sm">
       <div class="flex flex-col gap-5">
         <div class="flex items-center gap-2.5">
           <span class="bg-primary text-primary-foreground grid size-8 place-items-center rounded-lg">
@@ -46,27 +49,29 @@ async function onSubmit() {
         </Alert>
 
         <form class="flex flex-col gap-4" @submit.prevent="onSubmit">
-          <AppField v-slot="{ id }" label="Email">
+          <Field>
+            <FieldLabel :for="ids.email">Email</FieldLabel>
             <Input
-              :id="id"
+              :id="ids.email"
               v-model="email"
               type="email"
               autocomplete="username"
               placeholder="you@facility.org"
               required
             />
-          </AppField>
+          </Field>
 
-          <AppField v-slot="{ id }" label="Password">
+          <Field>
+            <FieldLabel :for="ids.password">Password</FieldLabel>
             <Input
-              :id="id"
+              :id="ids.password"
               v-model="password"
               type="password"
               autocomplete="current-password"
               placeholder="••••••••••"
               required
             />
-          </AppField>
+          </Field>
 
           <Button type="submit" :disabled="pending" class="w-full">
             {{ pending ? 'Signing in…' : 'Sign in' }}
@@ -78,6 +83,6 @@ async function onSubmit() {
              a tech signing in does not need telling, and stating the window
              tells anyone who picks up an unlocked phone how long they have. -->
       </div>
-    </div>
+    </Card>
   </div>
 </template>

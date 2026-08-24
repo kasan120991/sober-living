@@ -65,6 +65,9 @@ async function destroy() {
     pending.value = false
   }
 }
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('cohort', 'number')
 </script>
 
 <template>
@@ -84,7 +87,8 @@ async function destroy() {
           <AlertDescription>{{ error }}</AlertDescription>
         </Alert>
 
-        <AppField v-slot="{ id }" label="Number">
+        <Field>
+          <FieldLabel :for="ids.number">Number</FieldLabel>
           <div class="flex items-stretch">
             <span
               class="border-input bg-muted text-muted-foreground flex items-center rounded-l-md border border-r-0 px-3 text-sm"
@@ -92,23 +96,17 @@ async function destroy() {
               Apt
             </span>
             <Input
-              :id="id"
+              :id="ids.number"
               v-model="form.number"
               class="rounded-l-none"
               inputmode="numeric"
               required
             />
           </div>
-        </AppField>
+        </Field>
 
-        <AppField
-          label="Cohort"
-          :description="
-            cohortLocked
-              ? 'Locked while this apartment has beds.'
-              : 'An apartment serves one cohort.'
-          "
-        >
+        <Field>
+          <FieldLabel :for="ids.cohort">Cohort</FieldLabel>
           <Select v-model="form.cohort" :disabled="cohortLocked">
             <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -116,7 +114,12 @@ async function destroy() {
               <SelectItem value="WOMEN">Women</SelectItem>
             </SelectContent>
           </Select>
-        </AppField>
+          <FieldDescription>{{
+            cohortLocked
+              ? 'Locked while this apartment has beds.'
+              : 'An apartment serves one cohort.'
+           }}</FieldDescription>
+        </Field>
 
         <DialogFooter class="border-t pt-4 sm:justify-between">
           <Button type="button" variant="ghost" class="text-destructive" :disabled="pending" @click="destroy">

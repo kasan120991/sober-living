@@ -192,7 +192,7 @@ const figures = computed(() => {
         <!-- No unhoused banner, by request: the figures row counts whoever is
              awaiting a bed, and the bell carries the names and the action. -->
 
-        <div v-for="a in data.apartments" :key="a.id" class="bg-card rounded-md border p-4">
+        <Card v-for="a in data.apartments" :key="a.id">
           <div class="mb-3 flex flex-wrap items-baseline gap-2">
             <span class="text-sm font-semibold">{{ a.name }}</span>
             <Badge variant="outline" class="tracking-wider text-[10px] uppercase">
@@ -315,7 +315,7 @@ const figures = computed(() => {
               </component>
             </template>
           </div>
-        </div>
+        </Card>
 
         <p v-if="!data.apartments.length" class="text-muted-foreground text-sm">
           No apartments yet. Set up the facility under

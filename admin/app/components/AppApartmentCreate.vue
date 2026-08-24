@@ -32,6 +32,9 @@ async function submit() {
     pending.value = false
   }
 }
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('cohort', 'number')
 </script>
 
 <template>
@@ -51,7 +54,8 @@ async function submit() {
 
         <!-- Just the number — the "Apt" is supplied, so the roster never mixes
              "Apt 12" with "apt 12" with "12". -->
-        <AppField v-slot="{ id }" label="Number" description="It shows as “Apt 12” everywhere.">
+        <Field>
+          <FieldLabel :for="ids.number">Number</FieldLabel>
           <div class="flex items-stretch">
             <span
               class="border-input bg-muted text-muted-foreground flex items-center rounded-l-md border border-r-0 px-3 text-sm"
@@ -59,7 +63,7 @@ async function submit() {
               Apt
             </span>
             <Input
-              :id="id"
+              :id="ids.number"
               v-model="form.number"
               class="rounded-l-none"
               placeholder="12"
@@ -67,12 +71,11 @@ async function submit() {
               required
             />
           </div>
-        </AppField>
+          <FieldDescription>It shows as “Apt 12” everywhere.</FieldDescription>
+        </Field>
 
-        <AppField
-          label="Cohort"
-          description="An apartment serves one cohort. This cannot be changed once it has beds."
-        >
+        <Field>
+          <FieldLabel :for="ids.cohort">Cohort</FieldLabel>
           <Select v-model="form.cohort">
             <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -80,7 +83,8 @@ async function submit() {
               <SelectItem value="WOMEN">Women</SelectItem>
             </SelectContent>
           </Select>
-        </AppField>
+          <FieldDescription>An apartment serves one cohort. This cannot be changed once it has beds.</FieldDescription>
+        </Field>
 
         <DialogFooter>
           <Button type="button" variant="ghost" @click="open = false">Cancel</Button>

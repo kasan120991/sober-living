@@ -207,108 +207,106 @@ const COLUMNS = [
       <!-- Wide content scrolls inside its own container; the page never
            scrolls sideways. -->
       <div class="overflow-hidden rounded-md border">
-        <div class="overflow-x-auto">
-          <table class="w-full border-collapse text-[13.5px]">
-            <thead>
-              <tr class="bg-muted/40">
-                <th
-                  v-for="c in COLUMNS"
-                  :key="c.key"
-                  class="text-muted-foreground h-9 px-3 text-[10.5px] font-semibold tracking-wider whitespace-nowrap uppercase"
-                  :class="c.align === 'right' ? 'text-right' : 'text-left'"
-                >
-                  {{ c.label }}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-if="!rows.length">
-                <td :colspan="COLUMNS.length" class="text-muted-foreground h-12 px-3">
-                  Nothing here.
-                </td>
-              </tr>
-              <tr
-                v-for="r in rows"
-                :key="r.id"
-                class="bg-card"
-                :class="!isOpen(r) && 'opacity-70'"
+        <Table class="text-[13.5px]">
+          <TableHeader>
+            <TableRow class="bg-muted/40">
+              <TableHead
+                v-for="c in COLUMNS"
+                :key="c.key"
+                class="h-9"
+                :class="c.align === 'right' ? 'text-right' : 'text-left'"
               >
-                <!-- The page's ONLY inset, so it means something. -->
-                <td
-                  class="h-12 border-b px-3 whitespace-nowrap"
-                  :class="r.state === 'OVERDUE' && 'shadow-[inset_3px_0_0_var(--destructive)]'"
+                {{ c.label }}
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <TableRow v-if="!rows.length">
+              <TableCell :colspan="COLUMNS.length" class="text-muted-foreground">
+                Nothing here.
+              </TableCell>
+            </TableRow>
+            <TableRow
+              v-for="r in rows"
+              :key="r.id"
+              class="bg-card"
+              :class="!isOpen(r) && 'opacity-70'"
+            >
+              <!-- The page's ONLY inset, so it means something. -->
+              <TableCell
+                class="whitespace-nowrap"
+                :class="r.state === 'OVERDUE' && 'shadow-[inset_3px_0_0_var(--destructive)]'"
+              >
+                <Badge
+                  v-if="priorityDisplay(r.priority).tone !== 'none'"
+                  variant="outline"
+                  :class="['text-[10px] tracking-wider uppercase', toneClass(priorityDisplay(r.priority).tone)]"
                 >
-                  <Badge
-                    v-if="priorityDisplay(r.priority).tone !== 'none'"
-                    variant="outline"
-                    :class="['text-[10px] tracking-wider uppercase', toneClass(priorityDisplay(r.priority).tone)]"
-                  >
-                    {{ priorityDisplay(r.priority).label }}
-                  </Badge>
-                  <span v-else class="text-muted-foreground text-xs">
-                    {{ priorityDisplay(r.priority).label }}
-                  </span>
-                </td>
+                  {{ priorityDisplay(r.priority).label }}
+                </Badge>
+                <span v-else class="text-muted-foreground text-xs">
+                  {{ priorityDisplay(r.priority).label }}
+                </span>
+              </TableCell>
 
-                <!-- The title OPENS the request. A row you cannot open is what
-                     buried Edit in an ellipsis nobody found, and the table has
-                     nowhere to show a description or a trail anyway. -->
-                <td class="h-12 border-b px-3">
-                  <button
-                    type="button"
-                    class="text-start font-medium underline-offset-2 hover:underline"
-                    @click="openDetail(r)"
-                  >
-                    {{ r.title }}
-                  </button>
-                  <span
-                    v-if="r.events?.length"
-                    class="text-muted-foreground ms-2 text-[11px] whitespace-nowrap"
-                  >
-                    {{ r.events.length }} {{ r.events.length === 1 ? 'entry' : 'entries' }}
-                  </span>
-                </td>
+              <!-- The title OPENS the request. A row you cannot open is what
+                   buried Edit in an ellipsis nobody found, and the table has
+                   nowhere to show a description or a trail anyway. -->
+              <TableCell>
+                <button
+                  type="button"
+                  class="text-start font-medium underline-offset-2 hover:underline"
+                  @click="openDetail(r)"
+                >
+                  {{ r.title }}
+                </button>
+                <span
+                  v-if="r.events?.length"
+                  class="text-muted-foreground ms-2 text-[11px] whitespace-nowrap"
+                >
+                  {{ r.events.length }} {{ r.events.length === 1 ? 'entry' : 'entries' }}
+                </span>
+              </TableCell>
 
-                <td class="text-muted-foreground h-12 border-b px-3 whitespace-nowrap">
-                  {{ r.apartmentName ?? '—' }}
-                </td>
+              <TableCell class="text-muted-foreground whitespace-nowrap">
+                {{ r.apartmentName ?? '—' }}
+              </TableCell>
 
-                <!-- Age against the target it is judged by. The bare age would
-                     make a 10-day NORMAL and a 10-day LOW look identical when
-                     one is late and the other has three weeks left. -->
-                <td class="h-12 border-b px-3 text-right tabular-nums whitespace-nowrap">
-                  {{ ageLabel(r.reportedAt) }}
-                  <span v-if="isOpen(r)" class="text-muted-foreground">/ {{ targetLabel(r) }}</span>
-                </td>
+              <!-- Age against the target it is judged by. The bare age would
+                   make a 10-day NORMAL and a 10-day LOW look identical when
+                   one is late and the other has three weeks left. -->
+              <TableCell class="text-right tabular-nums whitespace-nowrap">
+                {{ ageLabel(r.reportedAt) }}
+                <span v-if="isOpen(r)" class="text-muted-foreground">/ {{ targetLabel(r) }}</span>
+              </TableCell>
 
-                <td class="text-muted-foreground h-12 border-b px-3 whitespace-nowrap">
-                  {{ ownerLabel(r) ?? '—' }}
-                </td>
+              <TableCell class="text-muted-foreground whitespace-nowrap">
+                {{ ownerLabel(r) ?? '—' }}
+              </TableCell>
 
-                <td class="h-12 border-b px-3 whitespace-nowrap">
-                  <Badge
-                    variant="outline"
-                    :class="['text-[10px] tracking-wider uppercase', toneClass(requestStateDisplay(r).tone)]"
-                  >
-                    {{ requestStateDisplay(r).label }}
-                  </Badge>
-                </td>
+              <TableCell class="whitespace-nowrap">
+                <Badge
+                  variant="outline"
+                  :class="['text-[10px] tracking-wider uppercase', toneClass(requestStateDisplay(r).tone)]"
+                >
+                  {{ requestStateDisplay(r).label }}
+                </Badge>
+              </TableCell>
 
-                <td class="h-12 border-b px-3 text-right">
-                  <AppMaintenanceActions
-                    :request="r"
-                    @changed="load"
-                    @close-request="openClose"
-                    @reopen-request="openReopen"
-                    @edit-request="openEdit"
-                    @assign-request="openAssign"
-                    @view-request="openDetail"
-                  />
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+              <TableCell class="text-right">
+                <AppMaintenanceActions
+                  :request="r"
+                  @changed="load"
+                  @close-request="openClose"
+                  @reopen-request="openReopen"
+                  @edit-request="openEdit"
+                  @assign-request="openAssign"
+                  @view-request="openDetail"
+                />
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
       </div>
 
       <p class="text-muted-foreground text-[12.5px]">

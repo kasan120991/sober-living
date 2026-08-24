@@ -73,6 +73,9 @@ async function submit() {
     busy.value = false
   }
 }
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('reason')
 </script>
 
 <template>
@@ -93,13 +96,11 @@ async function submit() {
           <p class="text-muted-foreground tabular-nums">{{ nightsLabel(pass.nights) }}</p>
         </div>
 
-        <AppField
-          v-slot="{ id }"
-          label="Reason"
-          description="Required — this is what the resident is told and what a review reads."
-        >
-          <Input :id="id" v-model="note" :placeholder="copy.placeholder" required />
-        </AppField>
+        <Field>
+          <FieldLabel :for="ids.reason">Reason</FieldLabel>
+          <Input :id="ids.reason" v-model="note" :placeholder="copy.placeholder" required />
+          <FieldDescription>Required — this is what the resident is told and what a review reads.</FieldDescription>
+        </Field>
 
         <DialogFooter class="border-t pt-4">
           <Button type="button" variant="ghost" @click="emit('update:open', false)">

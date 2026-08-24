@@ -1,15 +1,28 @@
 <script setup>
 // The header search field and its palette.
 //
-// Built on Dialog + Input rather than shadcn's Command: adding that component
-// makes the CLI offer to overwrite button/index.ts, which carries our 44px
-// floor, and the interaction here is small enough not to need cmdk.
+// Built on the vendored Command (reka-ui's Listbox), which replaced a
+// hand-rolled listbox: this file used to carry its own ArrowUp/ArrowDown/Enter
+// handler and a `cursor` ref, and hand-written roving focus is where keyboard
+// and screen-reader behaviour quietly goes wrong. The note that used to sit
+// here said Command could not be added because the CLI offers to overwrite
+// button/index.ts, which carries our 44px floor. That is now handled by
+// `npm run ui:add`, which declines every overwrite and restores main.css.
+//
+// THE SERVER IS THE ONLY FILTER, and that is why the input below is a bare
+// ListboxFilter rather than CommandInput. CommandInput v-models reka's own
+// `filterState.search`, which makes Command filter the rendered rows a second
+// time — and the two predicates genuinely differ: the server matches
+// `firstName` OR `lastName` as separate columns (services/search.js), while
+// Command matches each row's textContent. Leaving filterState.search empty
+// means every row the server returned is rendered, exactly as returned.
 //
 // The query is never put in a URL, never stored, and never logged. It is
 // somebody's name, and under 42 CFR Part 2 confirming that a named person is
 // here is itself the disclosure — see server/src/services/search.js for the
 // limits that back this up.
 import { Search, UserRound, Building2 } from '@lucide/vue'
+import { ListboxFilter } from 'reka-ui'
 
 const { search } = useSearch()
 const router = useRouter()
@@ -18,18 +31,14 @@ const open = ref(false)
 const query = ref('')
 const results = ref({ residents: [], apartments: [], tooShort: true })
 const busy = ref(false)
-const cursor = ref(0)
 
-/** Flat list in render order, so the keyboard and the mouse agree. */
-const flat = computed(() => [
-  ...results.value.residents.map((r) => ({ kind: 'resident', ...r })),
-  ...results.value.apartments.map((a) => ({ kind: 'apartment', ...a })),
-])
+const hasResults = computed(
+  () => results.value.residents.length > 0 || results.value.apartments.length > 0,
+)
 
 let timer
 watch(query, (q) => {
   clearTimeout(timer)
-  cursor.value = 0
   if (!q.trim()) {
     results.value = { residents: [], apartments: [], tooShort: true }
     return
@@ -52,26 +61,11 @@ watch(open, (isOpen) => {
   // house phone that somebody else picks up.
   query.value = ''
   results.value = { residents: [], apartments: [], tooShort: true }
-  cursor.value = 0
 })
 
 function go(item) {
   open.value = false
   router.push(item.kind === 'resident' ? `/residents/${item.id}` : `/apartments/${item.id}`)
-}
-
-function onKey(e) {
-  if (!flat.value.length) return
-  if (e.key === 'ArrowDown') {
-    e.preventDefault()
-    cursor.value = (cursor.value + 1) % flat.value.length
-  } else if (e.key === 'ArrowUp') {
-    e.preventDefault()
-    cursor.value = (cursor.value - 1 + flat.value.length) % flat.value.length
-  } else if (e.key === 'Enter') {
-    e.preventDefault()
-    go(flat.value[cursor.value])
-  }
 }
 
 function onShortcut(e) {
@@ -109,84 +103,75 @@ const isMac = computed(() =>
     </kbd>
   </button>
 
-  <Dialog v-model:open="open">
-    <DialogContent class="gap-0 overflow-hidden p-0 sm:max-w-[560px]">
-      <DialogHeader class="sr-only">
-        <DialogTitle>Search</DialogTitle>
-        <DialogDescription>Find a resident or an apartment.</DialogDescription>
-      </DialogHeader>
-
-      <div class="flex items-center gap-2 border-b px-4">
-        <Search class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
-        <input
+  <CommandDialog
+    v-model:open="open"
+    title="Search"
+    description="Find a resident or an apartment."
+    class="sm:max-w-[560px]"
+  >
+    <!-- InputGroup + ListboxFilter is CommandInput's own markup, minus the
+         v-model onto filterState.search. See the note at the top. -->
+    <div class="p-1 pb-0">
+      <InputGroup class="bg-input/50 h-9">
+        <ListboxFilter
           v-model="query"
-          class="placeholder:text-muted-foreground h-12 w-full bg-transparent text-[14px] outline-none"
-          placeholder="Search residents, apartments…"
+          auto-focus
           autocomplete="off"
-          autofocus
-          @keydown="onKey"
+          placeholder="Search residents, apartments…"
+          class="w-full text-sm outline-hidden"
         />
-      </div>
+        <InputGroupAddon>
+          <Search class="size-4 shrink-0 opacity-50" aria-hidden="true" />
+        </InputGroupAddon>
+      </InputGroup>
+    </div>
 
-      <div class="max-h-[min(22rem,55vh)] overflow-y-auto p-1.5">
-        <p v-if="results.tooShort" class="text-muted-foreground px-3 py-6 text-center text-sm">
-          Type at least two letters.
-        </p>
-        <p v-else-if="busy" class="text-muted-foreground px-3 py-6 text-center text-sm">
-          Searching…
-        </p>
-        <p v-else-if="!flat.length" class="text-muted-foreground px-3 py-6 text-center text-sm">
-          Nothing matching “{{ query }}”.
-        </p>
+    <CommandList>
+      <!-- CommandEmpty keys off filterState.search, which we deliberately leave
+           empty, so it can never render. These three states are ours: too
+           short, in flight, and a real miss are different answers and the
+           middle one must not read as "nobody by that name". -->
+      <p v-if="results.tooShort" class="text-muted-foreground px-3 py-6 text-center text-sm">
+        Type at least two letters.
+      </p>
+      <p v-else-if="busy" class="text-muted-foreground px-3 py-6 text-center text-sm">
+        Searching…
+      </p>
+      <p v-else-if="!hasResults" class="text-muted-foreground px-3 py-6 text-center text-sm">
+        Nothing matching “{{ query }}”.
+      </p>
 
-        <template v-else>
-          <p
-            v-if="results.residents.length"
-            class="text-muted-foreground px-2.5 pt-1.5 pb-1 text-[10.5px] font-semibold tracking-[0.1em] uppercase"
-          >
-            Residents
-          </p>
-          <button
-            v-for="(r, i) in results.residents"
+      <template v-else>
+        <CommandGroup v-if="results.residents.length" heading="Residents">
+          <CommandItem
+            v-for="r in results.residents"
             :key="r.id"
-            type="button"
-            class="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-start"
-            :class="cursor === i ? 'bg-muted' : 'hover:bg-muted/60'"
-            @mousemove="cursor = i"
-            @click="go({ kind: 'resident', ...r })"
+            :value="`resident:${r.id}`"
+            @select="go({ kind: 'resident', ...r })"
           >
-            <UserRound class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
-            <span class="min-w-0 flex-1 truncate text-[13.5px]">{{ r.fullName }}</span>
+            <UserRound class="text-muted-foreground shrink-0" aria-hidden="true" />
+            <span class="min-w-0 flex-1 truncate">{{ r.fullName }}</span>
             <span class="text-muted-foreground shrink-0 text-xs">
               {{ r.bed ?? (r.active ? 'No bed' : 'Discharged') }}
             </span>
-          </button>
+          </CommandItem>
+        </CommandGroup>
 
-          <p
-            v-if="results.apartments.length"
-            class="text-muted-foreground px-2.5 pt-3 pb-1 text-[10.5px] font-semibold tracking-[0.1em] uppercase"
-          >
-            Apartments
-          </p>
-          <button
-            v-for="(a, i) in results.apartments"
+        <CommandGroup v-if="results.apartments.length" heading="Apartments">
+          <CommandItem
+            v-for="a in results.apartments"
             :key="a.id"
-            type="button"
-            class="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-start"
-            :class="
-              cursor === results.residents.length + i ? 'bg-muted' : 'hover:bg-muted/60'
-            "
-            @mousemove="cursor = results.residents.length + i"
-            @click="go({ kind: 'apartment', ...a })"
+            :value="`apartment:${a.id}`"
+            @select="go({ kind: 'apartment', ...a })"
           >
-            <Building2 class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
-            <span class="min-w-0 flex-1 truncate text-[13.5px]">{{ a.name }}</span>
+            <Building2 class="text-muted-foreground shrink-0" aria-hidden="true" />
+            <span class="min-w-0 flex-1 truncate">{{ a.name }}</span>
             <span class="text-muted-foreground shrink-0 text-xs">
               {{ a.cohort === 'MEN' ? 'Men' : 'Women' }} · {{ a.bedCount }} beds
             </span>
-          </button>
-        </template>
-      </div>
-    </DialogContent>
-  </Dialog>
+          </CommandItem>
+        </CommandGroup>
+      </template>
+    </CommandList>
+  </CommandDialog>
 </template>

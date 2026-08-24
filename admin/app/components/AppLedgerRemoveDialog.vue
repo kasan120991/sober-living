@@ -53,6 +53,9 @@ async function submit() {
     pending.value = false
   }
 }
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('reason')
 </script>
 
 <template>
@@ -71,17 +74,16 @@ async function submit() {
         <AlertDescription>{{ error }}</AlertDescription>
       </Alert>
 
-      <AppField label="Reason" required>
-        <template #default="{ id }">
-          <Input
-            :id="id"
-            v-model="reason"
-            placeholder="Posted against the wrong resident"
-            maxlength="300"
-            @keyup.enter="submit"
-          />
-        </template>
-      </AppField>
+      <Field>
+        <FieldLabel :for="ids.reason">Reason<span class="text-destructive" aria-hidden="true">*</span></FieldLabel>
+        <Input
+          :id="ids.reason"
+          v-model="reason"
+          placeholder="Posted against the wrong resident"
+          maxlength="300"
+          @keyup.enter="submit"
+        />
+      </Field>
 
       <!-- Said plainly, because the word "Remove" over-promises: the row does
            not go away, and a manager writing the reason should know it will be

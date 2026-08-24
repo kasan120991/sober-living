@@ -1,16 +1,20 @@
 <script setup>
 // Picking who is on an event.
 //
-// Hand-built, and deliberately not a vendored component: nothing multi-select
-// is in components/ui/, and `shadcn-vue add combobox` would pull Command and
-// Popover in for one form AND rewrite main.css, silently restoring the Google
-// Fonts CDN imports CLAUDE.md forbids. See the five gotchas in CLAUDE.md.
+// A ROW IS A REAL CHECKBOX. It used to be a <button aria-pressed>, because the
+// note here said "a checkbox we do not have" — nothing multi-select was in
+// components/ui/, and adding one rewrote main.css with the Google Fonts CDN
+// imports CLAUDE.md forbids. `npm run ui:add` handles that now, so the row is
+// the vendored Checkbox wrapped in a <label>: a multi-select list is checkboxes,
+// and aria-pressed is a toggle BUTTON, which a screen reader announces as
+// "pressed" rather than "checked" and never counts as "3 of 12 selected".
 //
-// A row is a real <button aria-pressed>, so it is keyboard-reachable and reads
-// correctly to a screen reader without a checkbox we do not have. Rows carry
-// program and bed because two residents sharing a first name has to be
-// resolvable without opening anything.
-import { Check } from '@lucide/vue'
+// The <label> is what keeps the whole row tappable — the hallway rule — while
+// the control itself stays 16px. Checkbox already carries an ::after hit-area
+// inset, the same trick the vendored Switch uses.
+//
+// Rows carry program and bed because two residents sharing a first name has to
+// be resolvable without opening anything.
 import { COHORT_LABEL } from '~/utils/schedule.js'
 
 const props = defineProps({
@@ -106,14 +110,11 @@ function toggleAll() {
     <p v-if="loading" class="text-muted-foreground text-sm">Loading residents…</p>
 
     <div v-else-if="shown.length" class="overflow-y-auto rounded-md border" :class="listClass">
-      <button
+      <label
         v-for="c in shown"
         :key="c.stayId"
-        type="button"
-        class="hover:bg-accent/50 focus-visible:ring-ring/30 flex w-full min-h-12 items-center gap-3 border-b px-3 py-2 text-left outline-none transition-colors last:border-b-0 focus-visible:ring-3 max-md:min-h-14 pointer-coarse:min-h-14"
+        class="hover:bg-accent/50 has-focus-visible:ring-ring/30 flex min-h-12 w-full cursor-pointer items-center gap-3 border-b px-3 py-2 text-left transition-colors last:border-b-0 has-focus-visible:ring-3 max-md:min-h-14 pointer-coarse:min-h-14"
         :class="selected.has(c.stayId) && 'bg-accent/40'"
-        :aria-pressed="selected.has(c.stayId)"
-        @click="toggle(c.stayId)"
       >
         <span class="min-w-0 flex-1">
           <span class="block truncate text-[13.5px]">{{ c.fullName }}</span>
@@ -125,12 +126,14 @@ function toggleAll() {
             <template v-else> · Awaiting a bed</template>
           </span>
         </span>
-        <Check
-          class="size-4 shrink-0"
-          :class="selected.has(c.stayId) ? 'text-primary' : 'text-transparent'"
-          aria-hidden="true"
+        <!-- The label already toggles on click, so this takes no @click of its
+             own — one would fire a second time and cancel the first. -->
+        <Checkbox
+          :model-value="selected.has(c.stayId)"
+          class="shrink-0"
+          @update:model-value="toggle(c.stayId)"
         />
-      </button>
+      </label>
     </div>
 
     <!-- Two different empty states, because they mean different things: nobody

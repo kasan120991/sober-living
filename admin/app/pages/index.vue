@@ -376,15 +376,14 @@ const balancesTo = computed(() => (canManage.value ? '/billing' : '/residents'))
 
            NEVER CAPPED. It is people, and the cap rule already refuses to hide
            one: "hiding either is hiding a person or a hazard." -->
-      <section
+      <Card
         v-if="notAccounted.length"
-        class="bg-card border-destructive rounded-md border shadow-[inset_3px_0_0_var(--destructive)]"
+        as="section"
+        class="border-destructive p-0 shadow-[inset_3px_0_0_var(--destructive)]"
       >
-        <div class="flex items-center gap-2 px-4 pt-3 pb-2">
+        <CardHeader>
           <span class="bg-destructive size-1.5 shrink-0 rounded-full" aria-hidden="true" />
-          <h2 class="text-destructive text-[10.5px] font-semibold tracking-[0.1em] uppercase">
-            Not accounted for
-          </h2>
+          <CardTitle as="h2" class="text-destructive">Not accounted for</CardTitle>
           <span class="text-xs font-semibold tabular-nums">{{ notAccounted.length }}</span>
           <NuxtLink
             to="/checks"
@@ -392,7 +391,7 @@ const balancesTo = computed(() => (canManage.value ? '/billing' : '/residents'))
           >
             Apartment checks →
           </NuxtLink>
-        </div>
+        </CardHeader>
         <NuxtLink
           v-for="r in notAccounted"
           :key="r.stayId"
@@ -410,7 +409,7 @@ const balancesTo = computed(() => (canManage.value ? '/billing' : '/residents'))
             {{ r.apartmentName }} · {{ formatFacilityTime(r.at) }} round · {{ r.byName }}
           </span>
         </NuxtLink>
-      </section>
+      </Card>
 
       <!-- ── Status strip ─────────────────────────────────────────────────
            Four boxes since 2026-08-08, not three. Each is a LINK to the page
@@ -507,14 +506,12 @@ const balancesTo = computed(() => (canManage.value ? '/billing' : '/residents'))
                already says "needs attention" does not need each row shouting
                it again. The destructive inset below keeps its meaning by
                being the only inset left on the page. -->
-      <section v-if="attention.length" class="bg-card rounded-md border">
-        <div class="flex items-center gap-2 px-4 pt-3 pb-2">
+      <Card v-if="attention.length" as="section" class="p-0">
+        <CardHeader>
           <span class="bg-warning size-1.5 shrink-0 rounded-full" aria-hidden="true" />
-          <h2 class="text-muted-foreground text-[10.5px] font-semibold tracking-[0.1em] uppercase">
-            Needs attention
-          </h2>
+          <CardTitle as="h2">Needs attention</CardTitle>
           <span class="text-xs font-semibold tabular-nums">{{ attentionCount }}</span>
-        </div>
+        </CardHeader>
         <!-- TWO-UP at xl (2026-08-08). The panel is full width now, and one
              file of rows across 1,150px left most of each row empty while the
              panel itself ran to 422px. Priority still reads left-to-right then
@@ -558,7 +555,7 @@ const balancesTo = computed(() => (canManage.value ? '/billing' : '/residents'))
               </span>
           </NuxtLink>
         </div>
-      </section>
+      </Card>
 
       <!-- ── The foot ─────────────────────────────────────────────────────
            THREE panels in one row, and the number was measured rather than
@@ -573,31 +570,27 @@ const balancesTo = computed(() => (canManage.value ? '/billing' : '/residents'))
            `items-start` is back for that reason: nothing needs to stretch when
            the heights already agree. -->
       <div class="grid items-start gap-4 lg:grid-cols-3">
-        <section class="bg-card min-w-0 rounded-md border">
-          <div class="flex items-baseline gap-2 px-4 pt-3 pb-2">
-            <h2 class="text-muted-foreground text-[10.5px] font-semibold tracking-[0.1em] uppercase">
-              Today
-            </h2>
+        <Card as="section" class="min-w-0 p-0">
+          <CardHeader class="items-baseline">
+            <CardTitle as="h2">Today</CardTitle>
             <NuxtLink
               to="/schedule"
               class="text-primary ms-auto text-xs font-medium underline-offset-2 hover:underline"
             >
               Schedule →
             </NuxtLink>
-          </div>
+          </CardHeader>
           <!-- No border-t wrapper: the rows carry their own, exactly like the
                Signed out and Outstanding balances panels beside it. A wrapper
                would double the rule above the first row. -->
           <AppTodaySchedule :shared="data.upcoming.shared" :lanes="data.upcoming.lanes" />
-        </section>
+        </Card>
 
           <!-- Signed out. Overdue re-derived each tick, so a row crosses the
                grace window without a refetch — the census tile's pattern. -->
-          <section v-if="signedOut.length" class="bg-card min-w-0 rounded-md border">
-            <div class="flex items-baseline gap-2 px-4 pt-3 pb-2">
-              <h2 class="text-muted-foreground text-[10.5px] font-semibold tracking-[0.1em] uppercase">
-                Signed out
-              </h2>
+          <Card v-if="signedOut.length" as="section" class="min-w-0 p-0">
+            <CardHeader class="items-baseline">
+              <CardTitle as="h2">Signed out</CardTitle>
               <span class="text-xs font-semibold tabular-nums">{{ signedOut.length }}</span>
               <NuxtLink
                 to="/sign-outs"
@@ -605,7 +598,7 @@ const balancesTo = computed(() => (canManage.value ? '/billing' : '/residents'))
               >
                 Sign-outs →
               </NuxtLink>
-            </div>
+            </CardHeader>
             <div
               v-for="s in signedOut"
               :key="s.id"
@@ -640,7 +633,7 @@ const balancesTo = computed(() => (canManage.value ? '/billing' : '/residents'))
                 {{ isOverdue(s) ? 'due' : 'back' }} {{ formatFacilityTime(s.expectedReturnAt) }}
               </span>
             </div>
-          </section>
+          </Card>
 
           <!-- Outstanding balances. The panel KEEPS its name now that invoicing
                exists — it is still the complete list, and overdue is a property
@@ -648,11 +641,9 @@ const balancesTo = computed(() => (canManage.value ? '/billing' : '/residents'))
                the Signed-out panel's destructive BADGE, deliberately not its
                inset rule: the 2026-08-06 polish pass left exactly one inset on
                this page so that inset means something. Considered, declined. -->
-          <section v-if="balances.owing.length" class="bg-card min-w-0 rounded-md border">
-            <div class="flex items-baseline gap-2 px-4 pt-3 pb-2">
-              <h2 class="text-muted-foreground text-[10.5px] font-semibold tracking-[0.1em] uppercase">
-                Outstanding balances
-              </h2>
+          <Card v-if="balances.owing.length" as="section" class="min-w-0 p-0">
+            <CardHeader class="items-baseline">
+              <CardTitle as="h2">Outstanding balances</CardTitle>
               <span class="text-xs font-semibold tabular-nums">{{ money(balances.totalCents) }}</span>
               <NuxtLink
                 :to="balancesTo"
@@ -660,7 +651,7 @@ const balancesTo = computed(() => (canManage.value ? '/billing' : '/residents'))
               >
                 {{ canManage ? 'Billing →' : 'Residents →' }}
               </NuxtLink>
-            </div>
+            </CardHeader>
             <NuxtLink
               v-for="r in balances.owing"
               :key="r.residentId"
@@ -690,7 +681,7 @@ const balancesTo = computed(() => (canManage.value ? '/billing' : '/residents'))
               </div>
               <span class="text-sm font-semibold tabular-nums">{{ money(r.balanceCents) }}</span>
             </NuxtLink>
-          </section>
+          </Card>
       </div>
     </div>
 

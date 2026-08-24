@@ -89,6 +89,9 @@ async function submit() {
     pending.value = false
   }
 }
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('minutes', 'newSeriesStarts', 'onTheseDays', 'startsAt', 'why')
 </script>
 
 <template>
@@ -106,32 +109,32 @@ async function submit() {
           <AlertDescription>{{ error }}</AlertDescription>
         </Alert>
 
-        <AppField
-          v-slot="{ id }"
-          label="New series starts"
-          required
-          :description="`No earlier than ${humanDate(floor, { short: true, relative: false })} — everything up to then is on the record.`"
-        >
-          <Input :id="id" v-model="form.from" type="date" :min="floor" required />
-        </AppField>
+        <Field>
+          <FieldLabel :for="ids.newSeriesStarts">New series starts<span class="text-destructive" aria-hidden="true">*</span></FieldLabel>
+          <Input :id="ids.newSeriesStarts" v-model="form.from" type="date" :min="floor" required />
+          <FieldDescription>{{ `No earlier than ${humanDate(floor, { short: true, relative: false })} — everything up to then is on the record.` }}</FieldDescription>
+        </Field>
 
         <div class="grid gap-4 sm:grid-cols-2">
-          <AppField v-slot="{ id }" label="Starts at">
-            <Input :id="id" v-model="form.startsAtLocal" type="time" required />
-          </AppField>
-          <AppField v-slot="{ id }" label="Minutes">
+          <Field>
+            <FieldLabel :for="ids.startsAt">Starts at</FieldLabel>
+            <Input :id="ids.startsAt" v-model="form.startsAtLocal" type="time" required />
+          </Field>
+          <Field>
+            <FieldLabel :for="ids.minutes">Minutes</FieldLabel>
             <Input
-              :id="id"
+              :id="ids.minutes"
               v-model.number="form.durationMinutes"
               type="number"
               min="1"
               max="1440"
               required
             />
-          </AppField>
+          </Field>
         </div>
 
-        <AppField v-if="isWeekly" label="On these days">
+        <Field v-if="isWeekly">
+          <FieldLabel :for="ids.onTheseDays">On these days</FieldLabel>
           <div class="flex flex-wrap gap-1.5">
             <button
               v-for="d in WEEKDAYS"
@@ -150,15 +153,13 @@ async function submit() {
               {{ d.label }}
             </button>
           </div>
-        </AppField>
+        </Field>
 
-        <AppField
-          v-slot="{ id }"
-          label="Why"
-          description="Optional, and kept with the new series."
-        >
-          <Input :id="id" v-model="form.reason" placeholder="Room reassigned, court order…" />
-        </AppField>
+        <Field>
+          <FieldLabel :for="ids.why">Why</FieldLabel>
+          <Input :id="ids.why" v-model="form.reason" placeholder="Room reassigned, court order…" />
+          <FieldDescription>Optional, and kept with the new series.</FieldDescription>
+        </Field>
 
         <!-- The consequence, in numbers rather than adjectives. This is the
              sentence that makes the two-events outcome expected rather than a

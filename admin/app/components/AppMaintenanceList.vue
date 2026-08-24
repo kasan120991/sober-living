@@ -72,15 +72,14 @@ function openAssign(request) {
   <div class="flex flex-col gap-2">
     <p v-if="!requests.length" class="text-muted-foreground text-sm">No maintenance requests.</p>
 
-    <div
+    <Card
       v-for="r in requests"
       :key="r.id"
-      class="bg-card rounded-md border p-3"
+      
       :class="[
         !isOpen(r) && 'opacity-70',
         r.state === 'OVERDUE' && 'shadow-[inset_3px_0_0_var(--destructive)]',
-      ]"
-    >
+      ]" class="p-3">
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-2">
@@ -143,7 +142,7 @@ function openAssign(request) {
           @view-request="openDetail"
         />
       </div>
-    </div>
+    </Card>
   </div>
 
   <AppMaintenanceCloseDialog

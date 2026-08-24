@@ -70,6 +70,9 @@ async function submit() {
     pending.value = false
   }
 }
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('lastDate')
 </script>
 
 <template>
@@ -89,18 +92,15 @@ async function submit() {
           <AlertDescription>{{ error }}</AlertDescription>
         </Alert>
 
-        <AppField
-          v-slot="{ id }"
-          label="Last date"
-          required
-          :description="
+        <Field>
+          <FieldLabel :for="ids.lastDate">Last date<span class="text-destructive" aria-hidden="true">*</span></FieldLabel>
+          <Input :id="ids.lastDate" v-model="endsOn" type="date" :min="floor ?? undefined" required />
+          <FieldDescription>{{
             floor
               ? `No earlier than ${humanDate(floor, { short: true, relative: false })} — there is a record on that date.`
               : 'The final date this series runs.'
-          "
-        >
-          <Input :id="id" v-model="endsOn" type="date" :min="floor ?? undefined" required />
-        </AppField>
+           }}</FieldDescription>
+        </Field>
 
         <p class="text-muted-foreground text-xs">
           Sessions up to this date stay exactly as they are<template v-if="recordedLabel">,

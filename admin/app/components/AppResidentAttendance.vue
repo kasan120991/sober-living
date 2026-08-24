@@ -92,7 +92,7 @@ const byDay = computed(() => {
         <h2 class="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
           This stay
         </h2>
-        <div class="bg-card rounded-md border p-4">
+        <Card>
           <div class="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
             <!-- Counts, never a percentage: "31 of 38" carries its own sample
                  size where "82%" implies a measurement. -->
@@ -145,7 +145,7 @@ const byDay = computed(() => {
               :style="{ flex: summary.bars.absent }"
             />
           </div>
-        </div>
+        </Card>
       </section>
 
       <!-- ── The trail ──────────────────────────────────────────────────── -->

@@ -103,6 +103,9 @@ async function submit() {
     pending.value = false
   }
 }
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('dateWorked', 'hours', 'location', 'note', 'resident', 'supervisor', 'theirPhone', 'whatWasWrong')
 </script>
 
 <template>
@@ -124,7 +127,8 @@ async function submit() {
           figures that are changing.
         </p>
 
-        <AppField v-if="!residentId && !isAmendment" label="Resident" required>
+        <Field v-if="!residentId && !isAmendment">
+          <FieldLabel :for="ids.resident">Resident<span class="text-destructive" aria-hidden="true">*</span></FieldLabel>
           <Select v-model="pickedResidentId" required>
             <SelectTrigger class="w-full">
               <SelectValue placeholder="Whose hours are these?" />
@@ -135,64 +139,53 @@ async function submit() {
               </SelectItem>
             </SelectContent>
           </Select>
-        </AppField>
+        </Field>
 
         <div class="flex gap-3">
-          <AppField
-            v-slot="{ id }"
-            label="Hours"
-            description="Quarter hours, e.g. 3.5"
-            class="w-32"
-            required
-          >
-            <Input :id="id" v-model="form.hours" type="number" step="0.25" min="0" max="24" required />
-          </AppField>
-          <AppField v-slot="{ id }" label="Date worked" class="flex-1" required>
-            <Input :id="id" v-model="form.workedOn" type="date" required />
-          </AppField>
+          <Field class="w-32">
+            <FieldLabel :for="ids.hours">Hours<span class="text-destructive" aria-hidden="true">*</span></FieldLabel>
+            <Input :id="ids.hours" v-model="form.hours" type="number" step="0.25" min="0" max="24" required />
+            <FieldDescription>Quarter hours, e.g. 3.5</FieldDescription>
+          </Field>
+          <Field class="flex-1">
+            <FieldLabel :for="ids.dateWorked">Date worked<span class="text-destructive" aria-hidden="true">*</span></FieldLabel>
+            <Input :id="ids.dateWorked" v-model="form.workedOn" type="date" required />
+          </Field>
         </div>
 
-        <AppField
-          v-slot="{ id }"
-          label="Location"
-          description="Required — an hour with no place is not defensible later."
-          required
-        >
-          <Input :id="id" v-model="form.location" placeholder="Habitat ReStore" required />
-        </AppField>
+        <Field>
+          <FieldLabel :for="ids.location">Location<span class="text-destructive" aria-hidden="true">*</span></FieldLabel>
+          <Input :id="ids.location" v-model="form.location" placeholder="Habitat ReStore" required />
+          <FieldDescription>Required — an hour with no place is not defensible later.</FieldDescription>
+        </Field>
 
         <div class="flex gap-3">
-          <AppField v-slot="{ id }" label="Supervisor" class="flex-1">
-            <Input :id="id" v-model="form.supervisorName" placeholder="Dana Cole" />
-          </AppField>
-          <AppField
-            v-slot="{ id }"
-            label="Their phone"
-            description="Verifying means ringing them."
-            class="flex-1"
-          >
-            <Input :id="id" v-model="form.supervisorPhone" placeholder="404-555-0143" />
-          </AppField>
+          <Field class="flex-1">
+            <FieldLabel :for="ids.supervisor">Supervisor</FieldLabel>
+            <Input :id="ids.supervisor" v-model="form.supervisorName" placeholder="Dana Cole" />
+          </Field>
+          <Field class="flex-1">
+            <FieldLabel :for="ids.theirPhone">Their phone</FieldLabel>
+            <Input :id="ids.theirPhone" v-model="form.supervisorPhone" placeholder="404-555-0143" />
+            <FieldDescription>Verifying means ringing them.</FieldDescription>
+          </Field>
         </div>
 
-        <AppField v-slot="{ id }" label="Note">
-          <Input :id="id" v-model="form.note" placeholder="Optional" />
-        </AppField>
+        <Field>
+          <FieldLabel :for="ids.note">Note</FieldLabel>
+          <Input :id="ids.note" v-model="form.note" placeholder="Optional" />
+        </Field>
 
-        <AppField
-          v-if="isAmendment"
-          v-slot="{ id }"
-          label="What was wrong"
-          description="Recorded permanently. Without it the record shows a number changed and nothing about why."
-          required
-        >
+        <Field v-if="isAmendment">
+          <FieldLabel :for="ids.whatWasWrong">What was wrong<span class="text-destructive" aria-hidden="true">*</span></FieldLabel>
           <Input
-            :id="id"
+            :id="ids.whatWasWrong"
             v-model="form.amendmentReason"
             placeholder="Supervisor's sheet says 5 hours, not 8"
             required
           />
-        </AppField>
+          <FieldDescription>Recorded permanently. Without it the record shows a number changed and nothing about why.</FieldDescription>
+        </Field>
 
         <p v-if="isAmendment" class="text-muted-foreground text-xs">
           Was {{ hours(amending.minutes) }}. Zero hours voids the entry.

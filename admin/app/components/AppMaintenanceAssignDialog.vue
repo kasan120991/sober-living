@@ -69,43 +69,46 @@ async function submit() {
     pending.value = false
   }
 }
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('vendor', 'whoIsOnIt', 'workOrder')
 </script>
 
 <template>
   <Dialog :open="open" @update:open="(v) => emit('update:open', v)">
     <DialogContent class="sm:max-w-[480px]">
-      <DialogHeader><DialogTitle>Assign request</DialogTitle></DialogHeader>
+      <DialogHeader>
+        <DialogTitle>Assign request</DialogTitle>
+        <DialogDescription>{{ request?.title }}</DialogDescription>
+      </DialogHeader>
       <form class="flex flex-col gap-4" @submit.prevent="submit">
-        <p class="text-sm">{{ request?.title }}</p>
         <Alert v-if="error" variant="destructive">
           <AlertDescription>{{ error }}</AlertDescription>
         </Alert>
 
-        <AppField
-          v-slot="{ id }"
-          label="Who is on it"
-          description="Somebody here, a vendor below, or both — a manager who owns the job and called a plumber is one request."
-        >
-          <Select :id="id" v-model="form.assignedToId">
+        <Field>
+          <FieldLabel :for="ids.whoIsOnIt">Who is on it</FieldLabel>
+          <Select :id="ids.whoIsOnIt" v-model="form.assignedToId">
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem :value="NOBODY">Nobody in-house</SelectItem>
               <SelectItem v-for="s in staff" :key="s.id" :value="s.id">{{ s.fullName }}</SelectItem>
             </SelectContent>
           </Select>
-        </AppField>
+          <FieldDescription>Somebody here, a vendor below, or both — a manager who owns the job and called a plumber is one request.</FieldDescription>
+        </Field>
 
-        <AppField v-slot="{ id }" label="Vendor" description="Optional.">
-          <Input :id="id" v-model="form.vendorName" placeholder="Ridgeway Glazing" />
-        </AppField>
+        <Field>
+          <FieldLabel :for="ids.vendor">Vendor</FieldLabel>
+          <Input :id="ids.vendor" v-model="form.vendorName" placeholder="Ridgeway Glazing" />
+          <FieldDescription>Optional.</FieldDescription>
+        </Field>
 
-        <AppField
-          v-slot="{ id }"
-          label="Work order"
-          description="Their reference for the job, so it can be chased by number."
-        >
-          <Input :id="id" v-model="form.workOrderRef" placeholder="118" />
-        </AppField>
+        <Field>
+          <FieldLabel :for="ids.workOrder">Work order</FieldLabel>
+          <Input :id="ids.workOrder" v-model="form.workOrderRef" placeholder="118" />
+          <FieldDescription>Their reference for the job, so it can be chased by number.</FieldDescription>
+        </Field>
 
         <DialogFooter>
           <Button type="button" variant="ghost" @click="emit('update:open', false)">Cancel</Button>

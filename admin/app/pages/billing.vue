@@ -108,7 +108,7 @@ const recent = computed(() => data.value?.recent ?? [])
           </p>
         </div>
 
-        <div class="bg-card rounded-md border p-3.5">
+        <Card class="p-3.5">
           <p class="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
             Waiting to be billed
           </p>
@@ -124,9 +124,9 @@ const recent = computed(() => data.value?.recent ?? [])
             </span>
             <span v-else>Not owed by anyone until it is invoiced</span>
           </p>
-        </div>
+        </Card>
 
-        <div class="bg-card rounded-md border p-3.5">
+        <Card class="p-3.5">
           <p class="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
             Invoices past due
           </p>
@@ -139,7 +139,7 @@ const recent = computed(() => data.value?.recent ?? [])
           <p v-else class="text-muted-foreground mt-1 text-[12.5px]">
             {{ recent.length }} invoices recently
           </p>
-        </div>
+        </Card>
       </div>
 
       <!-- ── Ready to bill ────────────────────────────────────────────────
@@ -165,10 +165,10 @@ const recent = computed(() => data.value?.recent ?? [])
         </div>
 
         <div v-if="sendable.length" class="overflow-hidden rounded-md border">
-          <table class="w-full border-collapse text-[13.5px]">
-            <tbody>
-              <tr v-for="s in sendable" :key="s.stayId" class="bg-card">
-                <td class="h-11 border-b px-3">
+          <Table class="text-[13.5px]">
+            <TableBody>
+              <TableRow v-for="s in sendable" :key="s.stayId" class="bg-card">
+                <TableCell class="h-11">
                   <NuxtLink
                     :to="`/residents/${s.residentId}`"
                     class="underline-offset-2 hover:underline"
@@ -178,16 +178,16 @@ const recent = computed(() => data.value?.recent ?? [])
                   <span v-if="s.creditCents" class="text-muted-foreground">
                     · {{ money(s.creditCents) }} in credit
                   </span>
-                </td>
-                <td class="text-muted-foreground h-11 border-b px-3 text-right tabular-nums">
+                </TableCell>
+                <TableCell class="text-muted-foreground h-11 text-right tabular-nums">
                   {{ s.lineCount }} {{ s.lineCount === 1 ? 'line' : 'lines' }}
-                </td>
-                <td class="h-11 w-[8em] border-b px-3 text-right font-medium tabular-nums">
+                </TableCell>
+                <TableCell class="h-11 w-[8em] text-right font-medium tabular-nums">
                   {{ money(s.netCents) }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
         </div>
         <p v-else class="text-muted-foreground text-sm">
           Nothing to bill — no active stay has charges waiting.
@@ -220,51 +220,49 @@ const recent = computed(() => data.value?.recent ?? [])
           Past due
         </h2>
         <div class="overflow-hidden rounded-md border">
-          <div class="overflow-x-auto">
-            <table class="w-full border-collapse text-[13.5px]">
-              <tbody>
-                <tr v-for="i in pastDue" :key="i.invoiceId" class="bg-card">
-                  <td class="h-11 border-b px-3 whitespace-nowrap">
-                    <NuxtLink
-                      :to="`/residents/${i.residentId}`"
-                      class="underline-offset-2 hover:underline"
-                    >
-                      {{ i.residentName }}
-                    </NuxtLink>
-                  </td>
-                  <td class="text-muted-foreground h-11 border-b px-3 tabular-nums whitespace-nowrap">
-                    {{ i.number ?? '—' }}
-                  </td>
-                  <td class="h-11 border-b px-3 whitespace-nowrap">
-                    <Badge
-                      variant="outline"
-                      class="border-transparent text-[10px]"
-                      :class="toneClass('destructive')"
-                    >
-                      {{ i.daysPastDue }}d
-                    </Badge>
-                    <span class="text-muted-foreground ms-1.5 text-xs">
-                      due {{ facilityDateOf(i.dueAt) }}
-                    </span>
-                  </td>
-                  <td class="h-11 border-b px-3 text-right font-medium tabular-nums whitespace-nowrap">
-                    {{ money(i.totalCents) }}
-                  </td>
-                  <td class="h-11 border-b px-3 text-right whitespace-nowrap">
-                    <a
-                      v-if="i.hostedUrl"
-                      :href="i.hostedUrl"
-                      target="_blank"
-                      rel="noopener"
-                      class="text-muted-foreground inline-flex items-center gap-1 underline underline-offset-2"
-                    >
-                      Open <ExternalLink class="size-3" />
-                    </a>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          <Table class="text-[13.5px]">
+            <TableBody>
+              <TableRow v-for="i in pastDue" :key="i.invoiceId" class="bg-card">
+                <TableCell class="h-11 whitespace-nowrap">
+                  <NuxtLink
+                    :to="`/residents/${i.residentId}`"
+                    class="underline-offset-2 hover:underline"
+                  >
+                    {{ i.residentName }}
+                  </NuxtLink>
+                </TableCell>
+                <TableCell class="text-muted-foreground h-11 tabular-nums whitespace-nowrap">
+                  {{ i.number ?? '—' }}
+                </TableCell>
+                <TableCell class="h-11 whitespace-nowrap">
+                  <Badge
+                    variant="outline"
+                    class="border-transparent text-[10px]"
+                    :class="toneClass('destructive')"
+                  >
+                    {{ i.daysPastDue }}d
+                  </Badge>
+                  <span class="text-muted-foreground ms-1.5 text-xs">
+                    due {{ facilityDateOf(i.dueAt) }}
+                  </span>
+                </TableCell>
+                <TableCell class="h-11 text-right font-medium tabular-nums whitespace-nowrap">
+                  {{ money(i.totalCents) }}
+                </TableCell>
+                <TableCell class="h-11 text-right whitespace-nowrap">
+                  <a
+                    v-if="i.hostedUrl"
+                    :href="i.hostedUrl"
+                    target="_blank"
+                    rel="noopener"
+                    class="text-muted-foreground inline-flex items-center gap-1 underline underline-offset-2"
+                  >
+                    Open <ExternalLink class="size-3" />
+                  </a>
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
         </div>
       </section>
 
@@ -274,51 +272,49 @@ const recent = computed(() => data.value?.recent ?? [])
           Recent invoices
         </h2>
         <div class="overflow-hidden rounded-md border">
-          <div class="overflow-x-auto">
-            <table class="w-full border-collapse text-[13.5px]">
-              <tbody>
-                <tr v-for="i in recent" :key="i.id" class="bg-card">
-                  <td class="text-muted-foreground h-11 border-b px-3 tabular-nums whitespace-nowrap">
-                    {{ humanDate(facilityDateOf(i.createdAt), { short: true }) }}
-                  </td>
-                  <td class="h-11 border-b px-3 whitespace-nowrap">
-                    <NuxtLink
-                      :to="`/residents/${i.residentId}`"
-                      class="underline-offset-2 hover:underline"
-                    >
-                      {{ i.residentName }}
-                    </NuxtLink>
-                  </td>
-                  <td class="text-muted-foreground h-11 border-b px-3 tabular-nums whitespace-nowrap">
-                    {{ i.number ?? 'Not sent' }}
-                  </td>
-                  <td class="h-11 border-b px-3 whitespace-nowrap">
-                    <Badge
-                      variant="outline"
-                      class="border-transparent text-[10px]"
-                      :class="toneClass(invoiceStatusDisplay(i).tone)"
-                    >
-                      {{ invoiceStatusDisplay(i).label }}
-                    </Badge>
-                  </td>
-                  <td class="h-11 border-b px-3 text-right tabular-nums whitespace-nowrap">
-                    {{ money(i.totalCents) }}
-                  </td>
-                  <td class="h-11 border-b px-3 text-right whitespace-nowrap">
-                    <a
-                      v-if="i.hostedUrl"
-                      :href="i.hostedUrl"
-                      target="_blank"
-                      rel="noopener"
-                      class="text-muted-foreground inline-flex items-center gap-1 underline underline-offset-2"
-                    >
-                      Open <ExternalLink class="size-3" />
-                    </a>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          <Table class="text-[13.5px]">
+            <TableBody>
+              <TableRow v-for="i in recent" :key="i.id" class="bg-card">
+                <TableCell class="text-muted-foreground h-11 tabular-nums whitespace-nowrap">
+                  {{ humanDate(facilityDateOf(i.createdAt), { short: true }) }}
+                </TableCell>
+                <TableCell class="h-11 whitespace-nowrap">
+                  <NuxtLink
+                    :to="`/residents/${i.residentId}`"
+                    class="underline-offset-2 hover:underline"
+                  >
+                    {{ i.residentName }}
+                  </NuxtLink>
+                </TableCell>
+                <TableCell class="text-muted-foreground h-11 tabular-nums whitespace-nowrap">
+                  {{ i.number ?? 'Not sent' }}
+                </TableCell>
+                <TableCell class="h-11 whitespace-nowrap">
+                  <Badge
+                    variant="outline"
+                    class="border-transparent text-[10px]"
+                    :class="toneClass(invoiceStatusDisplay(i).tone)"
+                  >
+                    {{ invoiceStatusDisplay(i).label }}
+                  </Badge>
+                </TableCell>
+                <TableCell class="h-11 text-right tabular-nums whitespace-nowrap">
+                  {{ money(i.totalCents) }}
+                </TableCell>
+                <TableCell class="h-11 text-right whitespace-nowrap">
+                  <a
+                    v-if="i.hostedUrl"
+                    :href="i.hostedUrl"
+                    target="_blank"
+                    rel="noopener"
+                    class="text-muted-foreground inline-flex items-center gap-1 underline underline-offset-2"
+                  >
+                    Open <ExternalLink class="size-3" />
+                  </a>
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
         </div>
       </section>
     </div>

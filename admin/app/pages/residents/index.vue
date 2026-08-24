@@ -171,133 +171,131 @@ const shownCapacity = computed(() => {
       <p v-if="pending" class="text-muted-foreground text-sm">Loading…</p>
 
       <div v-else class="border-border overflow-hidden rounded-md border">
-        <div class="overflow-x-auto">
-          <table class="w-full border-collapse text-[13.5px]">
-            <thead>
-              <tr>
-                <th
-                  v-for="c in columns"
-                  :key="c.key"
-                  class="border-border bg-card text-muted-foreground border-b px-3 py-2 text-left text-[10.5px] font-semibold tracking-[0.1em] whitespace-nowrap uppercase"
-                  :class="c.align === 'end' && 'text-right'"
+        <Table class="text-[13.5px]">
+          <TableHeader>
+            <TableRow>
+              <TableHead
+                v-for="c in columns"
+                :key="c.key"
+                class="tracking-[0.1em]"
+                :class="c.align === 'end' && 'text-right'"
+              >
+                <span :class="c.srOnly && 'sr-only'">{{ c.label }}</span>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <TableRow v-for="r in filtered" :key="r.id" class="bg-card">
+              <TableCell class="whitespace-nowrap">
+                <NuxtLink
+                  :to="`/residents/${r.id}`"
+                  class="text-foreground font-medium hover:underline"
                 >
-                  <span :class="c.srOnly && 'sr-only'">{{ c.label }}</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="r in filtered" :key="r.id" class="bg-card">
-                <td class="border-border h-12 border-b px-3 whitespace-nowrap">
-                  <NuxtLink
-                    :to="`/residents/${r.id}`"
-                    class="text-foreground font-medium hover:underline"
-                  >
-                    {{ r.lastName }}, {{ r.firstName }}
-                  </NuxtLink>
-                </td>
+                  {{ r.lastName }}, {{ r.firstName }}
+                </NuxtLink>
+              </TableCell>
 
-                <td v-if="showCohortColumn" class="border-border h-12 border-b px-3 whitespace-nowrap">
-                  <Badge variant="outline" class="tracking-wider text-[10px] uppercase">
-                    {{ r.cohort === 'MEN' ? 'Men' : 'Women' }}
-                  </Badge>
-                </td>
+              <TableCell v-if="showCohortColumn" class="whitespace-nowrap">
+                <Badge variant="outline" class="tracking-wider text-[10px] uppercase">
+                  {{ r.cohort === 'MEN' ? 'Men' : 'Women' }}
+                </Badge>
+              </TableCell>
 
-                <!-- "No bed" is an exception state, so it is one of the two
-                     things on this screen that gets colour. -->
-                <td class="border-border h-12 border-b px-3 whitespace-nowrap">
-                  <span v-if="r.bed" class="text-foreground">
-                    {{ r.bed.apartmentName }} · {{ r.bed.label }}
-                  </span>
-                  <Badge
-                    v-else-if="r.status === 'ACTIVE'"
-                    variant="outline"
-                    class="border-warning/40 bg-warning/15 text-warning"
-                    >No bed</Badge
-                  >
-                  <span v-else class="text-muted-foreground/60">—</span>
-                </td>
-
-                <td class="border-border h-12 border-b px-3 whitespace-nowrap">
-                  {{ r.program?.name ?? '—' }}
-                </td>
-                <td class="border-border h-12 border-b px-3 tabular-nums whitespace-nowrap">
-                  {{ facilityDateOf(r.intakeAt) ?? '—' }}
-                </td>
-                <td class="border-border h-12 border-b px-3 tabular-nums whitespace-nowrap">
-                  <span v-if="r.status === 'ACTIVE'">{{ r.dayOfStay }}</span>
-                  <span v-else class="text-muted-foreground/60">discharged</span>
-                </td>
-
-                <!-- Right-aligned and tabular so the column can be scanned for
-                     magnitude. Deliberately no threshold colouring: "how far
-                     behind is too far" is facility policy and is not set yet. -->
-                <td
-                  class="border-border h-12 border-b px-3 text-right tabular-nums whitespace-nowrap"
+              <!-- "No bed" is an exception state, so it is one of the two
+                   things on this screen that gets colour. -->
+              <TableCell class="whitespace-nowrap">
+                <span v-if="r.bed" class="text-foreground">
+                  {{ r.bed.apartmentName }} · {{ r.bed.label }}
+                </span>
+                <Badge
+                  v-else-if="r.status === 'ACTIVE'"
+                  variant="outline"
+                  class="border-warning/40 bg-warning/15 text-warning"
+                  >No bed</Badge
                 >
-                  <span
-                    v-if="r.balanceCents != null"
-                    :class="
-                      r.balanceCents === 0
-                        ? 'text-muted-foreground'
-                        : inCredit(r.balanceCents)
-                          ? 'text-success'
-                          : 'text-foreground'
-                    "
-                  >
-                    {{ money(r.balanceCents) }}
-                  </span>
-                  <span v-else class="text-muted-foreground/60">—</span>
-                </td>
+                <span v-else class="text-muted-foreground/60">—</span>
+              </TableCell>
 
-                <!-- Same shape as AppBedTable: ghost ellipsis, menu aligned to
-                     the end. Discharged rows keep the trigger but offer only
-                     the record — an empty cell reads as broken. -->
-                <td v-if="canManage" class="border-border h-12 border-b px-3 text-right">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger as-child>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        :aria-label="`Actions for ${r.fullName}`"
-                      >
-                        <Ellipsis class="size-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" class="w-52">
-                      <DropdownMenuItem as-child>
-                        <NuxtLink :to="`/residents/${r.id}`">Open record</NuxtLink>
+              <TableCell class="whitespace-nowrap">
+                {{ r.program?.name ?? '—' }}
+              </TableCell>
+              <TableCell class="tabular-nums whitespace-nowrap">
+                {{ facilityDateOf(r.intakeAt) ?? '—' }}
+              </TableCell>
+              <TableCell class="tabular-nums whitespace-nowrap">
+                <span v-if="r.status === 'ACTIVE'">{{ r.dayOfStay }}</span>
+                <span v-else class="text-muted-foreground/60">discharged</span>
+              </TableCell>
+
+              <!-- Right-aligned and tabular so the column can be scanned for
+                   magnitude. Deliberately no threshold colouring: "how far
+                   behind is too far" is facility policy and is not set yet. -->
+              <TableCell
+                class="text-right tabular-nums whitespace-nowrap"
+              >
+                <span
+                  v-if="r.balanceCents != null"
+                  :class="
+                    r.balanceCents === 0
+                      ? 'text-muted-foreground'
+                      : inCredit(r.balanceCents)
+                        ? 'text-success'
+                        : 'text-foreground'
+                  "
+                >
+                  {{ money(r.balanceCents) }}
+                </span>
+                <span v-else class="text-muted-foreground/60">—</span>
+              </TableCell>
+
+              <!-- Same shape as AppBedTable: ghost ellipsis, menu aligned to
+                   the end. Discharged rows keep the trigger but offer only
+                   the record — an empty cell reads as broken. -->
+              <TableCell v-if="canManage" class="text-right">
+                <DropdownMenu>
+                  <DropdownMenuTrigger as-child>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      :aria-label="`Actions for ${r.fullName}`"
+                    >
+                      <Ellipsis class="size-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" class="w-52">
+                    <DropdownMenuItem as-child>
+                      <NuxtLink :to="`/residents/${r.id}`">Open record</NuxtLink>
+                    </DropdownMenuItem>
+
+                    <template v-if="r.status === 'ACTIVE'">
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem @select="bedFor = r">
+                        {{ r.bed ? 'Move bed…' : 'Assign a bed…' }}
                       </DropdownMenuItem>
+                      <DropdownMenuItem v-if="r.bed" @select="releaseFor = r">
+                        Release bed
+                      </DropdownMenuItem>
+                      <DropdownMenuItem @select="payFor = r">Record a payment…</DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem class="text-destructive" @select="dischargeFor = r">
+                        Discharge…
+                      </DropdownMenuItem>
+                    </template>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </TableCell>
+            </TableRow>
 
-                      <template v-if="r.status === 'ACTIVE'">
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem @select="bedFor = r">
-                          {{ r.bed ? 'Move bed…' : 'Assign a bed…' }}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem v-if="r.bed" @select="releaseFor = r">
-                          Release bed
-                        </DropdownMenuItem>
-                        <DropdownMenuItem @select="payFor = r">Record a payment…</DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem class="text-destructive" @select="dischargeFor = r">
-                          Discharge…
-                        </DropdownMenuItem>
-                      </template>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </td>
-              </tr>
-
-              <tr v-if="!filtered.length">
-                <td
-                  :colspan="columns.length"
-                  class="bg-card text-muted-foreground px-3 py-8 text-center text-sm"
-                >
-                  {{ query ? `No resident matching “${query}”.` : 'Nobody in this cohort.' }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+            <TableRow v-if="!filtered.length">
+              <TableCell
+                :colspan="columns.length"
+                class="bg-card text-muted-foreground py-8 text-center text-sm"
+              >
+                {{ query ? `No resident matching “${query}”.` : 'Nobody in this cohort.' }}
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
       </div>
     </div>
 

@@ -49,6 +49,9 @@ async function save(clear = false) {
     pending.value = false
   }
 }
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('hoursForThisStay')
 </script>
 
 <template>
@@ -64,13 +67,11 @@ async function save(clear = false) {
           <AlertDescription>{{ error }}</AlertDescription>
         </Alert>
 
-        <AppField
-          v-slot="{ id }"
-          label="Hours for this stay"
-          description="Whole hours. Leave blank and clear to fall back to the phase default."
-        >
-          <Input :id="id" v-model="value" type="number" min="0" max="2000" step="1" />
-        </AppField>
+        <Field>
+          <FieldLabel :for="ids.hoursForThisStay">Hours for this stay</FieldLabel>
+          <Input :id="ids.hoursForThisStay" v-model="value" type="number" min="0" max="2000" step="1" />
+          <FieldDescription>Whole hours. Leave blank and clear to fall back to the phase default.</FieldDescription>
+        </Field>
 
         <p class="text-muted-foreground text-xs">
           <template v-if="service?.targetSource === 'STAY'">

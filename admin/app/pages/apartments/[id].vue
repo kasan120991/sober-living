@@ -80,6 +80,9 @@ async function submitBeds() {
 // written inline here and reachable from nowhere else, which is why the
 // house-wide /maintenance queue had no way to file anything at all.
 const reqOpen = ref(false)
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('how', 'howMany', 'label', 'labelled')
 </script>
 
 <template>
@@ -151,7 +154,8 @@ const reqOpen = ref(false)
           <AlertDescription>{{ bedError }}</AlertDescription>
         </Alert>
 
-        <AppField label="How">
+        <Field>
+          <FieldLabel :for="ids.how">How</FieldLabel>
           <RadioGroup v-model="bedMode" class="flex flex-col gap-2">
             <div class="flex items-center gap-2">
               <RadioGroupItem id="bulk" value="bulk" />
@@ -162,14 +166,16 @@ const reqOpen = ref(false)
               <Label for="single" class="font-normal">One with a specific label</Label>
             </div>
           </RadioGroup>
-        </AppField>
+        </Field>
 
         <template v-if="bedMode === 'bulk'">
           <div class="flex gap-3">
-            <AppField v-slot="{ id }" label="How many" class="flex-1">
-              <Input :id="id" v-model="bedForm.count" type="number" min="1" max="24" />
-            </AppField>
-            <AppField label="Labelled" class="flex-1">
+            <Field class="flex-1">
+              <FieldLabel :for="ids.howMany">How many</FieldLabel>
+              <Input :id="ids.howMany" v-model="bedForm.count" type="number" min="1" max="24" />
+            </Field>
+            <Field class="flex-1">
+              <FieldLabel :for="ids.labelled">Labelled</FieldLabel>
               <Select v-model="bedForm.scheme">
                 <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -177,7 +183,7 @@ const reqOpen = ref(false)
                   <SelectItem value="numeric">1, 2, 3…</SelectItem>
                 </SelectContent>
               </Select>
-            </AppField>
+            </Field>
           </div>
           <!-- Show the labels before committing: bulk creation continues from
                the last existing bed rather than restarting, which is easy to
@@ -187,9 +193,10 @@ const reqOpen = ref(false)
           </p>
         </template>
 
-        <AppField v-else v-slot="{ id }" label="Label">
-          <Input :id="id" v-model="bedForm.label" placeholder="E" required />
-        </AppField>
+        <Field>
+          <FieldLabel :for="ids.label">Label</FieldLabel>
+          <Input :id="ids.label" v-model="bedForm.label" placeholder="E" required />
+        </Field>
 
         <DialogFooter>
           <Button type="button" variant="ghost" @click="bedsOpen = false">Cancel</Button>

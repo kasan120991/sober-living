@@ -102,6 +102,9 @@ async function submit() {
     pending.value = false
   }
 }
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('collectionWitness', 'detected', 'note', 'reason', 'resident', 'result', 'specimenSealNumber', 'testType')
 </script>
 
 <template>
@@ -123,9 +126,10 @@ async function submit() {
           <AlertDescription>{{ error }}</AlertDescription>
         </Alert>
 
-        <AppField v-slot="{ id }" label="Resident">
+        <Field>
+          <FieldLabel :for="ids.resident">Resident</FieldLabel>
           <select
-            :id="id"
+            :id="ids.resident"
             v-model="form.residentId"
             class="border-input bg-background w-full rounded-md border px-3 text-sm max-md:min-h-11 pointer-coarse:min-h-11 min-h-9"
           >
@@ -134,30 +138,33 @@ async function submit() {
               {{ r.firstName }} {{ r.lastName }}
             </option>
           </select>
-        </AppField>
+        </Field>
 
         <div class="grid grid-cols-2 gap-3">
-          <AppField v-slot="{ id }" label="Reason">
+          <Field>
+            <FieldLabel :for="ids.reason">Reason</FieldLabel>
             <select
-              :id="id"
+              :id="ids.reason"
               v-model="form.reason"
               class="border-input bg-background w-full rounded-md border px-3 text-sm max-md:min-h-11 pointer-coarse:min-h-11 min-h-9"
             >
               <option v-for="r in SCREEN_REASONS" :key="r.value" :value="r.value">{{ r.label }}</option>
             </select>
-          </AppField>
-          <AppField v-slot="{ id }" label="Test type">
+          </Field>
+          <Field>
+            <FieldLabel :for="ids.testType">Test type</FieldLabel>
             <select
-              :id="id"
+              :id="ids.testType"
               v-model="form.method"
               class="border-input bg-background w-full rounded-md border px-3 text-sm max-md:min-h-11 pointer-coarse:min-h-11 min-h-9"
             >
               <option v-for="m in SCREEN_METHODS" :key="m.value" :value="m.value">{{ m.label }}</option>
             </select>
-          </AppField>
+          </Field>
         </div>
 
-        <AppField label="Result" description="A refusal and a dilute are outcomes of their own, never a failure.">
+        <Field>
+          <FieldLabel :for="ids.result">Result</FieldLabel>
           <div class="flex flex-wrap gap-1.5">
             <button
               v-for="r in RESULTS"
@@ -170,9 +177,11 @@ async function submit() {
               {{ r === 'PENDING' ? 'Not read' : humanEnum(r) }}
             </button>
           </div>
-        </AppField>
+          <FieldDescription>A refusal and a dilute are outcomes of their own, never a failure.</FieldDescription>
+        </Field>
 
-        <AppField v-if="isPositive" label="Detected" description="A positive names what was found.">
+        <Field v-if="isPositive">
+          <FieldLabel :for="ids.detected">Detected</FieldLabel>
           <div class="flex flex-wrap gap-1.5">
             <button
               v-for="s in SUBSTANCES"
@@ -185,31 +194,33 @@ async function submit() {
               {{ humanEnum(s) }}
             </button>
           </div>
-        </AppField>
+          <FieldDescription>A positive names what was found.</FieldDescription>
+        </Field>
 
-        <AppField
-          v-if="needsSpecimen"
-          v-slot="{ id }"
-          label="Specimen / seal number"
-          description="What ties this to a lab report."
-        >
-          <Input :id="id" v-model="form.specimenId" maxlength="60" placeholder="e.g. SL-40881" />
-        </AppField>
+        <Field v-if="needsSpecimen">
+          <FieldLabel :for="ids.specimenSealNumber">Specimen / seal number</FieldLabel>
+          <Input :id="ids.specimenSealNumber" v-model="form.specimenId" maxlength="60" placeholder="e.g. SL-40881" />
+          <FieldDescription>What ties this to a lab report.</FieldDescription>
+        </Field>
 
-        <AppField v-slot="{ id }" label="Collection witness" description="Who observed the specimen being given.">
+        <Field>
+          <FieldLabel :for="ids.collectionWitness">Collection witness</FieldLabel>
           <select
-            :id="id"
+            :id="ids.collectionWitness"
             v-model="form.witnessedById"
             class="border-input bg-background w-full rounded-md border px-3 text-sm max-md:min-h-11 pointer-coarse:min-h-11 min-h-9"
           >
             <option value="">Choose…</option>
             <option v-for="s in staff" :key="s.id" :value="s.id">{{ s.fullName }}</option>
           </select>
-        </AppField>
+          <FieldDescription>Who observed the specimen being given.</FieldDescription>
+        </Field>
 
-        <AppField v-slot="{ id }" label="Note" description="Optional.">
-          <Input :id="id" v-model="form.note" maxlength="500" />
-        </AppField>
+        <Field>
+          <FieldLabel :for="ids.note">Note</FieldLabel>
+          <Input :id="ids.note" v-model="form.note" maxlength="500" />
+          <FieldDescription>Optional.</FieldDescription>
+        </Field>
       </div>
 
       <SheetFooter class="border-t p-4">

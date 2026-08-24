@@ -135,6 +135,9 @@ async function submit() {
     pending.value = false
   }
 }
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('admissionDate', 'bed', 'cohort', 'contactPhone', 'dateOfBirth', 'emailAddress', 'expectedOut', 'firstName', 'groupNumber', 'insuranceProvider', 'intakeNotes', 'lastName', 'name', 'phoneNumber', 'policyHolder', 'policyNumber', 'program', 'referralSource', 'relationship', 'sobrietyDate', 'ssnLast4')
 </script>
 
 <template>
@@ -186,46 +189,44 @@ async function submit() {
             <!-- ── Personal ─────────────────────────────────────────────── -->
             <div v-show="section === 'personal'" class="flex flex-col gap-4">
               <div class="flex gap-3">
-                <AppField v-slot="{ id }" label="First name" class="flex-1">
-                  <Input :id="id" v-model="form.firstName" autocomplete="off" />
-                </AppField>
-                <AppField v-slot="{ id }" label="Last name" class="flex-1">
-                  <Input :id="id" v-model="form.lastName" autocomplete="off" />
-                </AppField>
+                <Field class="flex-1">
+                  <FieldLabel :for="ids.firstName">First name</FieldLabel>
+                  <Input :id="ids.firstName" v-model="form.firstName" autocomplete="off" />
+                </Field>
+                <Field class="flex-1">
+                  <FieldLabel :for="ids.lastName">Last name</FieldLabel>
+                  <Input :id="ids.lastName" v-model="form.lastName" autocomplete="off" />
+                </Field>
               </div>
 
               <div class="flex gap-3">
-                <AppField v-slot="{ id }" label="Date of birth" class="flex-1">
-                  <Input :id="id" v-model="form.dateOfBirth" type="date" />
-                </AppField>
+                <Field class="flex-1">
+                  <FieldLabel :for="ids.dateOfBirth">Date of birth</FieldLabel>
+                  <Input :id="ids.dateOfBirth" v-model="form.dateOfBirth" type="date" />
+                </Field>
                 <!-- Last four only. The server and a CHECK constraint both
                      refuse anything else; the facility has no use for a whole
                      SSN and holding one turns a records breach into an
                      identity-theft breach. -->
-                <AppField
-                  v-slot="{ id }"
-                  label="SSN (last 4)"
-                  class="w-40"
-                  description="Last four digits only."
-                >
+                <Field class="w-40">
+                  <FieldLabel :for="ids.ssnLast4">SSN (last 4)</FieldLabel>
                   <Input
-                    :id="id"
+                    :id="ids.ssnLast4"
                     v-model="form.ssnLast4"
                     inputmode="numeric"
                     maxlength="4"
                     placeholder="0000"
                     autocomplete="off"
                   />
-                </AppField>
+                  <FieldDescription>Last four digits only.</FieldDescription>
+                </Field>
               </div>
 
-              <AppField
-                v-slot="{ id }"
-                label="Intake notes"
-                description="Observations or requirements from the door. Disclosable like any other record."
-              >
-                <Textarea :id="id" v-model="form.intakeNotes" rows="4" />
-              </AppField>
+              <Field>
+                <FieldLabel :for="ids.intakeNotes">Intake notes</FieldLabel>
+                <Textarea :id="ids.intakeNotes" v-model="form.intakeNotes" rows="4" />
+                <FieldDescription>Observations or requirements from the door. Disclosable like any other record.</FieldDescription>
+              </Field>
             </div>
 
             <!-- ── Program & Room ───────────────────────────────────────── -->
@@ -234,11 +235,8 @@ async function submit() {
                 <!-- Cohort is not on the reference form, but it is structural
                      here: it decides which apartments this person can ever be
                      housed in, and the database refuses a mismatch. -->
-                <AppField
-                  label="Cohort"
-                  class="flex-1"
-                  description="Decides which apartments they can be housed in."
-                >
+                <Field class="flex-1">
+                  <FieldLabel :for="ids.cohort">Cohort</FieldLabel>
                   <Select v-model="form.cohort">
                     <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
                     <SelectContent>
@@ -246,9 +244,11 @@ async function submit() {
                       <SelectItem value="WOMEN">Women</SelectItem>
                     </SelectContent>
                   </Select>
-                </AppField>
+                  <FieldDescription>Decides which apartments they can be housed in.</FieldDescription>
+                </Field>
 
-                <AppField label="Program" class="flex-1" description="Starts on Orientation.">
+                <Field class="flex-1">
+                  <FieldLabel :for="ids.program">Program</FieldLabel>
                   <Select v-model="form.programId">
                     <SelectTrigger class="w-full"><SelectValue placeholder="Select" /></SelectTrigger>
                     <SelectContent>
@@ -257,32 +257,29 @@ async function submit() {
                       </SelectItem>
                     </SelectContent>
                   </Select>
-                </AppField>
+                  <FieldDescription>Starts on Orientation.</FieldDescription>
+                </Field>
               </div>
 
               <div class="flex gap-3">
-                <AppField v-slot="{ id }" label="Admission date" class="flex-1">
-                  <Input :id="id" v-model="form.intakeAt" type="date" />
-                </AppField>
-                <AppField v-slot="{ id }" label="Expected out" class="flex-1">
-                  <Input :id="id" v-model="form.expectedDischargeAt" type="date" />
-                </AppField>
+                <Field class="flex-1">
+                  <FieldLabel :for="ids.admissionDate">Admission date</FieldLabel>
+                  <Input :id="ids.admissionDate" v-model="form.intakeAt" type="date" />
+                </Field>
+                <Field class="flex-1">
+                  <FieldLabel :for="ids.expectedOut">Expected out</FieldLabel>
+                  <Input :id="ids.expectedOut" v-model="form.expectedDischargeAt" type="date" />
+                </Field>
               </div>
 
               <div class="flex gap-3">
-                <AppField
-                  v-slot="{ id }"
-                  label="Sobriety date"
-                  class="flex-1"
-                  description="What they count from."
-                >
-                  <Input :id="id" v-model="form.sobrietyDate" type="date" />
-                </AppField>
-                <AppField
-                  label="Bed"
-                  class="flex-1"
-                  description="Free beds in matching-cohort apartments."
-                >
+                <Field class="flex-1">
+                  <FieldLabel :for="ids.sobrietyDate">Sobriety date</FieldLabel>
+                  <Input :id="ids.sobrietyDate" v-model="form.sobrietyDate" type="date" />
+                  <FieldDescription>What they count from.</FieldDescription>
+                </Field>
+                <Field class="flex-1">
+                  <FieldLabel :for="ids.bed">Bed</FieldLabel>
                   <Select v-model="form.bedId">
                     <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
                     <SelectContent>
@@ -292,23 +289,27 @@ async function submit() {
                       </SelectItem>
                     </SelectContent>
                   </Select>
-                </AppField>
+                  <FieldDescription>Free beds in matching-cohort apartments.</FieldDescription>
+                </Field>
               </div>
 
-              <AppField v-slot="{ id }" label="Referral source">
-                <Input :id="id" v-model="form.referralSource" placeholder="Fulton County drug court" />
-              </AppField>
+              <Field>
+                <FieldLabel :for="ids.referralSource">Referral source</FieldLabel>
+                <Input :id="ids.referralSource" v-model="form.referralSource" placeholder="Fulton County drug court" />
+              </Field>
             </div>
 
             <!-- ── Contact ──────────────────────────────────────────────── -->
             <div v-show="section === 'contact'" class="flex flex-col gap-4">
-              <AppField v-slot="{ id }" label="Email address">
-                <Input :id="id" v-model="form.email" type="email" placeholder="name@example.com" />
-              </AppField>
+              <Field>
+                <FieldLabel :for="ids.emailAddress">Email address</FieldLabel>
+                <Input :id="ids.emailAddress" v-model="form.email" type="email" placeholder="name@example.com" />
+              </Field>
 
-              <AppField v-slot="{ id }" label="Phone number">
-                <Input :id="id" v-model="form.phone" type="tel" placeholder="(555) 000-0000" />
-              </AppField>
+              <Field>
+                <FieldLabel :for="ids.phoneNumber">Phone number</FieldLabel>
+                <Input :id="ids.phoneNumber" v-model="form.phone" type="tel" placeholder="(555) 000-0000" />
+              </Field>
 
               <div class="border-t pt-4">
                 <p class="text-muted-foreground mb-3 text-[11px] tracking-wider uppercase">
@@ -316,16 +317,19 @@ async function submit() {
                 </p>
                 <div class="flex flex-col gap-3">
                   <div class="flex gap-3">
-                    <AppField v-slot="{ id }" label="Name" class="flex-1">
-                      <Input :id="id" v-model="form.contactName" />
-                    </AppField>
-                    <AppField v-slot="{ id }" label="Relationship" class="w-40">
-                      <Input :id="id" v-model="form.contactRelationship" placeholder="Parent" />
-                    </AppField>
+                    <Field class="flex-1">
+                      <FieldLabel :for="ids.name">Name</FieldLabel>
+                      <Input :id="ids.name" v-model="form.contactName" />
+                    </Field>
+                    <Field class="w-40">
+                      <FieldLabel :for="ids.relationship">Relationship</FieldLabel>
+                      <Input :id="ids.relationship" v-model="form.contactRelationship" placeholder="Parent" />
+                    </Field>
                   </div>
-                  <AppField v-slot="{ id }" label="Contact phone">
-                    <Input :id="id" v-model="form.contactPhone" placeholder="(555) 000-0000" />
-                  </AppField>
+                  <Field>
+                    <FieldLabel :for="ids.contactPhone">Contact phone</FieldLabel>
+                    <Input :id="ids.contactPhone" v-model="form.contactPhone" placeholder="(555) 000-0000" />
+                  </Field>
                 </div>
                 <!-- 42 CFR Part 2: being listed here does not authorise telling
                      this person anything. Consent is separate and not built. -->
@@ -337,28 +341,29 @@ async function submit() {
 
             <!-- ── Insurance ────────────────────────────────────────────── -->
             <div v-show="section === 'insurance'" class="flex flex-col gap-4">
-              <AppField v-slot="{ id }" label="Insurance provider">
-                <Input :id="id" v-model="form.insProvider" placeholder="Blue Cross Blue Shield" />
-              </AppField>
+              <Field>
+                <FieldLabel :for="ids.insuranceProvider">Insurance provider</FieldLabel>
+                <Input :id="ids.insuranceProvider" v-model="form.insProvider" placeholder="Blue Cross Blue Shield" />
+              </Field>
 
               <div class="flex gap-3">
-                <AppField v-slot="{ id }" label="Policy number" class="flex-1">
-                  <Input :id="id" v-model="form.insPolicyNumber" placeholder="ABC123456789" />
-                </AppField>
-                <AppField v-slot="{ id }" label="Group number" class="flex-1">
-                  <Input :id="id" v-model="form.insGroupNumber" placeholder="GRP12345" />
-                </AppField>
+                <Field class="flex-1">
+                  <FieldLabel :for="ids.policyNumber">Policy number</FieldLabel>
+                  <Input :id="ids.policyNumber" v-model="form.insPolicyNumber" placeholder="ABC123456789" />
+                </Field>
+                <Field class="flex-1">
+                  <FieldLabel :for="ids.groupNumber">Group number</FieldLabel>
+                  <Input :id="ids.groupNumber" v-model="form.insGroupNumber" placeholder="GRP12345" />
+                </Field>
               </div>
 
               <!-- Left blank means the resident holds the policy. Typing "same
                    as client" would make that fact unqueryable. -->
-              <AppField
-                v-slot="{ id }"
-                label="Policy holder"
-                description="Leave blank if the resident is the policy holder."
-              >
-                <Input :id="id" v-model="form.insPolicyHolder" placeholder="Name" />
-              </AppField>
+              <Field>
+                <FieldLabel :for="ids.policyHolder">Policy holder</FieldLabel>
+                <Input :id="ids.policyHolder" v-model="form.insPolicyHolder" placeholder="Name" />
+                <FieldDescription>Leave blank if the resident is the policy holder.</FieldDescription>
+              </Field>
 
               <p class="text-muted-foreground text-xs">
                 A provider and a policy number are recorded together or not at all.

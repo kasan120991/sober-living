@@ -71,40 +71,49 @@ async function submit() {
     pending.value = false
   }
 }
+
+// Ids for the Field labels below — see utils/fieldIds.js.
+const ids = useFieldIds('apartment', 'details', 'priority', 'whatIsWrong')
 </script>
 
 <template>
   <Dialog :open="open" @update:open="(v) => emit('update:open', v)">
     <DialogContent class="sm:max-w-[480px]">
-      <DialogHeader><DialogTitle>File a maintenance request</DialogTitle></DialogHeader>
+      <DialogHeader>
+        <DialogTitle>File a maintenance request</DialogTitle>
+        <DialogDescription>
+          Work needed on an apartment, never on a single bed.
+        </DialogDescription>
+      </DialogHeader>
       <form class="flex flex-col gap-4" @submit.prevent="submit">
         <Alert v-if="error" variant="destructive">
           <AlertDescription>{{ error }}</AlertDescription>
         </Alert>
 
-        <AppField v-if="needsPicker" v-slot="{ id }" label="Apartment">
-          <Select :id="id" v-model="form.apartmentId">
+        <Field v-if="needsPicker">
+          <FieldLabel :for="ids.apartment">Apartment</FieldLabel>
+          <Select :id="ids.apartment" v-model="form.apartmentId">
             <SelectTrigger><SelectValue placeholder="Choose an apartment" /></SelectTrigger>
             <SelectContent>
               <SelectItem v-for="a in apartments" :key="a.id" :value="a.id">{{ a.name }}</SelectItem>
             </SelectContent>
           </Select>
-        </AppField>
+        </Field>
 
-        <AppField v-slot="{ id }" label="What is wrong">
-          <Input :id="id" v-model="form.title" placeholder="No hot water in the second bathroom" />
-        </AppField>
+        <Field>
+          <FieldLabel :for="ids.whatIsWrong">What is wrong</FieldLabel>
+          <Input :id="ids.whatIsWrong" v-model="form.title" placeholder="No hot water in the second bathroom" />
+        </Field>
 
-        <AppField v-slot="{ id }" label="Details" description="Optional.">
-          <Textarea :id="id" v-model="form.description" :rows="3" />
-        </AppField>
+        <Field>
+          <FieldLabel :for="ids.details">Details</FieldLabel>
+          <Textarea :id="ids.details" v-model="form.description" :rows="3" />
+          <FieldDescription>Optional.</FieldDescription>
+        </Field>
 
-        <AppField
-          v-slot="{ id }"
-          label="Priority"
-          description="Urgent is due in 24 hours, normal in 7 days, low in 30."
-        >
-          <Select :id="id" v-model="form.priority">
+        <Field>
+          <FieldLabel :for="ids.priority">Priority</FieldLabel>
+          <Select :id="ids.priority" v-model="form.priority">
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="LOW">Low</SelectItem>
@@ -112,7 +121,8 @@ async function submit() {
               <SelectItem value="URGENT">Urgent</SelectItem>
             </SelectContent>
           </Select>
-        </AppField>
+          <FieldDescription>Urgent is due in 24 hours, normal in 7 days, low in 30.</FieldDescription>
+        </Field>
 
         <DialogFooter>
           <Button type="button" variant="ghost" @click="emit('update:open', false)">Cancel</Button>
