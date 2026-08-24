@@ -67,72 +67,69 @@ const ids = useFieldIds('reason')
 
 <template>
   <div class="overflow-hidden rounded-md border">
-    <div class="overflow-x-auto">
-      <table class="w-full border-collapse text-sm">
-        <thead>
-          <tr>
-            <th
-              v-for="h in ['Bed', 'Status', 'Resident', '']"
-              :key="h"
-              class="bg-card text-muted-foreground border-b px-3 py-2 text-left text-[10.5px] font-semibold uppercase tracking-wider"
-            >
-              {{ h }}
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="bed in beds" :key="bed.id" class="bg-card">
-            <td class="h-12 border-b px-3 font-semibold">{{ bed.label }}</td>
+    <Table class="text-sm">
+      <TableHeader>
+        <TableRow>
+          <TableHead
+            v-for="h in ['Bed', 'Status', 'Resident', '']"
+            :key="h"
+          >
+            {{ h }}
+          </TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        <TableRow v-for="bed in beds" :key="bed.id" class="bg-card">
+          <TableCell class="font-semibold">{{ bed.label }}</TableCell>
 
-            <!-- Out of service and available are the two states a manager hunts
-                 for, so they are the two that get a chip. -->
-            <td class="h-12 border-b px-3">
-              <Badge v-if="bed.status === 'OUT_OF_SERVICE'" variant="outline"
-                     class="border-warning/40 bg-warning/15 text-warning">
-                Out of service
-              </Badge>
-              <span v-else-if="bed.occupied" class="text-muted-foreground">Occupied</span>
-              <Badge v-else variant="outline" class="border-dashed">Available</Badge>
-            </td>
+          <!-- Out of service and available are the two states a manager hunts
+               for, so they are the two that get a chip. -->
+          <TableCell>
+            <Badge v-if="bed.status === 'OUT_OF_SERVICE'" variant="outline"
+                   class="border-warning/40 bg-warning/15 text-warning">
+              Out of service
+            </Badge>
+            <span v-else-if="bed.occupied" class="text-muted-foreground">Occupied</span>
+            <Badge v-else variant="outline" class="border-dashed">Available</Badge>
+          </TableCell>
 
-            <td class="h-12 border-b px-3">
-              <span v-if="bed.resident">{{ bed.resident.fullName }}</span>
-              <span v-else-if="bed.outOfServiceNote" class="text-muted-foreground">
-                {{ bed.outOfServiceNote }}
-              </span>
-              <span v-else class="text-muted-foreground/60">—</span>
-            </td>
+          <TableCell>
+            <span v-if="bed.resident">{{ bed.resident.fullName }}</span>
+            <span v-else-if="bed.outOfServiceNote" class="text-muted-foreground">
+              {{ bed.outOfServiceNote }}
+            </span>
+            <span v-else class="text-muted-foreground/60">—</span>
+          </TableCell>
 
-            <td class="h-12 border-b px-3 text-right">
-              <DropdownMenu>
-                <DropdownMenuTrigger as-child>
-                  <Button variant="ghost" size="sm" :aria-label="`Actions for bed ${bed.label}`">
-                    <Ellipsis class="size-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem v-if="bed.status === 'OUT_OF_SERVICE'" @select="restore(bed)">
-                    <RotateCcw class="size-4" /> Return to service
-                  </DropdownMenuItem>
-                  <DropdownMenuItem v-else @select="openOos(bed)">
-                    <Wrench class="size-4" /> Mark out of service
-                  </DropdownMenuItem>
-                  <DropdownMenuItem v-if="isAdmin" class="text-destructive" @select="destroy(bed)">
-                    <Trash2 class="size-4" /> Remove bed
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </td>
-          </tr>
+          <TableCell class="text-right">
+            <DropdownMenu>
+              <DropdownMenuTrigger as-child>
+                <Button variant="ghost" size="sm" :aria-label="`Actions for bed ${bed.label}`">
+                  <Ellipsis class="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem v-if="bed.status === 'OUT_OF_SERVICE'" @select="restore(bed)">
+                  <RotateCcw class="size-4" /> Return to service
+                </DropdownMenuItem>
+                <DropdownMenuItem v-else @select="openOos(bed)">
+                  <Wrench class="size-4" /> Mark out of service
+                </DropdownMenuItem>
+                <DropdownMenuItem v-if="isAdmin" class="text-destructive" @select="destroy(bed)">
+                  <Trash2 class="size-4" /> Remove bed
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </TableCell>
+        </TableRow>
 
-          <tr v-if="!beds.length">
-            <td colspan="4" class="bg-card text-muted-foreground px-3 py-6 text-center text-sm">
-              No beds yet.
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+        <TableRow v-if="!beds.length">
+          <TableCell colspan="4" class="bg-card text-muted-foreground py-6 text-center text-sm">
+            No beds yet.
+          </TableCell>
+        </TableRow>
+      </TableBody>
+    </Table>
   </div>
 
   <Dialog :open="Boolean(oosFor)" @update:open="(v) => !v && (oosFor = null)">

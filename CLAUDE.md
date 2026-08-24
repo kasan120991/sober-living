@@ -2815,6 +2815,18 @@ The preset owns colour and type. What it does not decide, and we do:
 - **A table column list must not be an array of strings filtered with `filter(Boolean)`** —
   an empty-string header for an actions column is falsy and gets silently dropped, leaving
   a `th` short and the empty-state `colspan` off by one. Use objects with a `key`.
+- **Tables are the vendored `Table` family, never raw `<table>`** (2026-08-23). Nine files
+  hand-rolled one, with the same `<th>` class string copy-pasted across four of them. The
+  header and cell styling this app uses — uppercase micro-caps headers, 48px rows, `px-3`
+  cells — is **retuned into `ui/table/TableHead.vue` and `TableCell.vue`** rather than
+  repeated at each call site, so `shadcn-vue diff table` flags those two files on purpose.
+  **`whitespace-nowrap` stays per call site**: 44 of the 66 cells carried it and 22
+  deliberately did not, so it cannot be a `TableCell` default.
+  **This fixed the 375px page-scroll bug** `AppPage.vue` had recorded as a known issue, and
+  the recorded diagnosis was wrong: it blamed nested overflow contexts, and the cause was a
+  bare `<div class="overflow-x-auto">` having no width of its own, so it grew to the table's
+  intrinsic width and pushed the page. `Table`'s own container is `relative w-full
+  overflow-x-auto`. Measured on the roster at 375px: `document.scrollWidth` 658 → 375.
 - **The app header is shell, not page — and it no longer names the page.** It carries
   search, one status figure, and the bell. **Every page states its own name** in an
   `AppPageHeading` rendered by `AppPage`, so a screen cannot be nameless by omission.
@@ -2824,8 +2836,18 @@ The preset owns colour and type. What it does not decide, and we do:
   falling back to beds free when the house is quiet. Three counts side by side is a
   dashboard, and it competes with the bell. Counts only, never names — that is what makes
   it safe on every screen regardless of who is behind the phone.
-- **Forms use `AppField`**, not shadcn's `Form` — that one is vee-validate based and we
-  validate server-side with zod. **Toasts go through `useNotify()`**, not `vue-sonner`
+- **Forms use the vendored `field` family** — `Field` / `FieldLabel` / `FieldDescription` /
+  `FieldError` / `FieldSet` — **not** shadcn's `Form`, which is vee-validate based where we
+  validate server-side with zod. This **replaced `AppField` on 2026-08-23** across 115 call
+  sites in 32 files; the old note here said we deliberately did not adopt shadcn's form
+  components, which was true of `Form` and never true of `field`, a zero-dependency layout
+  family that did not exist when the note was written. Densities are **retuned in the
+  vendored source** to what `AppField` shipped (`gap-1.5`, `text-xs`), because the registry
+  defaults made every form in the app about a quarter taller — the sign-out dialog measured
+  497px → 615px. `FieldLabel` renders a plain `Label` and generates no id, so `for`/`id` is
+  the caller's job: **`useFieldIds()` in `utils/fieldIds.js`** keeps that to one line per
+  form, and the ids are generated rather than hardcoded because a form can be mounted twice
+  at once (`AppSignOutDialog` is rendered by both `/sign-outs` and the dashboard). **Toasts go through `useNotify()`**, not `vue-sonner`
   directly. **Page headers go through `AppPageHeader`.** That header has no bottom rule and
   the page title renders at the breadcrumb's own size and weight — it is distinguished from
   its ancestors by colour alone. It is still the `<h1>`; that is semantics, not a licence to
@@ -3640,8 +3662,15 @@ Resolve these as they come up; update this file when they do.
 
 - Read this file at the start of every session. Update it when scope, decisions, or the
   stack change — it is the durable record, not the conversation.
-- Prefer the vendored shadcn components over custom ones; add new ones with
-  `shadcn-vue add` rather than hand-rolling. See UI rules above.
+- Prefer the vendored shadcn components over custom ones. **Add them with
+  `npm run ui:add -- @shadcn/<item>`, never a bare `shadcn-vue add`** — the wrapper
+  snapshots `main.css`, declines every overwrite prompt, and restores the file if the CLI
+  rewrote it. Both of those side effects are gotcha 1 below, and between them they are why
+  `command`, `table`, `card`, `checkbox` and `field` were hand-rolled for months instead of
+  vendored: three of those files said so in their own headers. The **shadcn-vue MCP server**
+  is configured in `.mcp.json` (pointed at `admin/`, where `components.json` lives) — its
+  `get_item_examples_from_registries` is the way to read a block's full source, since the
+  registry serves no `blocks/` path and `shadcn-vue view @shadcn/sidebar-08` 404s.
 - Ask before inventing domain rules. Curfew times, phase privileges, and service-hour
   targets are facility policy, not defaults to guess at.
 - When touching resident data, default to the conservative privacy choice.

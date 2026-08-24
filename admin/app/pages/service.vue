@@ -146,64 +146,61 @@ const COLUMNS = [
         </h2>
 
         <div v-if="tracked.length" class="overflow-hidden rounded-md border">
-          <div class="overflow-x-auto">
-            <table class="w-full border-collapse text-sm">
-              <thead>
-                <tr>
-                  <th
-                    v-for="c in COLUMNS"
-                    :key="c.key"
-                    class="bg-card text-muted-foreground border-b px-3 py-2 text-left text-[10.5px] font-semibold tracking-wider whitespace-nowrap uppercase"
+          <Table class="text-sm">
+            <TableHeader>
+              <TableRow>
+                <TableHead
+                  v-for="c in COLUMNS"
+                  :key="c.key"
+                >
+                  {{ c.label }}
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow v-for="p in tracked" :key="p.residentId" class="bg-card">
+                <TableCell class="whitespace-nowrap">
+                  <NuxtLink
+                    :to="`/residents/${p.residentId}?s=service`"
+                    class="underline-offset-2 hover:underline"
                   >
-                    {{ c.label }}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="p in tracked" :key="p.residentId" class="bg-card">
-                  <td class="h-12 border-b px-3 whitespace-nowrap">
-                    <NuxtLink
-                      :to="`/residents/${p.residentId}?s=service`"
-                      class="underline-offset-2 hover:underline"
-                    >
-                      {{ p.residentName }}
-                    </NuxtLink>
-                  </td>
-                  <td class="text-muted-foreground h-12 border-b px-3 text-xs whitespace-nowrap">
-                    {{ p.programName ?? '—' }}
-                  </td>
-                  <td class="h-12 w-[28%] min-w-[140px] border-b px-3">
-                    <AppServiceProgress :service="p" compact />
-                  </td>
-                  <td class="h-12 border-b px-3 whitespace-nowrap tabular-nums">
-                    {{ hours(p.verifiedMinutes) }} of {{ hours(p.requiredMinutes) }}
-                    <span v-if="p.pendingMinutes" class="text-muted-foreground text-xs">
-                      · {{ hours(p.pendingMinutes) }} pending
-                    </span>
-                  </td>
-                  <td class="h-12 border-b px-3 text-right whitespace-nowrap">
-                    <Badge
-                      v-if="p.behind"
-                      variant="outline"
-                      class="border-warning/45 bg-warning/15 text-warning text-[10px]"
-                    >
-                      Behind {{ hours(p.behindMinutes) }}
-                    </Badge>
-                    <Badge
-                      v-else-if="p.verifiedMinutes >= p.requiredMinutes"
-                      variant="outline"
-                      class="border-success/40 bg-success/15 text-success text-[10px]"
-                    >
-                      Met
-                    </Badge>
-                    <span v-else-if="p.monthsElapsed === 0" class="text-muted-foreground text-xs">
-                      day <span class="tabular-nums">{{ p.dayOfStay }}</span> — none due
-                    </span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+                    {{ p.residentName }}
+                  </NuxtLink>
+                </TableCell>
+                <TableCell class="text-muted-foreground text-xs whitespace-nowrap">
+                  {{ p.programName ?? '—' }}
+                </TableCell>
+                <TableCell class="w-[28%] min-w-[140px]">
+                  <AppServiceProgress :service="p" compact />
+                </TableCell>
+                <TableCell class="whitespace-nowrap tabular-nums">
+                  {{ hours(p.verifiedMinutes) }} of {{ hours(p.requiredMinutes) }}
+                  <span v-if="p.pendingMinutes" class="text-muted-foreground text-xs">
+                    · {{ hours(p.pendingMinutes) }} pending
+                  </span>
+                </TableCell>
+                <TableCell class="text-right whitespace-nowrap">
+                  <Badge
+                    v-if="p.behind"
+                    variant="outline"
+                    class="border-warning/45 bg-warning/15 text-warning text-[10px]"
+                  >
+                    Behind {{ hours(p.behindMinutes) }}
+                  </Badge>
+                  <Badge
+                    v-else-if="p.verifiedMinutes >= p.requiredMinutes"
+                    variant="outline"
+                    class="border-success/40 bg-success/15 text-success text-[10px]"
+                  >
+                    Met
+                  </Badge>
+                  <span v-else-if="p.monthsElapsed === 0" class="text-muted-foreground text-xs">
+                    day <span class="tabular-nums">{{ p.dayOfStay }}</span> — none due
+                  </span>
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
         </div>
 
         <p v-else class="text-muted-foreground text-sm">
