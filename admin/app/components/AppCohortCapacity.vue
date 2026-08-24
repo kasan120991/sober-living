@@ -14,7 +14,7 @@ defineProps({
 
 <template>
   <div class="grid grid-cols-1 gap-2.5" :class="cohorts.length > 1 && 'sm:grid-cols-2'">
-    <div v-for="c in cohorts" :key="c.key" class="bg-card rounded-md border p-3">
+    <Card v-for="c in cohorts" :key="c.key" class="p-3">
       <div class="mb-2 flex items-center justify-between gap-2">
         <span class="flex items-center gap-2 text-sm font-medium">
           <Badge variant="outline" class="tracking-wider text-[10px] uppercase">
@@ -49,6 +49,6 @@ defineProps({
         <template v-else>{{ c.free }} bed{{ c.free === 1 ? '' : 's' }} available</template>
         <template v-if="c.outOfService"> · {{ c.outOfService }} out of service</template>
       </p>
-    </div>
+    </Card>
   </div>
 </template>

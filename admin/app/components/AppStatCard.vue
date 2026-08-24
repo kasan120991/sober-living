@@ -37,6 +37,8 @@ const props = defineProps({
   tone: { type: String, default: 'default' },
 })
 
+const NuxtLink = resolveComponent('NuxtLink')
+
 const tile = computed(() =>
   props.tone === 'destructive'
     ? 'bg-destructive/10 text-destructive'
@@ -46,12 +48,13 @@ const tile = computed(() =>
 
 <template>
   <!-- The border warms to primary on hover rather than the card lifting, which
-       is the preset's own idiom. -->
-  <NuxtLink
+       is the preset's own idiom. The whole tile is the link — `as` takes the
+       component, so there is no wrapper element between Card and NuxtLink. -->
+  <Card
+    :as="NuxtLink"
     :to="to"
-    class="bg-card hover:border-primary/40 hover:bg-muted/30 focus-visible:ring-ring/30
-      flex items-center gap-3.5 rounded-md border p-4 outline-none transition-colors
-      focus-visible:ring-3"
+    class="hover:border-primary/40 hover:bg-muted/30 focus-visible:ring-ring/30
+      flex-row items-center gap-3.5 outline-none transition-colors focus-visible:ring-3"
   >
     <div class="flex size-10 shrink-0 items-center justify-center rounded-lg" :class="tile">
       <component :is="icon" class="size-5" />
@@ -60,5 +63,5 @@ const tile = computed(() =>
       <p class="text-2xl leading-tight font-semibold tracking-tight tabular-nums">{{ figure }}</p>
       <p class="text-muted-foreground text-xs"><slot name="qualifier" /></p>
     </div>
-  </NuxtLink>
+  </Card>
 </template>

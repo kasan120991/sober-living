@@ -83,7 +83,7 @@ const dayLabel = (at) => humanDate(facilityDateOf(at), { short: true })
           </Button>
         </div>
 
-        <div class="bg-card rounded-md border p-4">
+        <Card>
           <p class="text-[14px]">
             {{ eligibility?.eligible ? 'Eligible for travel passes.' : 'Not eligible yet.' }}
           </p>
@@ -93,7 +93,7 @@ const dayLabel = (at) => humanDate(facilityDateOf(at), { short: true })
           <p v-if="eligibility?.reason" class="text-muted-foreground mt-1 text-xs">
             {{ eligibility.reason }}
           </p>
-        </div>
+        </Card>
       </section>
 
       <!-- ── The passes ─────────────────────────────────────────────────── -->

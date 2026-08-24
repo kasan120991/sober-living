@@ -232,9 +232,7 @@ const ids = useFieldIds('name', 'phone', 'relationship')
         <!-- ── Overview ──────────────────────────────────────────────────── -->
         <template v-if="section === 'overview'">
           <section v-if="resident.current" class="flex flex-col gap-2">
-            <div
-              class="bg-card grid grid-cols-2 gap-x-6 gap-y-4 rounded-md border p-4 sm:grid-cols-3 lg:grid-cols-4"
-            >
+            <Card class="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 lg:grid-cols-4">
               <div class="flex flex-col">
                 <span class="text-muted-foreground text-[11.5px]">Bed</span>
                 <span v-if="resident.current.bed" class="text-[13.5px] font-medium">
@@ -251,7 +249,7 @@ const ids = useFieldIds('name', 'phone', 'relationship')
                   {{ f.v(resident) }}
                 </span>
               </div>
-            </div>
+            </Card>
 
             <div v-if="canManage" class="flex gap-2">
               <Button size="sm" variant="outline" @click="bedOpen = true">
@@ -276,7 +274,7 @@ const ids = useFieldIds('name', 'phone', 'relationship')
             <h2 class="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
               Needs attention
             </h2>
-            <div class="bg-card flex flex-col gap-1 rounded-md border p-4">
+            <Card class="flex flex-col gap-1">
               <button
                 v-if="resident.current?.checks?.notAccounted"
                 type="button"
@@ -324,7 +322,7 @@ const ids = useFieldIds('name', 'phone', 'relationship')
                   give a charge a due date.
                 </p>
               </template>
-            </div>
+            </Card>
           </section>
 
           <!-- Identity and cover. Two blocks that are usually empty on day one
@@ -338,7 +336,7 @@ const ids = useFieldIds('name', 'phone', 'relationship')
               Intake detail
             </h2>
 
-            <div class="bg-card flex flex-col gap-4 rounded-md border p-4">
+            <Card class="flex flex-col gap-4">
               <div
                 v-if="maskedSsn || resident.insurance"
                 class="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4"
@@ -375,7 +373,7 @@ const ids = useFieldIds('name', 'phone', 'relationship')
                   {{ resident.current.intakeNotes }}
                 </p>
               </div>
-            </div>
+            </Card>
           </section>
 
           <!-- Recent activity. Sign-outs only for now: this is the one place the

@@ -100,9 +100,9 @@ const COLUMNS = [
         </div>
       </div>
 
-      <div class="bg-card rounded-md border p-4">
+      <Card>
         <AppServiceProgress :service="service" />
-      </div>
+      </Card>
     </section>
 
     <section class="flex flex-col gap-2">

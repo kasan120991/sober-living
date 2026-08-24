@@ -329,7 +329,7 @@ async function resume(invoice) {
           <p v-else class="text-muted-foreground mt-1 text-[12.5px]">{{ owedSub }}</p>
         </div>
 
-        <div class="bg-card rounded-md border p-3.5">
+        <Card class="p-3.5">
           <p class="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
             Pending
           </p>
@@ -346,7 +346,7 @@ async function resume(invoice) {
             {{ money(pendingCents) }}
           </p>
           <p class="text-muted-foreground mt-1 text-[12.5px]">{{ pendingSub }}</p>
-        </div>
+        </Card>
       </div>
 
       <!-- A DRAFT is money in NEITHER figure above: its lines are bound so they

@@ -99,10 +99,8 @@ const STATUS_DISPLAY = {
           Last accounted for
         </h2>
 
-        <div
-          v-if="status?.notAccounted"
-          class="bg-card border-destructive rounded-md border p-4 shadow-[inset_3px_0_0_var(--destructive)]"
-        >
+        <Card
+          v-if="status?.notAccounted" class="border-destructive shadow-[inset_3px_0_0_var(--destructive)]">
           <p class="text-destructive text-sm font-semibold">
             Not found at the
             {{ formatHourLabel(facilityHourKeyOf(status.notAccounted.checkedAt)) }} check
@@ -115,9 +113,9 @@ const STATUS_DISPLAY = {
           <p class="text-muted-foreground mt-1 text-xs">
             Flagged on the bell until a later check or a sign-out accounts for them.
           </p>
-        </div>
+        </Card>
 
-        <div v-else-if="status?.lastSeen" class="bg-card rounded-md border p-4">
+        <Card v-else-if="status?.lastSeen">
           <p class="text-sm font-semibold">
             Last seen
             <span class="tabular-nums">{{ formatFacilityTime(status.lastSeen.checkedAt) }}</span>
@@ -130,7 +128,7 @@ const STATUS_DISPLAY = {
             {{ humanDate(facilityDateOf(status.lastSeen.checkedAt)) }} · by
             {{ status.lastSeen.byName }}
           </p>
-        </div>
+        </Card>
 
         <p v-else class="text-muted-foreground text-sm">
           No checks yet. They appear here as staff record the hourly rounds.

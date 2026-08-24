@@ -30,7 +30,7 @@ const ids = useFieldIds('email', 'password')
 
 <template>
   <div class="bg-muted/40 grid min-h-svh place-items-center p-5">
-    <div class="bg-card w-full max-w-[380px] rounded-xl border p-7 shadow-sm">
+    <Card class="w-full max-w-[380px] rounded-xl p-7 shadow-sm">
       <div class="flex flex-col gap-5">
         <div class="flex items-center gap-2.5">
           <span class="bg-primary text-primary-foreground grid size-8 place-items-center rounded-lg">
@@ -83,6 +83,6 @@ const ids = useFieldIds('email', 'password')
              a tech signing in does not need telling, and stating the window
              tells anyone who picks up an unlocked phone how long they have. -->
       </div>
-    </div>
+    </Card>
   </div>
 </template>

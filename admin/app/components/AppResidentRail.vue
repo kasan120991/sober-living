@@ -114,9 +114,9 @@ const dotClass = (d) =>
 
     <!-- Desktop: the rail proper. -->
     <div class="hidden md:flex md:flex-col md:gap-3">
-      <div v-if="$slots.summary" class="bg-card flex flex-col gap-2 rounded-md border p-3">
+      <Card v-if="$slots.summary" class="flex flex-col gap-2 p-3">
         <slot name="summary" />
-      </div>
+      </Card>
 
       <nav class="flex flex-col gap-0.5">
         <template v-for="group in RESIDENT_GROUPS" :key="group">

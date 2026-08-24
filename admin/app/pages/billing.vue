@@ -108,7 +108,7 @@ const recent = computed(() => data.value?.recent ?? [])
           </p>
         </div>
 
-        <div class="bg-card rounded-md border p-3.5">
+        <Card class="p-3.5">
           <p class="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
             Waiting to be billed
           </p>
@@ -124,9 +124,9 @@ const recent = computed(() => data.value?.recent ?? [])
             </span>
             <span v-else>Not owed by anyone until it is invoiced</span>
           </p>
-        </div>
+        </Card>
 
-        <div class="bg-card rounded-md border p-3.5">
+        <Card class="p-3.5">
           <p class="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
             Invoices past due
           </p>
@@ -139,7 +139,7 @@ const recent = computed(() => data.value?.recent ?? [])
           <p v-else class="text-muted-foreground mt-1 text-[12.5px]">
             {{ recent.length }} invoices recently
           </p>
-        </div>
+        </Card>
       </div>
 
       <!-- ── Ready to bill ────────────────────────────────────────────────

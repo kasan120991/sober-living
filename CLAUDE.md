@@ -2815,6 +2815,24 @@ The preset owns colour and type. What it does not decide, and we do:
 - **A table column list must not be an array of strings filtered with `filter(Boolean)`** —
   an empty-string header for an actions column is falsy and gets silently dropped, leaving
   a `th` short and the empty-state `colspan` off by one. Use objects with a `key`.
+- **Panels are the vendored `Card` family** (2026-08-23), and this one was adopted for a
+  narrower reason than the others: `Card` adds no behaviour and no accessibility, only
+  styling, so it earns its place solely by collapsing drift. The drift was real — 21 panel
+  surfaces carried **five different paddings** (`p-3`, `p-3.5`, `p-4`, `p-5`, `px-4 py-3`).
+  `p-4` is the default now and outliers say so out loud.
+  **Upstream's look was piloted and rejected**: `rounded-4xl py-6 shadow-md ring-1` put 32px
+  radii with a ring directly above 6px panels and read as a different design language on the
+  same page. `ui/card` is retuned **more heavily than field or table** — flat `rounded-md`,
+  `p-4`, a flex header at `px-4 pt-3 pb-2`, an uppercase eyebrow `CardTitle` — so
+  `shadcn-vue diff card` is close to meaningless and the components say so.
+  **Padding lives on the Card, not on `CardContent`** as upstream has it, so a plain panel is
+  a bare `<Card>` with no wrapper; a panel with a header and full-bleed rows passes
+  `class="p-0"`. **`Card` and `CardTitle` take an `as` prop** — the dashboard's five panels
+  are real `<section>` landmarks and its titles real `<h2>`s, where upstream renders divs
+  unconditionally. `as` also takes a **component**, which is how `AppStatCard` is one link
+  end to end (`<Card :as="NuxtLink" :to="to">`) — upstream's `asChild` in the shape Vue
+  offers. **Rows, banners and table wrappers are NOT cards** and were deliberately left
+  alone; only the 21 panels moved.
 - **Tables are the vendored `Table` family, never raw `<table>`** (2026-08-23). Nine files
   hand-rolled one, with the same `<th>` class string copy-pasted across four of them. The
   header and cell styling this app uses — uppercase micro-caps headers, 48px rows, `px-3`

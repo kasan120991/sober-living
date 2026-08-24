@@ -1,4 +1,8 @@
 <script setup lang="ts">
+// RETUNED: a flex row at px-4 pt-3 pb-2, not upstream's px-6 grid. Every
+// panel header in this app is an eyebrow, an optional count and an optional
+// trailing link — one line, never the two-row grid upstream builds for a
+// title over a description.
 import type { HTMLAttributes } from 'vue'
 import { cn } from '@/lib/utils'
 
@@ -10,7 +14,7 @@ const props = defineProps<{
 <template>
   <div
     data-slot="card-header"
-    :class="cn('gap-1.5 rounded-t-4xl px-6 group-data-[size=sm]/card:px-4 [.border-b]:pb-6 group-data-[size=sm]/card:[.border-b]:pb-4 group/card-header @container/card-header grid auto-rows-min items-start has-data-[slot=card-action]:grid-cols-[1fr_auto] has-data-[slot=card-description]:grid-rows-[auto_auto]', props.class)"
+    :class="cn('flex items-center gap-2 px-4 pt-3 pb-2 group/card-header', props.class)"
   >
     <slot />
   </div>
